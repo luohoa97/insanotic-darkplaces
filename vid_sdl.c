@@ -494,6 +494,26 @@ void VID_SetMouse(qboolean fullscreengrab, qboolean relative, qboolean hidecurso
 float multitouch[MAXFINGERS][3];
 // last input came from a finger (true) or from keyboard / mouse (false)
 static qboolean vid_input_touch;
+
+// Insanotic: on a phone or tablet the engine starts in touch-screen mode
+// (vid_touchscreen 1: no mouse grab, finger-sized menu). A real mouse
+// (a Bluetooth or USB one; fingers arrive as SDL_TOUCH_MOUSEID) switches
+// to mouse mode, so the game captures it for aiming like on a PC; the next
+// finger on the screen switches back.
+static void VID_MouseOrFinger(qboolean real_mouse)
+{
+#ifdef DP_MOBILETOUCH
+	if (real_mouse && vid_touchscreen.integer)
+	{
+		Cvar_SetValueQuick(&vid_touchscreen, 0);
+		vid_input_touch = false;
+	}
+	else if (!real_mouse && !vid_touchscreen.integer)
+		Cvar_SetValueQuick(&vid_touchscreen, 1);
+#else
+	(void)real_mouse;
+#endif
+}
 static int vid_touchmouse_hint = -1;
 
 // this one stores how many areas this finger has touched
@@ -1294,6 +1314,8 @@ void Sys_SendKeyEvents( void )
 				else
 					Con_DPrintf("SDL_Event: SDL_MOUSEBUTTONUP\n");
 #endif
+				if (event.type == SDL_MOUSEBUTTONDOWN)
+					VID_MouseOrFinger(event.button.which != SDL_TOUCH_MOUSEID);
 				if (!vid_touchscreen.integer)
 				if (event.type == SDL_MOUSEBUTTONDOWN && event.button.which != SDL_TOUCH_MOUSEID && !cl_lua_touch_mouse.integer)
 					vid_input_touch = false;
@@ -1420,8 +1442,10 @@ void Sys_SendKeyEvents( void )
 				Key_Event(K_TEXT, unicode, false);
 				break;
 			case SDL_MOUSEMOTION:
+				VID_MouseOrFinger(event.motion.which != SDL_TOUCH_MOUSEID);
 				break;
 			case SDL_FINGERDOWN:
+				VID_MouseOrFinger(false);
 				vid_input_touch = true;
 #ifdef DEBUGSDLEVENTS
 				Con_DPrintf("SDL_FINGERDOWN for finger %i\n", (int)event.tfinger.fingerId);
@@ -1439,6 +1463,18 @@ void Sys_SendKeyEvents( void )
 				}
 				if (i == MAXFINGERS-1)
 					Con_DPrintf("Too many fingers at once!\n");
+				// Insanotic: a three-finger tap opens and closes the
+				// console outside a match (a phone has no console key; in a
+				// match three fingers are just playing, there the touch
+				// controls open it with a long press on MENU)
+				{
+					int down = 0;
+					for (i = 0;i < MAXFINGERS-1;i++)
+						if (multitouch[i][0])
+							down++;
+					if (down == 3 && (key_dest != key_game || (key_consoleactive & KEY_CONSOLEACTIVE_USER)))
+						Cbuf_AddText("toggleconsole\n");
+				}
 				break;
 			case SDL_FINGERUP:
 #ifdef DEBUGSDLEVENTS
