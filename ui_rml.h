@@ -81,6 +81,16 @@ void UIE_Log(int level, const char *text);
 void UIE_Command(const char *command);
 /* value of a cvar as text, empty when there is none */
 const char *UIE_CvarString(const char *name);
+/* the servers the network code has heard from, for the server browser; returns how many */
+typedef struct UIE_Server {
+	char cname[128], name[128], map[32], type[32];
+	int ping, numplayers, numhumans, maxplayers, freeslots, isfavorite;
+} UIE_Server;
+int UIE_ServerList(UIE_Server *out, int max);
+/* ask the master servers again (reset empties the list first) */
+void UIE_ServerRefresh(int reset);
+/* names of the files matching a pattern, for the campaign list; returns how many */
+int UIE_FileList(const char *pattern, char (*out)[128], int max);
 /* set a cvar by name; read-only and private ones are left alone */
 void UIE_CvarSet(const char *name, const char *value);
 /* send a line to the server the way "cmd" does */

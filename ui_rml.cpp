@@ -28,6 +28,11 @@
 
 #include "ui_rml.h"
 
+// data models for the lists (ui_rml_models.cpp)
+void UIRmlModels_Create(Rml::Context* context);
+void UIRmlModels_Destroy(void);
+void UIRmlModels_Update(double now, bool servers_shown, bool campaign_shown);
+
 namespace {
 
 // ---------------------------------------------------------------------------
@@ -474,13 +479,13 @@ void ActionListener::ProcessEvent(Rml::Event& event)
 		Document* d = DocumentOf(e);
 		if (!d)
 			return;
-		if (close) {
-			g->pending_close.push_back(DocumentName(d));
-		} else if (d->server) {
+		if (d->server) {
 			// A page from a server can only talk to that server: its answer,
 			// or a "cmd ..." line for the server's own game code. Nothing it
 			// writes runs on this computer.
-			if (reply) {
+			if (close) {
+				g->pending_close.push_back(DocumentName(d));
+			} else if (reply) {
 				UIE_ServerCommand(BuildReply(d, e->GetAttribute<Rml::String>("data-reply", "")).c_str());
 			} else {
 				Rml::String c = e->GetAttribute<Rml::String>("data-cmd", "");
@@ -489,10 +494,15 @@ void ActionListener::ProcessEvent(Rml::Event& event)
 				else
 					UIE_Log(1, "a page from the server asked for a local command; refused");
 			}
-		} else if (cmd) {
-			Rml::String c = e->GetAttribute<Rml::String>("data-cmd", "");
-			if (!c.empty())
-				UIE_Command(c.c_str());
+		} else {
+			// a button may run a command and close its dialog
+			if (cmd) {
+				Rml::String c = e->GetAttribute<Rml::String>("data-cmd", "");
+				if (!c.empty())
+					UIE_Command(c.c_str());
+			}
+			if (close)
+				g->pending_close.push_back(DocumentName(d));
 		}
 		return;
 	}
@@ -701,6 +711,7 @@ int UIRml_Create(int width, int height, float dpratio)
 	g->dpratio = dpratio;
 	// the wheel glides to its target instead of jumping
 	g->context->SetDefaultScrollBehavior(Rml::ScrollBehavior::Smooth, 1.0f);
+	UIRmlModels_Create(g->context);
 
 	// Xolonium is what the rest of the menu is set in. The names it answers
 	// to in RCSS (font-family) come from the font files.
@@ -719,6 +730,7 @@ void UIRml_Destroy(void)
 	g->documents.clear();
 	if (g->initialised)
 		Rml::Shutdown();
+	UIRmlModels_Destroy();
 	delete g;
 	g = nullptr;
 }
@@ -781,6 +793,40 @@ void UIRml_HideAll(void)
 	g->scrolling = false;
 }
 
+// Does the file, or a template it links, bind a data model of the game? RmlUi
+// takes the data-model attribute off while it loads, so it is looked for in
+// the text beforehand.
+bool NamesDataModel(const std::string& path, int depth)
+{
+	size_t size = 0;
+	unsigned char* data = UIE_LoadFile(path.c_str(), &size);
+	if (!data)
+		return false;
+	std::string text((const char*)data, size);
+	UIE_Free(data);
+	for (char& c : text)
+		c = (char)tolower((unsigned char)c);
+	if (text.find("data-model") != std::string::npos)
+		return true;
+	if (depth > 3)
+		return true; // templates that link templates without end
+	std::string dir = path.substr(0, path.rfind('/') + 1);
+	for (size_t p = 0; (p = text.find("href=\"", p)) != std::string::npos;) {
+		p += 6;
+		size_t q = text.find('"', p);
+		if (q == std::string::npos)
+			break;
+		std::string ref = text.substr(p, q - p);
+		p = q;
+		if (ref.size() > 4 && ref.compare(ref.size() - 4, 4, ".rml") == 0) {
+			std::string full = ref[0] == '/' ? ref.substr(1) : dir + ref;
+			if (NamesDataModel(full, depth + 1))
+				return true;
+		}
+	}
+	return false;
+}
+
 // A page a server sent. It is the one kind of document that is not ours, so
 // it is held to limits and loses abilities (see the listeners above): at most
 // one at a time, a file of at most 256 KB, at most 2000 elements, a path in
@@ -796,6 +842,8 @@ const char* UIRml_ShowServer(const char* path)
 	UIE_Free(probe);
 	if (size > 256 * 1024)
 		return "the page is too large";
+	if (NamesDataModel(path, 0))
+		return "the page asks for data of the game";
 	// one at a time: a new page replaces the one before
 	std::vector<std::string> old;
 	for (auto& kv : g->documents)
@@ -826,6 +874,15 @@ const char* UIRml_ShowServer(const char* path)
 		g->context->UnloadDocument(d.doc);
 		g->documents.erase(name);
 		return "the page has too many elements";
+	}
+	// the lists of the game (servers, campaign) can start a connection or a
+	// map: not for a page the server sent
+	Rml::ElementList models;
+	d.doc->QuerySelectorAll(models, "[data-model]");
+	if (!models.empty()) {
+		g->context->UnloadDocument(d.doc);
+		g->documents.erase(name);
+		return "the page asks for data of the game";
 	}
 	PrepareDocument(d);
 	d.doc->Show();
@@ -1234,6 +1291,11 @@ void UIRml_Frame(void)
 		}
 	}
 	UpdateBindings();
+	auto shown = [](const char* n) {
+		auto it = g->documents.find(n);
+		return it != g->documents.end() && it->second.shown;
+	};
+	UIRmlModels_Update(now, shown("servers"), shown("singleplayer"));
 	g->context->Update();
 	g->context->Render();
 }

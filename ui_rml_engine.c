@@ -195,6 +195,50 @@ const char *UIE_CvarString(const char *name)
 	return Cvar_VariableString(name);
 }
 
+int UIE_ServerList(UIE_Server *out, int max)
+{
+	int i, n = 0;
+	for (i = 0; i < serverlist_cachecount && n < max; i++)
+	{
+		const serverlist_entry_t *e = ServerList_GetCacheEntry(i);
+		UIE_Server *o = out + n;
+		if (e->query != SQS_QUERIED)
+			continue;
+		strlcpy(o->cname, e->info.cname, sizeof(o->cname));
+		strlcpy(o->name, e->info.name, sizeof(o->name));
+		strlcpy(o->map, e->info.map, sizeof(o->map));
+		// the game mode is the first field of the status the game code sends
+		strlcpy(o->type, e->info.qcstatus, sizeof(o->type));
+		if (strchr(o->type, ':'))
+			*strchr(o->type, ':') = 0;
+		o->ping = e->info.ping;
+		o->numplayers = e->info.numplayers;
+		o->numhumans = e->info.numhumans;
+		o->maxplayers = e->info.maxplayers;
+		o->freeslots = e->info.freeslots;
+		o->isfavorite = e->info.isfavorite != 0;
+		n++;
+	}
+	return n;
+}
+
+void UIE_ServerRefresh(int reset)
+{
+	ServerList_QueryList(reset != 0, true, false, false);
+}
+
+int UIE_FileList(const char *pattern, char (*out)[128], int max)
+{
+	int i, n = 0;
+	fssearch_t *s = FS_Search(pattern, true, true);
+	if (!s)
+		return 0;
+	for (i = 0; i < s->numfilenames && n < max; i++)
+		strlcpy(out[n++], s->filenames[i], 128);
+	FS_FreeSearch(s);
+	return n;
+}
+
 void UIE_CvarSet(const char *name, const char *value)
 {
 	cvar_t *var = Cvar_FindVar(name);

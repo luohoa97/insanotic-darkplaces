@@ -205,7 +205,7 @@ OBJ_COMMON= \
 # engine's own (e.g. rmlui/Source/Core/Context.cpp vs. any future Context.c).
 RMLUI_SRCDIRS=rmlui/Source/Core rmlui/Source/Core/Elements rmlui/Source/Core/FontEngineDefault rmlui/Source/Core/Layout
 OBJ_RMLUI=$(patsubst %.cpp,rml_%.o,$(notdir $(wildcard $(addsuffix /*.cpp,$(addprefix ../../../,$(RMLUI_SRCDIRS))))))
-OBJ_RML=ui_rml_engine.o rml_ui_rml.o $(OBJ_RMLUI)
+OBJ_RML=ui_rml_engine.o rml_ui_rml.o rml_ui_rml_models.o $(OBJ_RMLUI)
 
 OBJ_MENU= \
 	menu.o \
