@@ -419,6 +419,41 @@ static void RML_Click_f(void)
 // pointer takes ten frames to the end, then the button goes up.
 static struct { qboolean active; int frame; int x0, y0, x1, y1; } ui_drag;
 
+// A finger by hand, for tests: rml_touch down|move|up <x> <y>. The window
+// system would keep reporting the real pointer, so the position is set again
+// every frame while the finger is down.
+static struct { qboolean down; int x, y; } ui_finger;
+
+static void RML_Touch_f(void)
+{
+	const char *what = Cmd_Argc() > 1 ? Cmd_Argv(1) : "";
+	if (!strcmp(what, "up"))
+	{
+		ui_finger.down = false;
+		Key_Event(K_MOUSE1, 0, false);
+		return;
+	}
+	if (Cmd_Argc() < 4 || (strcmp(what, "down") && strcmp(what, "move")))
+	{
+		Con_Printf("usage: rml_touch down|move <x> <y>, rml_touch up   (for tests)\n");
+		return;
+	}
+	ui_finger.x = in_windowmouse_x = atoi(Cmd_Argv(2));
+	ui_finger.y = in_windowmouse_y = atoi(Cmd_Argv(3));
+	if (!strcmp(what, "down"))
+	{
+		ui_finger.down = true;
+		Key_Event(K_MOUSE1, 0, true);
+	}
+}
+
+static void RML_State_f(void)
+{
+	if (Cmd_Argc() < 2 || !ui_created)
+		return;
+	UIRml_State(Cmd_Argv(1), UI_RML_PrintLine);
+}
+
 static void RML_Drag_f(void)
 {
 	if (Cmd_Argc() < 5)
@@ -437,6 +472,12 @@ static void RML_Drag_f(void)
 static void UI_RML_DragStep(void)
 {
 	float t;
+
+	if (ui_finger.down)
+	{
+		in_windowmouse_x = ui_finger.x;
+		in_windowmouse_y = ui_finger.y;
+	}
 
 	if (!ui_drag.active)
 		return;
@@ -479,6 +520,8 @@ void UI_RML_Init(void)
 	Cmd_AddCommand("rml_reload", RML_Reload_f, "load the RmlUi documents, stylesheets and images again (for editing them)");
 	Cmd_AddCommand("rml_click", RML_Click_f, "click at a window pixel as if with the mouse (for tests)");
 	Cmd_AddCommand("rml_drag", RML_Drag_f, "press, drag and release the primary button between window pixels (for tests)");
+	Cmd_AddCommand("rml_touch", RML_Touch_f, "a finger by hand: rml_touch down|move <x> <y>, rml_touch up (for tests)");
+	Cmd_AddCommand("rml_state", RML_State_f, "print whether the element with an id is hovered or pressed (for tests)");
 	Cmd_AddCommand("rml_list", RML_List_f, "list the RmlUi documents");
 }
 
@@ -601,6 +644,7 @@ void UI_RML_Draw(void)
 		return;
 
 	UIRml_Resize(vid.width, vid.height, UI_RML_DPRatio());
+	UIRml_SetTouch(vid_touchscreen.integer || VID_InputIsTouch());
 	UIRml_SetBodyClass(MAINMENU, "touch", vid_touchscreen.integer != 0);
 	UIRml_SetBodyClass(MAINMENU, "ingame", cls.state == ca_connected);
 	// a finger is only a pointer while it is down
@@ -695,6 +739,7 @@ int UI_RML_KeyEvent(int key, int ascii, int down)
 			ui_routed[key] = 1;
 			return 1;
 		}
+		UIRml_SetTouch(vid_touchscreen.integer || VID_InputIsTouch());
 		UIRml_MouseMove((float)in_windowmouse_x, (float)in_windowmouse_y);
 		ui_mouse_sent[0] = (float)in_windowmouse_x;
 		ui_mouse_sent[1] = (float)in_windowmouse_y;

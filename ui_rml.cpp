@@ -296,6 +296,9 @@ struct State {
 	// drag scrolling
 	bool pressed = false;
 	bool touch = false;
+	bool touch_mode = false; // the input is a finger: no hover, only the pressed state
+	bool left_target = false; // the finger went down on something and is now off it
+	Rml::Element* press_target = nullptr;
 	bool scrolling = false;
 	Rml::Vector2f press_pos, last_pos;
 	Rml::Element* scroll_target = nullptr;
@@ -914,6 +917,23 @@ void UIRml_List(void (*print)(const char* line))
 	}
 }
 
+void UIRml_State(const char* id, void (*print)(const char* line))
+{
+	if (!g)
+		return;
+	for (auto& kv : g->documents) {
+		if (!kv.second.shown)
+			continue;
+		if (Rml::Element* e = kv.second.doc->GetElementById(id)) {
+			char line[160];
+			snprintf(line, sizeof(line), "%s hover=%d active=%d", id, e->IsPseudoClassSet("hover") ? 1 : 0, e->IsPseudoClassSet("active") ? 1 : 0);
+			print(line);
+			return;
+		}
+	}
+	print("no such element");
+}
+
 void UIRml_EachShown(void (*each)(const char* name))
 {
 	if (!g)
@@ -921,6 +941,28 @@ void UIRml_EachShown(void (*each)(const char* name))
 	for (auto& kv : g->documents)
 		if (kv.second.shown)
 			each(kv.first.c_str());
+}
+
+// A finger does not hover. RmlUi sets :hover on what is under the pointer, so
+// on a touch screen it is taken off again right away; the pressed state
+// (:active) is the only feedback, and it is given by the element where the
+// finger went down, for as long as the finger is still on it.
+static void ClearHover()
+{
+	for (Rml::Element* e = g->context->GetHoverElement(); e; e = e->GetParentNode())
+		e->SetPseudoClass("hover", false);
+}
+
+static void SetPressed(bool on)
+{
+	for (Rml::Element* e = g->press_target; e; e = e->GetParentNode())
+		e->SetPseudoClass("active", on);
+}
+
+void UIRml_SetTouch(int touch)
+{
+	if (g)
+		g->touch_mode = touch != 0;
 }
 
 void UIRml_MouseMove(float x, float y)
@@ -943,9 +985,29 @@ void UIRml_MouseMove(float x, float y)
 					g->scrolling = true;
 					// take the press back: the element under the finger must not click
 					g->context->ProcessMouseLeave();
+					SetPressed(false);
 					g->last_pos = g->press_pos;
 				}
 			}
+		}
+		if (!g->scrolling) {
+			// The pointer stays where the finger went down: dragging over
+			// other buttons must not light them or let them be clicked.
+			// Off the pressed element the press is let go of (no click
+			// when the finger lifts there); back on it, it is held again.
+			bool inside = !g->press_target || g->press_target->IsPointWithinElement(now);
+			if (!inside && !g->left_target) {
+				g->context->ProcessMouseLeave();
+				SetPressed(false);
+				g->left_target = true;
+			} else if (inside && g->left_target) {
+				g->context->ProcessMouseMove((int)std::lround(x), (int)std::lround(y), 0);
+				ClearHover();
+				SetPressed(true);
+				g->left_target = false;
+			}
+			g->last_pos = now;
+			return;
 		}
 		if (g->scrolling) {
 			double t = UIE_Time();
@@ -964,6 +1026,8 @@ void UIRml_MouseMove(float x, float y)
 	}
 	g->last_pos = Rml::Vector2f(x, y);
 	g->context->ProcessMouseMove((int)std::lround(x), (int)std::lround(y), 0);
+	if (g->touch_mode)
+		ClearHover();
 }
 
 int UIRml_MouseButton(int button, int down, int modifiers, int touch)
@@ -975,6 +1039,7 @@ int UIRml_MouseButton(int button, int down, int modifiers, int touch)
 			g->pressed = true;
 			g->touch = touch != 0;
 			g->scrolling = false;
+			g->left_target = false;
 			// a touch on a list that is still flying or springing back stops
 			// it, and is not a click on what is under the finger
 			Rml::Vector2f v = g->velocity;
@@ -1002,14 +1067,24 @@ int UIRml_MouseButton(int button, int down, int modifiers, int touch)
 				}
 				// the context was told the pointer left; release without a click
 				g->context->ProcessMouseButtonUp(0, modifiers);
+				SetPressed(false);
+				g->press_target = nullptr;
 				return 1;
 			}
 		}
 	}
 	bool r = down ? g->context->ProcessMouseButtonDown(button, modifiers) : g->context->ProcessMouseButtonUp(button, modifiers);
 	(void)r;
-	if (!down && g->touch && button == 0)
-		g->context->ProcessMouseLeave(); // a lifted finger leaves nothing hovered
+	if (button == 0 && g->touch) {
+		if (down) {
+			g->press_target = g->context->GetHoverElement();
+			ClearHover();
+		} else {
+			g->context->ProcessMouseLeave(); // a lifted finger leaves nothing hovered
+			SetPressed(false);
+			g->press_target = nullptr;
+		}
+	}
 	return 1;
 }
 

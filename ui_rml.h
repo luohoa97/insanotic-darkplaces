@@ -113,10 +113,14 @@ void UIRml_Reload(void);
 void UIRml_SetBodyClass(const char *name, const char *cls, int on);
 /* ids of the documents that are shown, for rml_list */
 void UIRml_List(void (*print)(const char *line));
+/* for tests: whether the element with that id is hovered or pressed */
+void UIRml_State(const char *id, void (*print)(const char *line));
 /* names of the documents that are shown */
 void UIRml_EachShown(void (*each)(const char *name));
 
 /* input: coordinates are window pixels. Return 1 when RmlUi used the event. */
+/* 1 while the input is a finger: nothing hovers, the pressed state is all the feedback */
+void UIRml_SetTouch(int touch);
 void UIRml_MouseMove(float x, float y);
 int UIRml_MouseButton(int button, int down, int modifiers, int touch);
 int UIRml_MouseWheel(float delta, int modifiers);
