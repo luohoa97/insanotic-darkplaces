@@ -49,6 +49,7 @@ cvar_t scr_loadingscreen_firstforstartup = {0, "scr_loadingscreen_firstforstartu
 cvar_t scr_loadingscreen_barcolor = {0, "scr_loadingscreen_barcolor", "0 0 1", "rgb color of loadingscreen progress bar"};
 cvar_t scr_loadingscreen_barheight = {0, "scr_loadingscreen_barheight", "8", "the height of the loadingscreen progress bar"};
 cvar_t scr_loadingscreen_insanotic = {CVAR_SAVE, "scr_loadingscreen_insanotic", "1", "Insanotic loading screen: the map's picture, what is being loaded and one progress bar with a percentage from connecting to being in the game (0 = classic DarkPlaces screen)"};
+cvar_t scr_loadingscreen_startuptime = {CVAR_SAVE, "scr_loadingscreen_startuptime", "1", "seconds the last game start took until the menu (moves the startup progress bar; measured automatically)"};
 cvar_t scr_loadingscreen_maxfps = {0, "scr_loadingscreen_maxfps", "10", "restrict maximal FPS for loading screen so it will not update very often (this will make lesser loading times on a maps loading large number of models)"};
 cvar_t scr_infobar_height = {0, "scr_infobar_height", "8", "the height of the infobar items"};
 cvar_t vid_conwidth = {CVAR_SAVE, "vid_conwidth", "640", "virtual width of 2D graphics system"};
@@ -1350,6 +1351,7 @@ void CL_Screen_Init(void)
 	Cvar_RegisterVariable (&scr_loadingscreen_barheight);
 	Cvar_RegisterVariable (&scr_loadingscreen_maxfps);
 	Cvar_RegisterVariable (&scr_loadingscreen_insanotic);
+	Cvar_RegisterVariable (&scr_loadingscreen_startuptime);
 	Cvar_RegisterVariable (&scr_infobar_height);
 	Cvar_RegisterVariable (&scr_showram);
 	Cvar_RegisterVariable (&scr_showturtle);
@@ -2562,6 +2564,8 @@ static void SCR_DrawLoadingScreen_SharedSetup (qboolean clear)
 // progress bar that only moves forward across all stages
 
 static float loading_progress;           // shown fraction, never decreases
+static qboolean loading_isstartup;       // the game is starting (no map)
+static double loading_starttime;
 static char loading_levelshot_map[MAX_QPATH];
 static cachepic_t *loading_levelshot;    // NULL when the map has none
 
@@ -2653,6 +2657,82 @@ static float SCR_LoadingStage(char *stage, size_t stagesize, char *detail, size_
 	return stack;
 }
 
+// the main menu's look without the menu: its earth background and the
+// Xonotic logo (cut from the logo layer, which has no "Loading" text);
+// a dark gradient when the pictures are missing. Returns the bottom of the
+// logo.
+#define LOADING_MENU_BACKGROUND "gfx/menu/luma/background"
+#define LOADING_MENU_LOGO "gfx/menu/luma/background_l2"
+// logo bounds in the 2560x2048 logo layer
+#define LOADING_LOGO_S0 (30.0f / 2560)
+#define LOADING_LOGO_T0 (10.0f / 2048)
+#define LOADING_LOGO_S1 (1420.0f / 2560)
+#define LOADING_LOGO_T1 (470.0f / 2048)
+static float SCR_DrawInsanoticBackdrop(float logocenter, float logowidth)
+{
+	static int checked;
+	static cachepic_t *background, *logo;
+	float w = vid_conwidth.integer, h = vid_conheight.integer, f, lw, lh;
+	int i, strips = 32;
+
+	if (!checked)
+	{
+		checked = true;
+		if (FS_FileExists(LOADING_MENU_BACKGROUND ".jpg") || FS_FileExists(LOADING_MENU_BACKGROUND ".tga"))
+			background = Draw_CachePic_Flags(LOADING_MENU_BACKGROUND, CACHEPICFLAG_QUIET);
+		if (FS_FileExists(LOADING_MENU_LOGO ".jpg") || FS_FileExists(LOADING_MENU_LOGO ".tga"))
+			logo = Draw_CachePic_Flags(LOADING_MENU_LOGO, CACHEPICFLAG_QUIET);
+	}
+	if (background && background->width > 0 && background->height > 0)
+	{
+		f = max(w / background->width, h / background->height);
+		DrawQ_Pic((w - background->width * f) / 2, (h - background->height * f) / 2, background, background->width * f, background->height * f, 0.6f, 0.6f, 0.6f, 1, 0);
+	}
+	else
+	{
+		for (i = 0; i < strips; i++)
+		{
+			// navy at the top fading to black, lighter in the middle
+			float y0 = floor(h * i / strips), y1 = floor(h * (i + 1) / strips);
+			float t = (float)i / (strips - 1), glow = 1 - fabs(t - 0.45f) * 2;
+			DrawQ_Fill(0, y0, w, y1 - y0, 0.02f + 0.04f * glow, 0.03f + 0.06f * glow, 0.06f + 0.12f * glow, 1, 0);
+		}
+	}
+	if (!logo || logo->width <= 0)
+		return logocenter;
+	lw = min(logowidth, w * 0.9f);
+	lh = lw * ((LOADING_LOGO_T1 - LOADING_LOGO_T0) * logo->height) / ((LOADING_LOGO_S1 - LOADING_LOGO_S0) * logo->width);
+	DrawQ_SuperPic((w - lw) / 2, logocenter - lh / 2, logo, lw, lh,
+		LOADING_LOGO_S0, LOADING_LOGO_T0, 1, 1, 1, 1,
+		LOADING_LOGO_S1, LOADING_LOGO_T0, 1, 1, 1, 1,
+		LOADING_LOGO_S0, LOADING_LOGO_T1, 1, 1, 1, 1,
+		LOADING_LOGO_S1, LOADING_LOGO_T1, 1, 1, 1, 1, 0);
+	return logocenter + lh / 2;
+}
+
+// game start: the menu's background and logo with a bar that follows the
+// time the last start took
+static void SCR_DrawInsanoticStartupScreen(void)
+{
+	float w = vid_conwidth.integer, h = vid_conheight.integer;
+	float barw = floor(w * 0.3f), barh = max(2, floor(h * 0.005f)), x, y, f;
+	float bar[3] = { 0.2f, 0.6f, 1.0f };
+
+	y = SCR_DrawInsanoticBackdrop(floor(h * 0.42f), w * 0.55f);
+	sscanf(scr_loadingscreen_barcolor.string, "%f %f %f", &bar[0], &bar[1], &bar[2]);
+
+	f = (float)((Sys_DirtyTime() - loading_starttime) / max(0.2f, scr_loadingscreen_startuptime.value));
+	f = min(f, 0.95f);
+	if (f > loading_progress)
+		loading_progress = f;
+
+	y = floor(y + h * 0.06f);
+	x = (w - barw) / 2;
+	DrawQ_Fill(x, y, barw, barh, 1, 1, 1, 0.12f, 0);
+	DrawQ_Fill(x, y, barw * loading_progress, barh, bar[0], bar[1], bar[2], 1, 0);
+	loadingscreenheight = h;
+}
+
 static void SCR_DrawInsanoticLoadingScreen(void)
 {
 	float w = vid_conwidth.integer, h = vid_conheight.integer;
@@ -2662,6 +2742,12 @@ static void SCR_DrawInsanoticLoadingScreen(void)
 	const char *map = SCR_LoadingMapName();
 	char stage[128], detail[128], percent[16];
 	int i, strips = 24;
+
+	if (loading_isstartup && !map[0] && cls.state != ca_connected && !cls.connect_trying)
+	{
+		SCR_DrawInsanoticStartupScreen();
+		return;
+	}
 
 	// the map's own picture (maps/<name>.jpg ships with every map), else
 	// the game's loading picture
@@ -2684,11 +2770,7 @@ static void SCR_DrawInsanoticLoadingScreen(void)
 		DrawQ_Pic((w - loading_levelshot->width * f) / 2, (h - loading_levelshot->height * f) / 2, loading_levelshot, loading_levelshot->width * f, loading_levelshot->height * f, 0.75f, 0.75f, 0.75f, 1, 0);
 	}
 	else
-	{
-		R_Mesh_PrepareVertices_Generic_Arrays(4, loadingscreenpic_vertex3f, NULL, loadingscreenpic_texcoord2f);
-		R_SetupShader_Generic(Draw_GetPicTexture(loadingscreenpic), NULL, GL_MODULATE, 1, true, true, false);
-		R_Mesh_Draw(0, 4, 0, 2, polygonelement3i, NULL, 0, polygonelement3s, NULL, 0);
-	}
+		SCR_DrawInsanoticBackdrop(floor(h * 0.36f), w * 0.5f);
 
 	// darken the lower part for the text
 	for (i = 0; i < strips; i++)
@@ -2810,6 +2892,8 @@ void SCR_UpdateLoadingScreen (qboolean clear, qboolean startup)
 	{
 		loadingscreendone = true;
 		loadingscreenheight = 0;
+		loading_isstartup = startup;
+		loading_starttime = Sys_DirtyTime();
 	}
 	loadingscreencleared = clear;
 
@@ -2958,6 +3042,10 @@ void CL_UpdateScreen(void)
 		return;
 	}
 
+	// remember how long the game took to start, for the next start's bar
+	if (loadingscreendone && loading_isstartup)
+		Cvar_SetValueQuick(&scr_loadingscreen_startuptime, (float)(Sys_DirtyTime() - loading_starttime));
+	loading_isstartup = false;
 	loadingscreendone = false;
 	loading_progress = 0;
 
