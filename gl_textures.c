@@ -39,6 +39,12 @@ cvar_t gl_texturecompression_sprites = {CVAR_SAVE, "gl_texturecompression_sprite
 cvar_t gl_nopartialtextureupdates = {CVAR_SAVE, "gl_nopartialtextureupdates", "0", "use alternate path for dynamic lightmap updates that avoids a possibly slow code path in the driver"};
 cvar_t r_texture_dds_load_alphamode = {0, "r_texture_dds_load_alphamode", "1", "0: trust DDPF_ALPHAPIXELS flag, 1: texture format and brute force search if ambiguous, 2: texture format only"};
 cvar_t r_texture_dds_load_logfailure = {0, "r_texture_dds_load_logfailure", "0", "log missing DDS textures to ddstexturefailures.log, 0: done log, 1: log with no optional textures (_norm, glow etc.). 2: log all"};
+#ifdef __ANDROID__
+#define DDS_SWDECODE_MAXSIZE "1024"
+#else
+#define DDS_SWDECODE_MAXSIZE "0"
+#endif
+cvar_t r_texture_dds_swdecode_maxsize = {CVAR_SAVE, "r_texture_dds_swdecode_maxsize", DDS_SWDECODE_MAXSIZE, "largest width or height of a DDS texture decoded in software (bigger ones load a smaller mip level: decoded textures take 4-8 times the memory of compressed ones); 0 = no limit"};
 cvar_t r_texture_dds_swdecode = {0, "r_texture_dds_swdecode", "0", "how DDS (S3TC) textures are decoded when the GPU cannot (phones): 0 = full resolution software decode, 1 = quarter resolution (faster, less memory); testing on a GPU that can: 2 = force the quarter resolution decode, 3 = force the full one"};
 
 qboolean	gl_filter_force = false;
@@ -988,6 +994,7 @@ void R_Textures_Init (void)
 	Cvar_RegisterVariable (&r_texture_dds_load_alphamode);
 	Cvar_RegisterVariable (&r_texture_dds_load_logfailure);
 	Cvar_RegisterVariable (&r_texture_dds_swdecode);
+	Cvar_RegisterVariable (&r_texture_dds_swdecode_maxsize);
 
 	R_RegisterModule("R_Textures", r_textures_start, r_textures_shutdown, r_textures_newmap, r_textures_devicelost, r_textures_devicerestored);
 }
@@ -2722,6 +2729,20 @@ rtexture_t *R_LoadTextureDDSFile(rtexturepool_t *rtexturepool, const char *filen
 
 		if(miplevel < 0)
 			Con_DPrintf("WARNING: fake software decoding of compressed texture %s degraded quality\n", filename);
+	}
+
+	// Insanotic: decoded textures are 4-8 times bigger in memory than
+	// compressed ones; start from a smaller mip level when they would exceed
+	// r_texture_dds_swdecode_maxsize
+	if (force_swdecode && dds_fulldecode && r_texture_dds_swdecode_maxsize.integer > 0)
+	{
+		int w = dds_width >> max(miplevel, 0), h = dds_height >> max(miplevel, 0);
+		while ((w > r_texture_dds_swdecode_maxsize.integer || h > r_texture_dds_swdecode_maxsize.integer) && miplevel + 1 < dds_miplevels)
+		{
+			miplevel++;
+			w >>= 1;
+			h >>= 1;
+		}
 	}
 
 	// this is where we apply gl_picmip
