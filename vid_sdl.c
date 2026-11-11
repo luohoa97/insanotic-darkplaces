@@ -1986,7 +1986,12 @@ void GLES_Init(void)
 	vid.support.arb_occlusion_query = false;
 	vid.support.arb_query_buffer_object = false;
 	vid.support.arb_shadow = false;
-	vid.support.arb_texture_compression = false; // different (vendor-specific) formats than on desktop OpenGL...
+	// Insanotic: glCompressedTexImage2D is core in GLES2; the formats are
+	// vendor extensions. Many phone GPUs (Adreno, Mali on newer drivers)
+	// have S3TC: then DDS textures upload as they are instead of being
+	// decoded on the CPU (slow, and 4-8 times the memory). Set again below
+	// from GL_EXT_texture_compression_s3tc.
+	vid.support.arb_texture_compression = false;
 	vid.support.arb_texture_cube_map = SDL_GL_ExtensionSupported("GL_OES_texture_cube_map") != 0;
 	vid.support.arb_texture_env_combine = false;
 	vid.support.arb_texture_gather = false;
@@ -2010,6 +2015,7 @@ void GLES_Init(void)
 	vid.support.ext_stencil_two_side = false;
 	vid.support.ext_texture_3d = SDL_GL_ExtensionSupported("GL_OES_texture_3D") != 0;
 	vid.support.ext_texture_compression_s3tc = SDL_GL_ExtensionSupported("GL_EXT_texture_compression_s3tc") != 0;
+	vid.support.arb_texture_compression = vid.support.ext_texture_compression_s3tc;
 	vid.support.ext_texture_edge_clamp = true; // GLES2 core
 	vid.support.ext_texture_filter_anisotropic = false; // probably don't want to use it...
 	vid.support.ext_texture_srgb = false;
