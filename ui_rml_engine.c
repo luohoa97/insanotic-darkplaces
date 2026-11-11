@@ -22,6 +22,10 @@
 #include "draw.h"
 #include "image.h"
 #include "keys.h"
+#include "menu.h"
+
+const char *Key_KeynumToString(int keynum, char *tinystr, size_t tinystrlength);
+int Key_StringToKeynum(const char *str);
 
 #define MAINMENU "mainmenu"
 
@@ -195,6 +199,54 @@ const char *UIE_CvarString(const char *name)
 	return Cvar_VariableString(name);
 }
 
+int UIE_VideoModes(UIE_VideoMode *out, int max)
+{
+	int i, n = 0;
+	for (i = 0; i < video_resolutions_count && n < max; i++)
+	{
+		out[n].width = video_resolutions[i].width;
+		out[n].height = video_resolutions[i].height;
+		n++;
+	}
+	return n;
+}
+
+void UIE_KeysFor(const char *command, char *key1, char *key2, int size)
+{
+	int keys[2], bindmap = 0;
+	char name[32];
+	Key_GetBindMap(&bindmap, NULL);
+	Key_FindKeysForCommand(command, keys, 2, bindmap);
+	*key1 = *key2 = 0;
+	if (keys[0] >= 0)
+		strlcpy(key1, Key_KeynumToString(keys[0], name, sizeof(name)), size);
+	if (keys[1] >= 0)
+		strlcpy(key2, Key_KeynumToString(keys[1], name, sizeof(name)), size);
+}
+
+void UIE_BindKey(const char *command, int slot, int key)
+{
+	int keys[2], bindmap = 0;
+	Key_GetBindMap(&bindmap, NULL);
+	Key_FindKeysForCommand(command, keys, 2, bindmap);
+	// the slot's old key is freed; the same key in the other slot moves
+	if (slot >= 0 && slot < 2 && keys[slot] >= 0)
+		Key_SetBinding(keys[slot], bindmap, "");
+	if (key >= 0)
+	{
+		if (keys[1 - slot] == key)
+			keys[1 - slot] = -1;
+		Key_SetBinding(key, bindmap, command);
+	}
+}
+
+static qboolean ui_capture_keys;
+
+void UIE_CaptureKeys(int on)
+{
+	ui_capture_keys = on != 0;
+}
+
 int UIE_ServerList(UIE_Server *out, int max)
 {
 	int i, n = 0;
@@ -220,6 +272,26 @@ int UIE_ServerList(UIE_Server *out, int max)
 		n++;
 	}
 	return n;
+}
+
+int UIE_ServerDetail_Get(const char *cname, UIE_ServerDetail *out)
+{
+	int i;
+	for (i = 0; i < serverlist_cachecount; i++)
+	{
+		const serverlist_entry_t *e = ServerList_GetCacheEntry(i);
+		if (e->query != SQS_QUERIED || strcmp(e->info.cname, cname))
+			continue;
+		strlcpy(out->players, e->info.players, sizeof(out->players));
+		strlcpy(out->qcstatus, e->info.qcstatus, sizeof(out->qcstatus));
+		strlcpy(out->mod, e->info.mod, sizeof(out->mod));
+		strlcpy(out->game, e->info.game, sizeof(out->game));
+		out->numbots = e->info.numbots;
+		out->numhumans = e->info.numhumans;
+		out->maxplayers = e->info.maxplayers;
+		return 1;
+	}
+	return 0;
 }
 
 void UIE_ServerRefresh(int reset)
@@ -491,6 +563,19 @@ static void RML_Touch_f(void)
 	}
 }
 
+// A key press and release by name, for tests (the window system is not asked)
+static void RML_Key_f(void)
+{
+	int key;
+	if (Cmd_Argc() < 2 || (key = Key_StringToKeynum(Cmd_Argv(1))) < 0)
+	{
+		Con_Printf("usage: rml_key <key name>   press and release a key (for tests)\n");
+		return;
+	}
+	Key_Event(key, 0, true);
+	Key_Event(key, 0, false);
+}
+
 static void RML_State_f(void)
 {
 	if (Cmd_Argc() < 2 || !ui_created)
@@ -565,6 +650,7 @@ void UI_RML_Init(void)
 	Cmd_AddCommand("rml_click", RML_Click_f, "click at a window pixel as if with the mouse (for tests)");
 	Cmd_AddCommand("rml_drag", RML_Drag_f, "press, drag and release the primary button between window pixels (for tests)");
 	Cmd_AddCommand("rml_touch", RML_Touch_f, "a finger by hand: rml_touch down|move <x> <y>, rml_touch up (for tests)");
+	Cmd_AddCommand("rml_key", RML_Key_f, "press and release a key by name (for tests)");
 	Cmd_AddCommand("rml_state", RML_State_f, "print whether the element with an id is hovered or pressed (for tests)");
 	Cmd_AddCommand("rml_list", RML_List_f, "list the RmlUi documents");
 }
@@ -754,6 +840,14 @@ int UI_RML_KeyEvent(int key, int ascii, int down)
 
 	if (!ui_created || key < 0 || key >= MAX_KEYS)
 		return 0;
+	// binding a key: the next press goes to the page that asked, whatever it is
+	if (ui_capture_keys && down && key != K_TEXT)
+	{
+		ui_capture_keys = false;
+		ui_routed[key] = 1; // the release is not the game's either
+		UIRml_KeyCaptured(key == K_ESCAPE ? -1 : key);
+		return 1;
+	}
 	main_shown = UI_RML_MainMenuShown();
 	modal = UI_RML_Modal();
 	// a release goes where the press went, shown or not

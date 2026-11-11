@@ -81,12 +81,30 @@ void UIE_Log(int level, const char *text);
 void UIE_Command(const char *command);
 /* value of a cvar as text, empty when there is none */
 const char *UIE_CvarString(const char *name);
+/* the screen sizes the video code offers */
+typedef struct UIE_VideoMode { int width, height; } UIE_VideoMode;
+int UIE_VideoModes(UIE_VideoMode *out, int max);
+/* the (up to two) keys bound to a command, as names; empty when none */
+void UIE_KeysFor(const char *command, char *key1, char *key2, int size);
+/* bind a key to a command in the slot (0 or 1) the player picked; key
+ * names it freed are unbound. A key of -1 clears the slot. */
+void UIE_BindKey(const char *command, int slot, int key);
+/* while on, the next key or mouse button press goes to UIRml_KeyCaptured
+ * instead of anywhere else (Escape cancels) */
+void UIE_CaptureKeys(int on);
 /* the servers the network code has heard from, for the server browser; returns how many */
 typedef struct UIE_Server {
 	char cname[128], name[128], map[32], type[32];
 	int ping, numplayers, numhumans, maxplayers, freeslots, isfavorite;
 } UIE_Server;
 int UIE_ServerList(UIE_Server *out, int max);
+/* what one server told besides the list columns; 0 when it is not in the list */
+typedef struct UIE_ServerDetail {
+	char players[2800]; /* lines of: score ping team "name" */
+	char qcstatus[128], mod[32], game[32];
+	int numbots, numhumans, maxplayers;
+} UIE_ServerDetail;
+int UIE_ServerDetail_Get(const char *cname, UIE_ServerDetail *out);
 /* ask the master servers again (reset empties the list first) */
 void UIE_ServerRefresh(int reset);
 /* names of the files matching a pattern, for the campaign list; returns how many */
@@ -127,6 +145,9 @@ void UIRml_List(void (*print)(const char *line));
 void UIRml_State(const char *id, void (*print)(const char *line));
 /* names of the documents that are shown */
 void UIRml_EachShown(void (*each)(const char *name));
+
+/* the key that was pressed while capturing, or -1 for Escape */
+void UIRml_KeyCaptured(int key);
 
 /* input: coordinates are window pixels. Return 1 when RmlUi used the event. */
 /* 1 while the input is a finger: nothing hovers, the pressed state is all the feedback */

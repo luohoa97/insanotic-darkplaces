@@ -84,6 +84,95 @@ std::string Lower(std::string s)
 // Servers
 // ---------------------------------------------------------------------------
 
+struct PlayerRow {
+	std::string name;
+	int score = 0, ping = 0;
+	bool spectator = false;
+};
+
+// net_slist_favorites: addresses (or key hashes) separated by spaces
+std::vector<std::string> Favorites()
+{
+	std::vector<std::string> out;
+	std::string s = UIE_CvarString("net_slist_favorites"), cur;
+	for (char c : s) {
+		if (c == ' ' || c == '"') {
+			if (!cur.empty())
+				out.push_back(cur);
+			cur.clear();
+		} else
+			cur += c;
+	}
+	if (!cur.empty())
+		out.push_back(cur);
+	return out;
+}
+
+bool IsFavorite(const std::string& address)
+{
+	for (const std::string& f : Favorites())
+		if (f == address)
+			return true;
+	return false;
+}
+
+// adds the address, or takes it out when it is there
+void ToggleFavorite(const std::string& address)
+{
+	std::vector<std::string> list = Favorites();
+	std::string out;
+	bool found = false;
+	for (const std::string& f : list) {
+		if (f == address) {
+			found = true;
+			continue;
+		}
+		out += (out.empty() ? "" : " ") + f;
+	}
+	if (!found)
+		out += (out.empty() ? "" : " ") + address;
+	UIE_CvarSet("net_slist_favorites", out.c_str());
+}
+
+// the player lines of a server: score ping team "name"; team 0 is a spectator
+std::vector<PlayerRow> ParsePlayers(const char* text)
+{
+	std::vector<PlayerRow> out;
+	std::string all = text;
+	size_t start = 0;
+	while (start < all.size()) {
+		size_t end = all.find('\n', start);
+		if (end == std::string::npos)
+			end = all.size();
+		std::string line = all.substr(start, end - start);
+		start = end + 1;
+		std::vector<std::string> f;
+		std::string cur;
+		bool quoted = false;
+		for (char c : line) {
+			if (c == '"')
+				quoted = !quoted;
+			else if (c == ' ' && !quoted) {
+				if (!cur.empty())
+					f.push_back(cur);
+				cur.clear();
+			} else
+				cur += c;
+		}
+		if (!cur.empty() || quoted)
+			f.push_back(cur);
+		if (f.size() < 3)
+			continue;
+		PlayerRow p;
+		p.score = atoi(f[0].c_str());
+		p.ping = atoi(f[1].c_str());
+		p.spectator = f.size() >= 4 && f[2] == "0";
+		p.name = StripColors(f.back().c_str());
+		out.push_back(p);
+	}
+	return out;
+}
+
 struct ServerRow {
 	std::string address, name, map, type, players;
 	int ping = 0;
@@ -94,6 +183,12 @@ struct ServerRow {
 };
 
 struct ServersModel {
+	// the info panel of the tapped server
+	bool info_open = false;
+	std::string info_name, info_address, info_map, info_image, info_mode, info_mod, info_extra;
+	int info_ping = 0, info_humans = 0, info_bots = 0, info_slots = 0;
+	bool info_favorite = false;
+	std::vector<PlayerRow> info_players;
 	Rml::DataModelHandle handle;
 	std::vector<ServerRow> rows;
 	std::vector<ServerRow> all; // what the network code found, before the filter
@@ -138,7 +233,7 @@ void ServersRebuild(bool force)
 		r.humans = s.numhumans;
 		r.slots = s.maxplayers;
 		r.free_slots = s.freeslots;
-		r.favorite = s.isfavorite != 0;
+		r.favorite = IsFavorite(r.address);
 		r.players = std::to_string(s.numhumans) + "/" + std::to_string(s.maxplayers);
 		if (!m.show_empty && s.numhumans < 1)
 			continue;
@@ -152,9 +247,12 @@ void ServersRebuild(bool force)
 		rows.push_back(r);
 	}
 	bool desc = m.descending;
+	// favorites stay on top, whatever the order
 	const std::string key = m.sort;
 	std::stable_sort(rows.begin(), rows.end(), [&](const ServerRow& a, const ServerRow& b) {
 		int c;
+		if (a.favorite != b.favorite)
+			return a.favorite;
 		if (key == "name")
 			c = Lower(a.name).compare(Lower(b.name));
 		else if (key == "map")
@@ -183,6 +281,32 @@ void ServersRebuild(bool force)
 	m.status = status;
 	m.handle.DirtyVariable("rows");
 	m.handle.DirtyVariable("status");
+}
+
+void InfoRefresh()
+{
+	ServersModel& m = *servers;
+	if (!m.info_open)
+		return;
+	UIE_ServerDetail d;
+	if (!UIE_ServerDetail_Get(m.info_address.c_str(), &d))
+		return;
+	m.info_players = ParsePlayers(d.players);
+	m.info_humans = d.numhumans;
+	m.info_bots = d.numbots;
+	m.info_slots = d.maxplayers;
+	m.info_mod = d.mod;
+	m.info_favorite = IsFavorite(m.info_address);
+	for (const ServerRow& r : m.rows)
+		if (r.address == m.info_address) {
+			m.info_ping = r.ping;
+			m.info_name = r.name;
+			m.info_map = r.map;
+			m.info_image = "/maps/" + r.map;
+			m.info_mode = r.type;
+		}
+	for (const char* v : {"info_players", "info_humans", "info_bots", "info_slots", "info_mod", "info_favorite", "info_ping", "info_name", "info_map", "info_image", "info_mode"})
+		m.handle.DirtyVariable(v);
 }
 
 void ServersCvars(bool write)
@@ -229,8 +353,8 @@ void ServersUpdate(double now, bool shown)
 		return;
 	servers->next_update = now + 0.4;
 	ServersCvars(true);
-	// a refresh is over when nothing has been asking for a while
 	ServersRebuild(false);
+	InfoRefresh();
 }
 
 void CreateServers(Rml::Context* context)
@@ -249,7 +373,27 @@ void CreateServers(Rml::Context* context)
 		s.RegisterMember("ping", &ServerRow::ping);
 		s.RegisterMember("favorite", &ServerRow::favorite);
 	}
+	if (auto p = c.RegisterStruct<PlayerRow>()) {
+		p.RegisterMember("name", &PlayerRow::name);
+		p.RegisterMember("score", &PlayerRow::score);
+		p.RegisterMember("ping", &PlayerRow::ping);
+		p.RegisterMember("spectator", &PlayerRow::spectator);
+	}
+	c.RegisterArray<std::vector<PlayerRow>>();
 	c.RegisterArray<std::vector<ServerRow>>();
+	c.Bind("info_open", &m.info_open);
+	c.Bind("info_name", &m.info_name);
+	c.Bind("info_address", &m.info_address);
+	c.Bind("info_map", &m.info_map);
+	c.Bind("info_image", &m.info_image);
+	c.Bind("info_mode", &m.info_mode);
+	c.Bind("info_mod", &m.info_mod);
+	c.Bind("info_ping", &m.info_ping);
+	c.Bind("info_humans", &m.info_humans);
+	c.Bind("info_bots", &m.info_bots);
+	c.Bind("info_slots", &m.info_slots);
+	c.Bind("info_favorite", &m.info_favorite);
+	c.Bind("info_players", &m.info_players);
 	c.Bind("rows", &m.rows);
 	c.Bind("filter", &m.filter);
 	c.Bind("selected", &m.selected);
@@ -267,8 +411,28 @@ void CreateServers(Rml::Context* context)
 			return;
 		servers->selected = args[0].Get<std::string>();
 		servers->address = servers->selected;
+		// a tap opens the panel with what the server told
+		servers->info_open = true;
+		servers->info_address = servers->selected;
 		h.DirtyVariable("selected");
 		h.DirtyVariable("address");
+		h.DirtyVariable("info_open");
+		h.DirtyVariable("info_address");
+		InfoRefresh();
+	});
+	c.BindEventCallback("info_close", [](Rml::DataModelHandle h, Rml::Event&, const Rml::VariantList&) {
+		servers->info_open = false;
+		h.DirtyVariable("info_open");
+	});
+	c.BindEventCallback("info_join", [](Rml::DataModelHandle, Rml::Event&, const Rml::VariantList&) {
+		UIE_Command(("connect " + servers->info_address).c_str());
+		UIE_Command("rml_hide servers");
+	});
+	c.BindEventCallback("toggle_favorite", [](Rml::DataModelHandle, Rml::Event&, const Rml::VariantList&) {
+		ToggleFavorite(servers->info_address);
+		servers->signature.clear();
+		ServersRebuild(true);
+		InfoRefresh();
 	});
 	c.BindEventCallback("join", [](Rml::DataModelHandle, Rml::Event&, const Rml::VariantList&) {
 		// an address typed by hand may hold anything, a console line must not
@@ -534,12 +698,203 @@ void CreateCampaign(Rml::Context* context)
 	CampaignLoad(true);
 }
 
+// ---------------------------------------------------------------------------
+// Settings: screen sizes, key bindings, menu skins
+// ---------------------------------------------------------------------------
+
+struct OptionRow {
+	std::string label, value;
+};
+
+struct BindRow {
+	std::string label, command, key1, key2;
+	bool header = false, bindable = false;
+	bool capturing1 = false, capturing2 = false;
+};
+
+struct SettingsModel {
+	Rml::DataModelHandle handle;
+	std::vector<OptionRow> resolutions, skins;
+	std::string resolution;
+	std::vector<BindRow> binds;
+	std::string capture_text;
+	int capture_row = -1, capture_slot = 0;
+	double next_update = 0;
+};
+
+SettingsModel* settings = nullptr;
+
+void BindsRefresh()
+{
+	bool changed = false;
+	for (BindRow& b : settings->binds) {
+		if (b.command.empty())
+			continue;
+		char k1[32], k2[32];
+		UIE_KeysFor(b.command.c_str(), k1, k2, sizeof(k1));
+		if (b.key1 != k1 || b.key2 != k2) {
+			b.key1 = k1;
+			b.key2 = k2;
+			changed = true;
+		}
+	}
+	for (size_t i = 0; i < settings->binds.size(); i++) {
+		BindRow& b = settings->binds[i];
+		bool c1 = (int)i == settings->capture_row && settings->capture_slot == 0;
+		bool c2 = (int)i == settings->capture_row && settings->capture_slot == 1;
+		if (b.capturing1 != c1 || b.capturing2 != c2) {
+			b.capturing1 = c1;
+			b.capturing2 = c2;
+			changed = true;
+		}
+	}
+	if (changed)
+		settings->handle.DirtyVariable("binds");
+}
+
+void SettingsUpdate(double now, bool shown)
+{
+	if (!settings || !shown || now < settings->next_update)
+		return;
+	settings->next_update = now + 0.3;
+	BindsRefresh();
+	// the size the cvars describe, as the dropdown's value
+	std::string cur = std::string(UIE_CvarString("vid_width")) + "x" + UIE_CvarString("vid_height");
+	if (cur != settings->resolution) {
+		settings->resolution = cur;
+		settings->handle.DirtyVariable("resolution");
+	}
+}
+
+void CreateSettings(Rml::Context* context)
+{
+	Rml::DataModelConstructor c = context->CreateDataModel("settings");
+	if (!c)
+		return;
+	settings = new SettingsModel;
+	SettingsModel& m = *settings;
+	if (auto o = c.RegisterStruct<OptionRow>()) {
+		o.RegisterMember("label", &OptionRow::label);
+		o.RegisterMember("value", &OptionRow::value);
+	}
+	c.RegisterArray<std::vector<OptionRow>>();
+	if (auto b = c.RegisterStruct<BindRow>()) {
+		b.RegisterMember("label", &BindRow::label);
+		b.RegisterMember("command", &BindRow::command);
+		b.RegisterMember("key1", &BindRow::key1);
+		b.RegisterMember("key2", &BindRow::key2);
+		b.RegisterMember("header", &BindRow::header);
+		b.RegisterMember("bindable", &BindRow::bindable);
+		b.RegisterMember("capturing1", &BindRow::capturing1);
+		b.RegisterMember("capturing2", &BindRow::capturing2);
+	}
+	c.RegisterArray<std::vector<BindRow>>();
+	c.Bind("resolutions", &m.resolutions);
+	c.Bind("resolution", &m.resolution);
+	c.Bind("skins", &m.skins);
+	c.Bind("binds", &m.binds);
+	c.Bind("capture_text", &m.capture_text);
+	m.handle = c.GetModelHandle();
+
+	// screen sizes
+	UIE_VideoMode modes[64];
+	int n = UIE_VideoModes(modes, 64);
+	for (int i = 0; i < n; i++) {
+		std::string v = std::to_string(modes[i].width) + "x" + std::to_string(modes[i].height);
+		m.resolutions.push_back({v, v});
+	}
+	// menu skins: gfx/menu/<name>/skinvalues.txt
+	char files[32][128];
+	int nf = UIE_FileList("gfx/menu/*/skinvalues.txt", files, 32);
+	for (int i = 0; i < nf; i++) {
+		std::string f = files[i];
+		size_t a = f.find('/', 4) + 1, b = f.find('/', a);
+		if (a != std::string::npos && b != std::string::npos)
+			m.skins.push_back({f.substr(a, b - a), f.substr(a, b - a)});
+	}
+
+	c.BindEventCallback("resolution_changed", [](Rml::DataModelHandle, Rml::Event&, const Rml::VariantList&) {
+		size_t x = settings->resolution.find('x');
+		if (x == std::string::npos)
+			return;
+		UIE_CvarSet("vid_width", settings->resolution.substr(0, x).c_str());
+		UIE_CvarSet("vid_height", settings->resolution.substr(x + 1).c_str());
+	});
+
+	// key bindings: the commands of the game's key binder
+	struct { const char *label, *command; } table[] = {
+		{"Moving", nullptr},
+		{"Move forwards", "+forward"}, {"Move backwards", "+back"}, {"Strafe left", "+moveleft"}, {"Strafe right", "+moveright"},
+		{"Jump / swim", "+jump"}, {"Crouch / sink", "+crouch"}, {"Off-hand hook", "+hook"}, {"Jetpack", "+jetpack"},
+		{"Attacking", nullptr},
+		{"Primary fire", "+fire"}, {"Secondary fire", "+fire2"},
+		{"Weapons", nullptr},
+		{"Previous weapon", "weapprev"}, {"Next weapon", "weapnext"}, {"Previously used weapon", "weaplast"}, {"Best weapon", "weapbest"},
+		{"Reload", "reload"}, {"Drop weapon / throw nade", "dropweapon"},
+		{"Weapon group 1", "weapon_group_1"}, {"Weapon group 2", "weapon_group_2"}, {"Weapon group 3", "weapon_group_3"},
+		{"Weapon group 4", "weapon_group_4"}, {"Weapon group 5", "weapon_group_5"}, {"Weapon group 6", "weapon_group_6"},
+		{"Weapon group 7", "weapon_group_7"}, {"Weapon group 8", "weapon_group_8"}, {"Weapon group 9", "weapon_group_9"},
+		{"Weapon group 0", "weapon_group_0"},
+		{"Misc", nullptr},
+		{"Use (drop flag, leave vehicle)", "+use"}, {"Suicide / respawn", "kill"}, {"Zoom", "+zoom"}, {"Show scoreboard", "+showscores"},
+		{"Chat", "messagemode"}, {"Team chat", "messagemode2"}, {"Screenshot", "screenshot"}, {"Quick menu", "quickmenu"},
+	};
+	for (auto& t : table) {
+		BindRow r;
+		r.label = t.label;
+		if (t.command) {
+			r.command = t.command;
+			r.bindable = true;
+		} else
+			r.header = true;
+		m.binds.push_back(r);
+	}
+	c.BindEventCallback("bind", [](Rml::DataModelHandle h, Rml::Event&, const Rml::VariantList& args) {
+		if (args.size() < 2)
+			return;
+		int row = args[0].Get<int>(), slot = args[1].Get<int>();
+		if (row < 0 || row >= (int)settings->binds.size() || !settings->binds[row].bindable)
+			return;
+		settings->capture_row = row;
+		settings->capture_slot = slot;
+		settings->capture_text = "Press a key for \"" + settings->binds[row].label + "\"  (Esc cancels)";
+		h.DirtyVariable("capture_text");
+		UIE_CaptureKeys(1);
+		BindsRefresh();
+	});
+	c.BindEventCallback("unbind", [](Rml::DataModelHandle, Rml::Event&, const Rml::VariantList& args) {
+		if (args.empty())
+			return;
+		int row = args[0].Get<int>();
+		if (row < 0 || row >= (int)settings->binds.size() || !settings->binds[row].bindable)
+			return;
+		UIE_BindKey(settings->binds[row].command.c_str(), 0, -1);
+		UIE_BindKey(settings->binds[row].command.c_str(), 1, -1);
+		BindsRefresh();
+	});
+	BindsRefresh();
+}
+
 } // namespace
+
+void UIRml_KeyCaptured(int key)
+{
+	if (!settings || settings->capture_row < 0)
+		return;
+	const BindRow& b = settings->binds[settings->capture_row];
+	if (key >= 0)
+		UIE_BindKey(b.command.c_str(), settings->capture_slot, key);
+	settings->capture_row = -1;
+	settings->capture_text.clear();
+	settings->handle.DirtyVariable("capture_text");
+	BindsRefresh();
+}
 
 void UIRmlModels_Create(Rml::Context* context)
 {
 	CreateServers(context);
 	CreateCampaign(context);
+	CreateSettings(context);
 }
 
 void UIRmlModels_Destroy(void)
@@ -548,12 +903,15 @@ void UIRmlModels_Destroy(void)
 	servers = nullptr;
 	delete campaign;
 	campaign = nullptr;
+	delete settings;
+	settings = nullptr;
 }
 
 // shown: whether any document that uses the models is up (the server list
 // only asks the network for news while it is looked at)
-void UIRmlModels_Update(double now, bool servers_shown, bool campaign_shown)
+void UIRmlModels_Update(double now, bool servers_shown, bool campaign_shown, bool settings_shown)
 {
+	SettingsUpdate(now, settings_shown);
 	ServersUpdate(now, servers_shown);
 	CampaignUpdate(now, campaign_shown);
 }

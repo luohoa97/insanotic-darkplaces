@@ -31,7 +31,7 @@
 // data models for the lists (ui_rml_models.cpp)
 void UIRmlModels_Create(Rml::Context* context);
 void UIRmlModels_Destroy(void);
-void UIRmlModels_Update(double now, bool servers_shown, bool campaign_shown);
+void UIRmlModels_Update(double now, bool servers_shown, bool campaign_shown, bool settings_shown);
 
 namespace {
 
@@ -519,6 +519,40 @@ bool SameValue(const Rml::String& a, const Rml::String& b)
 	return !a.empty() && !b.empty() && !*ea && !*eb && std::fabs(x - y) < 1e-6;
 }
 
+// Controls can say how their value relates to the cvar's:
+//   data-on / data-off   a checkbox writes these instead of 1 and 0 (it is
+//                        checked while the cvar is not the off value);
+//   data-map="db"        a slider in decibels for a volume cvar (the cvar is
+//                        a factor; the slider's lowest value is silence).
+Rml::String FormatNumber(double v)
+{
+	char buf[48];
+	snprintf(buf, sizeof(buf), "%.6g", v);
+	return buf;
+}
+
+Rml::String ControlFromCvar(Rml::Element* e, const Rml::String& value)
+{
+	if (e->GetAttribute<Rml::String>("data-map", "") == "db") {
+		double v = atof(value.c_str());
+		double lo = e->GetAttribute<double>("min", -40.0);
+		double db = v <= 0 ? lo : 20.0 * std::log10(v);
+		return FormatNumber(std::max(lo, std::min(db, e->GetAttribute<double>("max", 0.0))));
+	}
+	return value;
+}
+
+Rml::String CvarFromControl(Rml::Element* e, const Rml::String& value)
+{
+	if (e->GetAttribute<Rml::String>("data-map", "") == "db") {
+		double db = atof(value.c_str());
+		if (db <= e->GetAttribute<double>("min", -40.0) + 1e-6)
+			return "0";
+		return FormatNumber(std::pow(10.0, db / 20.0));
+	}
+	return value;
+}
+
 Rml::ElementFormControl* AsControl(Rml::Element* e) { return rmlui_dynamic_cast<Rml::ElementFormControl*>(e); }
 
 // the cvar changed (or the document was just shown): bring the control in line
@@ -528,7 +562,7 @@ void SyncControl(Rml::Element* e, const Rml::String& value)
 	if (tag == "input") {
 		const Rml::String type = e->GetAttribute<Rml::String>("type", "text");
 		if (type == "checkbox") {
-			bool on = !value.empty() && !SameValue(value, "0");
+			bool on = !value.empty() && !SameValue(value, e->GetAttribute<Rml::String>("data-off", "0"));
 			if (on != e->HasAttribute("checked")) {
 				if (on)
 					e->SetAttribute("checked", true);
@@ -551,9 +585,15 @@ void SyncControl(Rml::Element* e, const Rml::String& value)
 	// a field being typed in is the player's, not the cvar's
 	if (e == g->context->GetFocusElement())
 		return;
-	if (Rml::ElementFormControl* fc = AsControl(e))
-		if (!SameValue(fc->GetValue(), value))
-			fc->SetValue(value);
+	if (Rml::ElementFormControl* fc = AsControl(e)) {
+		Rml::String shown = ControlFromCvar(e, value);
+		if (!SameValue(fc->GetValue(), shown))
+			fc->SetValue(shown);
+		// a dropdown whose options are made from data may not have the
+		// option yet: look again at the next check
+		if (e->GetTagName() == "select" && !SameValue(fc->GetValue(), shown))
+			g->bound.erase(e);
+	}
 }
 
 void CvarWriter::ProcessEvent(Rml::Event& event)
@@ -567,13 +607,13 @@ void CvarWriter::ProcessEvent(Rml::Event& event)
 	Rml::String value;
 	const Rml::String type = e->GetAttribute<Rml::String>("type", "text");
 	if (e->GetTagName() == "input" && type == "checkbox") {
-		value = e->HasAttribute("checked") ? "1" : "0";
+		value = e->HasAttribute("checked") ? e->GetAttribute<Rml::String>("data-on", "1") : e->GetAttribute<Rml::String>("data-off", "0");
 	} else if (e->GetTagName() == "input" && type == "radio") {
 		if (!e->HasAttribute("checked"))
 			return;
 		value = e->GetAttribute<Rml::String>("value", "");
 	} else if (Rml::ElementFormControl* fc = AsControl(e)) {
-		value = fc->GetValue();
+		value = CvarFromControl(e, fc->GetValue());
 	} else {
 		return;
 	}
@@ -1295,7 +1335,7 @@ void UIRml_Frame(void)
 		auto it = g->documents.find(n);
 		return it != g->documents.end() && it->second.shown;
 	};
-	UIRmlModels_Update(now, shown("servers"), shown("singleplayer"));
+	UIRmlModels_Update(now, shown("servers"), shown("singleplayer"), shown("settings"));
 	g->context->Update();
 	g->context->Render();
 }
