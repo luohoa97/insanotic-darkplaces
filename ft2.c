@@ -39,6 +39,7 @@ cvar_t r_font_size_snapping = {CVAR_SAVE, "r_font_size_snapping", "1", "stick to
 #define FONT_KERNING_UNKNOWN 1e30f // kerning pair not looked up yet
 
 cvar_t r_font_dynamicsizes = {CVAR_SAVE, "r_font_dynamicsizes", "1", "render a font at the size text is actually drawn at when the font was not loaded at a close enough size, instead of stretching a smaller one (Insanotic: big menu and HUD text stays sharp)"};
+cvar_t r_font_dynamicsizes_max = {CVAR_SAVE, "r_font_dynamicsizes_max", "64", "largest size r_font_dynamicsizes renders a font at; bigger text is stretched from it. A font size is a sheet of 256 glyphs at twice the size, so memory grows fast: 64 is about 18 MB, 256 was over 250 MB (Insanotic)"};
 cvar_t r_font_lazysizes = {CVAR_SAVE, "r_font_lazysizes", "1", "render each font size the first time it is drawn instead of all sizes when the font loads (Insanotic)"};
 cvar_t r_font_kerning = {CVAR_SAVE, "r_font_kerning", "1", "Use kerning if available"};
 cvar_t r_font_diskcache = {CVAR_SAVE, "r_font_diskcache", "0", "save font textures to disk for future loading rather than generating them every time"};
@@ -433,6 +434,7 @@ void Font_Init(void)
 	Cvar_RegisterVariable(&r_font_kerning);
 	Cvar_RegisterVariable(&r_font_lazysizes);
 	Cvar_RegisterVariable(&r_font_dynamicsizes);
+	Cvar_RegisterVariable(&r_font_dynamicsizes_max);
 	Cvar_RegisterVariable(&r_font_diskcache);
 	Cvar_RegisterVariable(&r_font_compress);
 	Cvar_RegisterVariable(&developer_font);
@@ -1057,8 +1059,9 @@ int Font_AddSize(ft2_font_t *font, float realsize)
 	int m, i, free_slot = -1;
 	float largest = 0, q = 0;
 	ft2_font_t *fb;
-	if (!r_font_dynamicsizes.integer || !font || font->image_font || realsize > 256)
+	if (!r_font_dynamicsizes.integer || !font || font->image_font)
 		return -1;
+	realsize = min(realsize, r_font_dynamicsizes_max.value);
 	for (m = 0; m < MAX_FONT_SIZES; ++m)
 	{
 		if (!font->font_maps[m])
