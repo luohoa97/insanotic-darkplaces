@@ -1132,6 +1132,26 @@ void Host_LockSession(void)
 		char *p = va(vabuf, sizeof(vabuf), "%slock%s", *fs_userdir ? fs_userdir : fs_basedir, sessionid.string);
 		FS_CreatePath(p);
 		locksession_fh = FS_SysOpen(p, "wl", false);
+		// Insanotic: another copy already runs in this user directory and no
+		// -sessionid was given: take the next free session (.2, .3, ...)
+		// instead of refusing to start. That copy gets its own lock and its
+		// own player ID key, so servers see two different players.
+		if(!locksession_fh && !COM_CheckParm("-sessionid"))
+		{
+			int n;
+			for (n = 2; n <= 16 && !locksession_fh; n++)
+			{
+				char idbuf[16];
+				dpsnprintf(idbuf, sizeof(idbuf), ".%d", n);
+				p = va(vabuf, sizeof(vabuf), "%slock%s", *fs_userdir ? fs_userdir : fs_basedir, idbuf);
+				locksession_fh = FS_SysOpen(p, "wl", false);
+				if (locksession_fh)
+				{
+					Cvar_SetQuick(&sessionid, idbuf);
+					Con_Printf("Another copy is running in this user directory; this one uses session %s\n", idbuf);
+				}
+			}
+		}
 		// TODO maybe write the pid into the lockfile, while we are at it? may help server management tools
 		if(!locksession_fh)
 		{
