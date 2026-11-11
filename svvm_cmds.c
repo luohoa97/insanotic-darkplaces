@@ -2,6 +2,7 @@
 
 #include "prvm_cmds.h"
 #include "jpeg.h"
+#include "sv_lua.h"
 
 //============================================================================
 // Server
@@ -226,6 +227,7 @@ const char *vm_sv_extensions =
 "PRYDON_CLIENTCURSOR "
 "TENEBRAE_GFX_DLIGHTS "
 "TW_SV_STEPCONTROL "
+"XON_LUA "
 "ZQ_PAUSE "
 //"EXT_CSQC " // not ready yet
 ;
@@ -3837,6 +3839,45 @@ NULL,							// #640
 NULL,							// #641
 VM_coverage,						// #642
 NULL,							// #643
+NULL,							// #644
+NULL,							// #645
+NULL,							// #646
+NULL,							// #647
+NULL,							// #648
+NULL,							// #649
+NULL,							// #650
+NULL,							// #651
+NULL,							// #652
+NULL,							// #653
+NULL,							// #654
+NULL,							// #655
+NULL,							// #656
+NULL,							// #657
+NULL,							// #658
+NULL,							// #659
+NULL,							// #660
+NULL,							// #661
+NULL,							// #662
+NULL,							// #663
+NULL,							// #664
+NULL,							// #665
+NULL,							// #666
+NULL,							// #667
+NULL,							// #668
+NULL,							// #669
+NULL,							// #670
+NULL,							// #671
+NULL,							// #672
+NULL,							// #673
+NULL,							// #674
+NULL,							// #675
+NULL,							// #676
+NULL,							// #677
+NULL,							// #678
+NULL,							// #679
+VM_SV_lua_load,					// #680 float lua_load(string vfs_path) (XON_LUA)
+VM_SV_lua_hook,					// #681 float lua_hook(string hook_name, ...) (XON_LUA)
+VM_SV_lua_hookcount,			// #682 float lua_hookcount(string hook_name) (XON_LUA)
 };
 
 const int vm_sv_numbuiltins = sizeof(vm_sv_builtins) / sizeof(prvm_builtin_t);
@@ -3848,6 +3889,9 @@ void SVVM_init_cmd(prvm_prog_t *prog)
 
 void SVVM_reset_cmd(prvm_prog_t *prog)
 {
+	// Lua entity handles and hook signatures refer to this progs instance
+	LuaMods_ProgReset();
+
 	World_End(&sv.world);
 
 	if(prog->loaded && PRVM_serverfunction(SV_Shutdown))

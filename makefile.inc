@@ -180,6 +180,7 @@ OBJ_COMMON= \
 	r_sprites.o \
 	sbar.o \
 	sv_demo.o \
+	sv_lua.o \
 	sv_main.o \
 	sv_move.o \
 	sv_phys.o \

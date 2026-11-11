@@ -20,6 +20,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // sv_main.c -- server main program
 
 #include "quakedef.h"
+#include "sv_lua.h"
 #include "sv_demo.h"
 #include "libcurl.h"
 #include "csprogs.h"
@@ -435,6 +436,8 @@ void SV_Init (void)
 	extern cvar_t csqc_progcrc;
 	extern cvar_t csqc_progsize;
 	extern cvar_t csqc_usedemoprogs;
+
+	LuaMods_Init();
 
 	Cvar_RegisterVariable(&sv_worldmessage);
 	Cvar_RegisterVariable(&sv_worldname);
