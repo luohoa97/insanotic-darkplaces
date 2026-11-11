@@ -1687,6 +1687,7 @@ static void CL_SignonReply (void)
 
 		Con_ClearNotify();
 		LoadTimes_Report();
+		Host_PreloadGameReady();
 		if (COM_CheckParm("-profilegameonly"))
 			Sys_AllowProfiling(true);
 		break;
@@ -1705,6 +1706,8 @@ static void CL_ParseServerInfo (void)
 	protocolversion_t protocol;
 	int nummodels, numsounds;
 	char vabuf[1024];
+	if (!sv.active)
+		Host_PreloadRecordStart(); // connecting to a server: note what loading it opens
 
 	// if we start loading a level and a video is still playing, stop it
 	CL_VideoStop();

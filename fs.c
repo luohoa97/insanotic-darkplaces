@@ -348,6 +348,8 @@ void FS_Ls_f(void);
 void FS_Which_f(void);
 
 static searchpath_t *FS_FindFile (const char *name, int* index, qboolean quiet);
+static qboolean fs_recording;
+static void FS_RecordName(const char *name);
 static packfile_t* FS_AddFileToPack (const char* name, pack_t* pack,
 									fs_offset_t offset, fs_offset_t packsize,
 									fs_offset_t realsize, int flags);
@@ -2747,7 +2749,94 @@ qfile_t* FS_OpenVirtualFile (const char* filepath, qboolean quiet)
 	if (fs_mutex) Thread_LockMutex(fs_mutex);
 	result = FS_OpenReadFile (filepath, quiet, false, 16);
 	if (fs_mutex) Thread_UnlockMutex(fs_mutex);
+	if (result && fs_recording)
+		FS_RecordName(filepath);
 	return result;
+}
+
+/*
+====================
+Insanotic startup preload
+
+FS_RecordStart/FS_RecordStop note every file opened in between (a map
+load and its first seconds of play) and save the list. FS_Prefetch asks
+the kernel to read a file ahead (posix_fadvise WILLNEED): for files
+inside a pack, only that file's byte range. The kernel reads all of them
+in parallel in the background; later loads find them in memory.
+====================
+*/
+static stringlist_t fs_recorded;
+
+static void FS_RecordName(const char *name)
+{
+	int i;
+	if (fs_recorded.numstrings >= 8192)
+		return;
+	for (i = fs_recorded.numstrings - 1; i >= 0 && i >= fs_recorded.numstrings - 64; i--)
+		if (!strcmp(fs_recorded.strings[i], name))
+			return; // cheap dedupe of repeated opens
+	stringlistappend(&fs_recorded, name);
+}
+
+void FS_RecordStart(void)
+{
+	stringlistfreecontents(&fs_recorded);
+	stringlistinit(&fs_recorded);
+	fs_recording = true;
+}
+
+void FS_RecordStop(const char *listfile)
+{
+	qfile_t *f;
+	int i, j;
+	if (!fs_recording)
+		return;
+	fs_recording = false;
+	f = FS_OpenRealFile(listfile, "wb", false);
+	if (!f)
+		return;
+	for (i = 0; i < fs_recorded.numstrings; i++)
+	{
+		for (j = 0; j < i; j++)
+			if (!strcmp(fs_recorded.strings[j], fs_recorded.strings[i]))
+				break;
+		if (j == i)
+			FS_Printf(f, "%s\n", fs_recorded.strings[i]);
+	}
+	FS_Close(f);
+	Con_DPrintf("preload list: %d files saved to %s\n", fs_recorded.numstrings, listfile);
+	stringlistfreecontents(&fs_recorded);
+}
+
+qboolean FS_Prefetch(const char *name)
+{
+#if !USE_RWOPS && defined(POSIX_FADV_WILLNEED)
+	int index;
+	searchpath_t *sp = FS_FindFile(name, &index, true);
+	if (!sp)
+		return false;
+	if (sp->pack && index >= 0)
+	{
+		const packfile_t *pf = &sp->pack->files[index];
+		// the local header in front of the data is small; read a bit more
+		posix_fadvise(sp->pack->handle, pf->offset, pf->packsize + 1024, POSIX_FADV_WILLNEED);
+		return true;
+	}
+	else
+	{
+		char path[MAX_OSPATH];
+		int fd;
+		dpsnprintf(path, sizeof(path), "%s%s", sp->filename, name);
+		fd = open(path, O_RDONLY);
+		if (fd < 0)
+			return false;
+		posix_fadvise(fd, 0, 0, POSIX_FADV_WILLNEED);
+		close(fd);
+		return true;
+	}
+#else
+	return false;
+#endif
 }
 
 

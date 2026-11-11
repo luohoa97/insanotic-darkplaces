@@ -86,6 +86,65 @@ cvar_t developer_extra = {0, "developer_extra", "0", "prints additional debuggin
 cvar_t developer_insane = {0, "developer_insane", "0", "prints huge streams of information about internal workings, entire contents of files being read/written, etc.  Not recommended!"};
 cvar_t developer_loadfile = {0, "developer_loadfile","0", "prints name and size of every file loaded via the FS_LoadFile function (which is almost everything)"};
 loadtimes_t loadtimes;
+cvar_t cl_preload = {CVAR_SAVE, "cl_preload", "1", "remember the files your matches load and read them ahead (and load their models) in the background at startup (Insanotic)"};
+#define PRELOAD_LIST "insanotic_preload.txt"
+static double preload_ready_time = -1;
+static qboolean preload_started = false;
+
+// startup: read ahead everything the last matches loaded and queue their
+// models for background loading while the menu is up
+static void Host_PreloadStart(void)
+{
+	unsigned char *buf;
+	fs_offset_t size;
+	char *p, *line;
+	int files = 0, models = 0;
+	preload_started = true;
+	if (!cl_preload.integer || cls.state == ca_dedicated)
+		return;
+	buf = FS_LoadFile(PRELOAD_LIST, tempmempool, true, &size);
+	if (!buf)
+		return;
+	buf = (unsigned char *)Mem_Realloc(tempmempool, buf, size + 1);
+	buf[size] = 0;
+	for (line = (char *)buf; *line; line = p)
+	{
+		const char *ext;
+		for (p = line; *p && *p != '\n'; p++)
+			;
+		if (*p)
+			*p++ = 0;
+		if (!*line)
+			continue;
+		if (FS_Prefetch(line))
+			files++;
+		ext = FS_FileExtension(line);
+		if (!strcasecmp(ext, "md3") || !strcasecmp(ext, "iqm") || !strcasecmp(ext, "dpm") || !strcasecmp(ext, "mdl")
+		 || !strcasecmp(ext, "zym") || !strcasecmp(ext, "obj") || !strcasecmp(ext, "psk") || !strcasecmp(ext, "spr"))
+		{
+			Mod_FindName(line, NULL);
+			models++;
+		}
+	}
+	Mem_Free(buf);
+	Con_DPrintf("preload: reading %d files ahead, %d models queued\n", files, models);
+}
+
+// start recording what a map load opens (local server or connecting)
+void Host_PreloadRecordStart(void)
+{
+	if (cl_preload.integer && cls.state != ca_dedicated)
+	{
+		FS_RecordStart();
+		preload_ready_time = -1;
+	}
+}
+
+// the game is playable: keep recording for a while (lazily loaded models)
+void Host_PreloadGameReady(void)
+{
+	preload_ready_time = realtime;
+}
 static double host_starttime;
 cvar_t developer_loadtimes = {0, "developer_loadtimes", "0", "print how long each part of loading a map took, once the game is ready"};
 cvar_t developer_loading = {0, "developer_loading","0", "prints information about files as they are loaded or unloaded successfully"};
@@ -266,6 +325,7 @@ static void Host_InitLocal (void)
 	Cvar_RegisterVariable (&developer_loadfile);
 	Cvar_RegisterVariable (&developer_loading);
 	Cvar_RegisterVariable (&developer_loadtimes);
+	Cvar_RegisterVariable (&cl_preload);
 	Cvar_RegisterVariable (&developer_entityparsing);
 
 	Cvar_RegisterVariable (&timestamps);
@@ -800,7 +860,7 @@ void Host_Main(void)
 
 		// Insanotic: never sleep while connecting or loading; the handshake
 		// with a server (also a local one) advances one step per frame
-		if (cls.state == ca_connected && cls.signon < SIGNONS)
+		if ((cls.state == ca_connected && cls.signon < SIGNONS) || cls.connect_trying || (sv.active && cls.signon < SIGNONS))
 			wait = 0;
 
 		if (!cls.timedemo && wait >= 1)
@@ -1027,9 +1087,16 @@ void Host_Main(void)
 			R_TimeReport("sendmove");
 
 			// Insanotic: load the not yet used precached models a few at a
-			// time once the game is running
-			if (mod_lazyload.integer && cls.signon == SIGNONS)
+			// time once the game is running, and preloaded ones in the menu
+			if (!preload_started)
+				Host_PreloadStart();
+			if (mod_lazyload.integer && (cls.signon == SIGNONS || cls.state != ca_connected))
 				Mod_LoadPending(0);
+			if (preload_ready_time > 0 && cls.signon == SIGNONS && realtime - preload_ready_time > 20)
+			{
+				FS_RecordStop(PRELOAD_LIST);
+				preload_ready_time = -1;
+			}
 
 			// update client world (interpolate entities, create trails, etc)
 			CL_UpdateWorld();

@@ -63,6 +63,10 @@ int FS_SysOpenFD(const char *filepath, const char *mode, qboolean nonblocking); 
 qfile_t* FS_SysOpen (const char* filepath, const char* mode, qboolean nonblocking); // uses absolute path
 qfile_t* FS_OpenRealFile (const char* filepath, const char* mode, qboolean quiet);
 qfile_t* FS_OpenVirtualFile (const char* filepath, qboolean quiet);
+// Insanotic startup preload (see fs.c)
+void FS_RecordStart(void);
+void FS_RecordStop(const char *listfile);
+qboolean FS_Prefetch(const char *name);
 qfile_t* FS_FileFromData (const unsigned char *data, const size_t size, qboolean quiet);
 int FS_Close (qfile_t* file);
 void FS_RemoveOnClose(qfile_t* file);

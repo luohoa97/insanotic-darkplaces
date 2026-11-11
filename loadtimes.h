@@ -21,5 +21,7 @@ typedef struct loadtimes_s
 extern loadtimes_t loadtimes;
 extern cvar_t developer_loadtimes;
 void LoadTimes_Report(void);
+void Host_PreloadRecordStart(void);
+void Host_PreloadGameReady(void);
 
 #endif

@@ -3300,6 +3300,7 @@ void SV_SpawnServer (const char *server)
 	double t = Sys_DirtyTime();
 	if (loadtimes.map_start <= 0)
 		loadtimes.map_start = t;
+	Host_PreloadRecordStart();
 	SV_SpawnServer_Inner(server);
 	loadtimes.spawnserver += Sys_DirtyTime() - t;
 	if (developer_loadtimes.integer)
