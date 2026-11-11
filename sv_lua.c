@@ -25,7 +25,31 @@ of lua_hook is a signature string naming them, e.g. "e0 e1 f4 >f4":
 cvar_t sv_lua_instruction_limit = {0, "sv_lua_instruction_limit", "2000000", "Lua VM instructions one server plugin may execute per entry (loading, or one hook call) before it is killed and disabled"};
 cvar_t sv_lua_memory_limit = {0, "sv_lua_memory_limit", "32", "memory in MB one server plugin may allocate before it is killed and disabled"};
 
+cvar_t sv_lua_disabled = {CVAR_SAVE, "sv_lua_disabled", "", "space separated list of server plugin folder names not to load (plugins/<name>)"};
+
 #define SV_LUA_QC_RELOAD "Lua_ReloadPlugins"
+
+// is plugins/<name>/... listed in sv_lua_disabled?
+static qboolean SV_Lua_IsDisabled(const char *path)
+{
+	const char *name, *end, *p = sv_lua_disabled.string;
+	size_t len;
+	if (strncmp(path, "plugins/", 8))
+		return false;
+	name = path + 8;
+	end = strchr(name, '/');
+	len = end ? (size_t)(end - name) : strlen(name);
+	while (*p)
+	{
+		while (*p && ISWHITESPACE(*p))
+			p++;
+		if (!strncmp(p, name, len) && (p[len] == 0 || ISWHITESPACE(p[len])))
+			return true;
+		while (*p && !ISWHITESPACE(*p))
+			p++;
+	}
+	return false;
+}
 
 static void SV_Lua_RegisterAPI(lua_State *L);
 
@@ -848,6 +872,12 @@ void VM_SV_lua_load(prvm_prog_t *prog)
 {
 	luasandbox_t *m;
 	VM_SAFEPARMCOUNT(1, VM_SV_lua_load);
+	if (SV_Lua_IsDisabled(PRVM_G_STRING(OFS_PARM0)))
+	{
+		Con_Printf("[lua] plugin %s is disabled (sv_lua_disabled)\n", PRVM_G_STRING(OFS_PARM0));
+		PRVM_G_FLOAT(OFS_RETURN) = 0;
+		return;
+	}
 	m = LuaSandbox_Load(&sv_luahost, PRVM_G_STRING(OFS_PARM0));
 	PRVM_G_FLOAT(OFS_RETURN) = (m && !m->disabled) ? 1 : 0;
 }
@@ -911,6 +941,7 @@ void LuaMods_Init(void)
 	sv_lua_mempool = Mem_AllocPool("lua plugins", 0, NULL);
 	Cvar_RegisterVariable(&sv_lua_instruction_limit);
 	Cvar_RegisterVariable(&sv_lua_memory_limit);
+	Cvar_RegisterVariable(&sv_lua_disabled);
 	Cmd_AddCommand("sv_lua_plugins", SV_Lua_Plugins_f, "list server Lua plugins and their status");
 	Cmd_AddCommand("sv_lua_reload", SV_Lua_Reload_f, "reload every server Lua plugin without restarting the map");
 }
