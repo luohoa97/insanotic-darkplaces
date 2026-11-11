@@ -81,6 +81,10 @@ void UIE_Log(int level, const char *text);
 void UIE_Command(const char *command);
 /* value of a cvar as text, empty when there is none */
 const char *UIE_CvarString(const char *name);
+/* set a cvar by name; read-only and private ones are left alone */
+void UIE_CvarSet(const char *name, const char *value);
+/* send a line to the server the way "cmd" does */
+void UIE_ServerCommand(const char *line);
 /* the on-screen keyboard of touch devices */
 void UIE_Keyboard(int show);
 
@@ -98,6 +102,9 @@ void UIRml_Resize(int width, int height, float dpratio);
 int UIRml_Show(const char *name);
 void UIRml_Hide(const char *name);
 void UIRml_HideAll(void);
+/* a page a server sent (a path in ui/); NULL when it is showing, else why not */
+const char *UIRml_ShowServer(const char *path);
+int UIRml_ServerShown(void);
 int UIRml_IsShown(const char *name);
 int UIRml_AnyShownExcept(const char *name);
 /* close and load every document again (stylesheets and images too) */

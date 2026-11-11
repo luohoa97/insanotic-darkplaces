@@ -33,6 +33,11 @@ static cvar_t menu_overview = {0, "_menu_overview", "0", "set by the menu: 1 whi
 // and reads this one to know it should not draw that screen itself
 static cvar_t menu_rml_active = {0, "_menu_rml_active", "0", "set by the engine: 1 while an RmlUi document draws the menu's main screen"};
 
+// Pages a server sends (see docs/MODDING.md). They are untrusted: they can
+// only talk back to the server, never run commands here.
+cvar_t cl_allow_server_pages = {CVAR_SAVE, "cl_allow_server_pages", "1", "1 lets a server open its own pages (RmlUi documents from its pk3) on this client; they can only answer the server, never run commands here"};
+cvar_t cl_server_page_timeout = {CVAR_SAVE, "cl_server_page_timeout", "600", "seconds a page from a server stays open before it is closed; 0 = no limit"};
+
 static qboolean ui_created;
 static qboolean ui_mainmenu_failed;
 static unsigned int ui_texture_serial;
@@ -190,6 +195,22 @@ const char *UIE_CvarString(const char *name)
 	return Cvar_VariableString(name);
 }
 
+void UIE_CvarSet(const char *name, const char *value)
+{
+	cvar_t *var = Cvar_FindVar(name);
+	if (!var || (var->flags & (CVAR_READONLY | CVAR_PRIVATE)))
+		return;
+	Cvar_Set(name, value);
+}
+
+void UIE_ServerCommand(const char *line)
+{
+	if (cls.state != ca_connected || cls.demoplayback)
+		return;
+	Con_DPrintf("RmlUi: to the server: %s\n", line);
+	Cmd_ForwardStringToServer(line);
+}
+
 void UIE_Keyboard(int show)
 {
 	VID_ShowKeyboard(show != 0);
@@ -243,7 +264,8 @@ static void UI_RML_Create(void)
 
 static void UI_RML_Remember(const char *name)
 {
-	if (strcmp(name, MAINMENU) && ui_num_remembered < MAX_REMEMBERED)
+	// pages from a server are gone with the renderer; the server may send them again
+	if (strcmp(name, MAINMENU) && strncmp(name, "server:", 7) && ui_num_remembered < MAX_REMEMBERED)
 		dpsnprintf(ui_remembered[ui_num_remembered++], sizeof(ui_remembered[0]), "%s", name);
 }
 
@@ -289,6 +311,62 @@ static void RML_Show_f(void)
 		return;
 	if (!UIRml_Show(Cmd_Argv(1)))
 		Con_Printf("rml_show: ui/%s.rml did not load\n", Cmd_Argv(1));
+}
+
+// The paths a page may have: ui/<folder>/<name>.rml, plain file name
+// characters. The server checks this too; the client does not trust it.
+static qboolean UI_RML_ServerPathOK(const char *path)
+{
+	size_t n = strlen(path), i;
+	if (n < 8 || n > 120 || strncmp(path, "ui/", 3) || strcmp(path + n - 4, ".rml") || strstr(path, ".."))
+		return false;
+	for (i = 0; i < n; i++)
+	{
+		char c = path[i];
+		if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' || c == '-' || c == '.' || c == '/'))
+			return false;
+	}
+	// ui/<file>.rml directly in ui/ belongs to the game, a page needs a folder
+	return strchr(path + 3, '/') != NULL;
+}
+
+static void RML_ShowServer_f(void)
+{
+	static double last;
+	const char *path, *why;
+
+	if (Cmd_Argc() != 2)
+	{
+		Con_Printf("usage: rml_show_server <ui/folder/page.rml>   (a server sends this)\n");
+		return;
+	}
+	path = Cmd_Argv(1);
+	if (!cl_allow_server_pages.integer)
+		return;
+	if (cls.state != ca_connected || cls.demoplayback)
+		return;
+	if (!UI_RML_ServerPathOK(path))
+	{
+		Con_Printf("The server asked for a page with a path that is not allowed: %s\n", path);
+		return;
+	}
+	// a server cannot make the screen flicker with pages
+	if (realtime - last < 0.5)
+		return;
+	last = realtime;
+	Host_StartVideo();
+	UI_RML_Create();
+	if (!ui_created)
+		return;
+	why = UIRml_ShowServer(path);
+	if (why)
+		Con_Printf("Could not show the server's page %s: %s\n", path, why);
+}
+
+static void RML_CloseServer_f(void)
+{
+	if (ui_created && UIRml_ServerShown())
+		UIRml_HideAll();
 }
 
 static void RML_Hide_f(void)
@@ -390,10 +468,14 @@ void UI_RML_Init(void)
 {
 	Cvar_RegisterVariable(&menu_rmlui);
 	Cvar_RegisterVariable(&rml_scale);
+	Cvar_RegisterVariable(&cl_allow_server_pages);
+	Cvar_RegisterVariable(&cl_server_page_timeout);
 	Cvar_RegisterVariable(&menu_overview);
 	Cvar_RegisterVariable(&menu_rml_active);
 	Cmd_AddCommand("rml_show", RML_Show_f, "show an RmlUi document: rml_show <name> loads ui/<name>.rml and draws it above the menu");
 	Cmd_AddCommand("rml_hide", RML_Hide_f, "hide an RmlUi document (all of them without a name)");
+	Cmd_AddCommand("rml_show_server", RML_ShowServer_f, "open a page the server sent (ui/<folder>/<name>.rml); servers use this");
+	Cmd_AddCommand("rml_close_server", RML_CloseServer_f, "close the page a server opened");
 	Cmd_AddCommand("rml_reload", RML_Reload_f, "load the RmlUi documents, stylesheets and images again (for editing them)");
 	Cmd_AddCommand("rml_click", RML_Click_f, "click at a window pixel as if with the mouse (for tests)");
 	Cmd_AddCommand("rml_drag", RML_Drag_f, "press, drag and release the primary button between window pixels (for tests)");
@@ -447,6 +529,36 @@ static void UI_RML_DrawCursor(void)
 	y = in_windowmouse_y * (float)vid_conheight.integer / (float)vid.height;
 	// the skin's cursor is 32x32 console units
 	DrawQ_Pic(x, y, pic, 32, 32, 1, 1, 1, 1, 0);
+}
+
+/*
+The band across the top of a page from a server. The engine draws it, not the
+page, so the page cannot style it away, cover it or move it: it says where
+the page comes from and has a close button. (Escape closes the page too.)
+*/
+#define SERVER_BAND_DP 40.0f
+
+static float UI_RML_BandHeight(void)
+{
+	return SERVER_BAND_DP * UI_RML_DPRatio(); // window pixels
+}
+
+static void UI_RML_DrawServerBand(void)
+{
+	float sx, sy, h, w, bw;
+	const char *text = "Page from the server. Esc closes it.";
+
+	if (!UIRml_ServerShown())
+		return;
+	sx = (float)vid_conwidth.integer / (float)vid.width;
+	sy = (float)vid_conheight.integer / (float)vid.height;
+	h = UI_RML_BandHeight() * sy;
+	w = (float)vid_conwidth.integer;
+	bw = 72.0f * UI_RML_DPRatio() * sx;
+	DrawQ_Fill(0, 0, w, h, 0, 0, 0, 0.9f, 0);
+	DrawQ_Fill(w - bw, 0, bw, h, 0.69f, 0.19f, 0.19f, 1, 0);
+	DrawQ_String(36, h * 0.5f - 4, text, 0, 8, 8, 1, 0.8f, 0.4f, 1, 0, NULL, true, FONT_DEFAULT);
+	DrawQ_String(w - bw + bw * 0.5f - 20, h * 0.5f - 4, "Close", 0, 8, 8, 1, 1, 1, 1, 0, NULL, true, FONT_DEFAULT);
 }
 
 void UI_RML_Draw(void)
@@ -510,6 +622,7 @@ void UI_RML_Draw(void)
 
 	UIRml_Frame();
 	DrawQ_ResetClipArea();
+	UI_RML_DrawServerBand();
 	UI_RML_DrawCursor();
 }
 
@@ -575,6 +688,13 @@ int UI_RML_KeyEvent(int key, int ascii, int down)
 
 	if (key >= K_MOUSE1 && key <= K_MOUSE3)
 	{
+		// the close button of the band of a page from a server
+		if (UIRml_ServerShown() && in_windowmouse_y < UI_RML_BandHeight() && in_windowmouse_x > vid.width - 72.0f * UI_RML_DPRatio())
+		{
+			UIRml_HideAll();
+			ui_routed[key] = 1;
+			return 1;
+		}
 		UIRml_MouseMove((float)in_windowmouse_x, (float)in_windowmouse_y);
 		ui_mouse_sent[0] = (float)in_windowmouse_x;
 		ui_mouse_sent[1] = (float)in_windowmouse_y;

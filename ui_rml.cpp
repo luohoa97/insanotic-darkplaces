@@ -51,6 +51,10 @@ public:
 		const char* p = path.c_str();
 		while (*p == '/')
 			++p;
+		// nothing outside the game's folders, whoever asks (pages from a
+		// server name their own files)
+		if (strstr(p, "..") || strchr(p, ':') || strchr(p, '\\'))
+			return 0;
 		size_t size = 0;
 		unsigned char* data = UIE_LoadFile(p, &size);
 		if (!data)
@@ -248,26 +252,30 @@ private:
 // Documents
 // ---------------------------------------------------------------------------
 
-// data-cmd on an element: queue that console command when it is clicked
-class CommandListener : public Rml::EventListener {
+// What a click on an element can do. The attributes are looked up from the
+// element that was hit upwards, so a button may have children.
+//   data-cmd="..."    run that console command (documents of the game only);
+//   data-close        close the document the element is in;
+//   data-reply="act"  server pages: send the page's answer to the server.
+// The rules differ for pages that come from a server, see ActionListener.
+class ActionListener : public Rml::EventListener {
 public:
-	void ProcessEvent(Rml::Event& event) override
-	{
-		// the click may land on a child of the element that carries the attribute
-		for (Rml::Element* e = event.GetCurrentElement(); e; e = e->GetParentNode()) {
-			if (e->HasAttribute("data-cmd")) {
-				Rml::String cmd = e->GetAttribute<Rml::String>("data-cmd", "");
-				if (!cmd.empty())
-					UIE_Command(cmd.c_str());
-				return;
-			}
-		}
-	}
+	void ProcessEvent(Rml::Event& event) override;
+};
+
+// two-way cvar binding: a form control with data-cvar writes its value to the
+// cvar when the player changes it
+class CvarWriter : public Rml::EventListener {
+public:
+	void ProcessEvent(Rml::Event& event) override;
 };
 
 struct Document {
 	Rml::ElementDocument* doc = nullptr;
 	bool shown = false;
+	bool server = false; // a page a server sent: it is not trusted, see UIRml_ShowServer
+	double shown_at = 0;
+	std::string path;    // server pages: where it was loaded from
 	std::map<std::string, bool> classes;
 };
 
@@ -275,7 +283,10 @@ struct State {
 	EngineFiles files;
 	EngineSystem system;
 	EngineRender render;
-	CommandListener commands;
+	ActionListener actions;
+	CvarWriter writer;
+	std::vector<std::string> pending_close; // documents to close at the start of the next frame
+	double last_server_open = 0;
 	Rml::Context* context = nullptr;
 	bool initialised = false;
 	std::map<std::string, Document> documents;
@@ -301,7 +312,80 @@ struct State {
 
 State* g = nullptr;
 
-std::string DocumentPath(const std::string& name) { return "ui/" + name + ".rml"; }
+// "server:ui/x/y.rml" is a page from a server, everything else is
+// ui/<name>.rml of the game
+const char* const SERVER_PREFIX = "server:";
+bool IsServerName(const std::string& name) { return name.compare(0, 7, SERVER_PREFIX) == 0; }
+std::string DocumentPath(const std::string& name)
+{
+	if (IsServerName(name))
+		return name.substr(7);
+	return "ui/" + name + ".rml";
+}
+
+Document* DocumentOf(Rml::Element* e)
+{
+	Rml::ElementDocument* doc = e ? e->GetOwnerDocument() : nullptr;
+	for (auto& kv : g->documents)
+		if (kv.second.doc == doc && doc)
+			return &kv.second;
+	return nullptr;
+}
+
+std::string DocumentName(Document* d)
+{
+	for (auto& kv : g->documents)
+		if (&kv.second == d)
+			return kv.first;
+	return "";
+}
+
+// A value that goes into a command line the server splits into words: no
+// quotes, backslashes or control characters, and not very long.
+std::string Sanitize(const Rml::String& in, size_t max)
+{
+	std::string out;
+	for (unsigned char c : in) {
+		if (out.size() >= max)
+			break;
+		if (c < 32 || c == '"' || c == '\\' || c == 127)
+			continue;
+		out += (char)c;
+	}
+	return out;
+}
+
+// the page's answer: "rml_reply <page> <action> [name value]...", with
+// every named control of the page. At most 16 controls and about a kilobyte.
+std::string BuildReply(Document* d, const Rml::String& action)
+{
+	std::string line = "rml_reply \"" + Sanitize(d->path, 120) + "\" \"" + Sanitize(action, 60) + "\"";
+	Rml::ElementList list;
+	d->doc->QuerySelectorAll(list, "input, select, textarea");
+	int n = 0;
+	for (Rml::Element* e : list) {
+		if (!e->HasAttribute("name") || n >= 16 || line.size() > 900)
+			continue;
+		std::string value;
+		const Rml::String type = e->GetAttribute<Rml::String>("type", "text");
+		if (e->GetTagName() == "input" && type == "checkbox") {
+			value = e->HasAttribute("checked") ? "1" : "0";
+		} else if (e->GetTagName() == "input" && type == "radio") {
+			if (!e->HasAttribute("checked"))
+				continue;
+			value = Sanitize(e->GetAttribute<Rml::String>("value", ""), 80);
+		} else if (auto* fc = rmlui_dynamic_cast<Rml::ElementFormControl*>(e)) {
+			value = Sanitize(fc->GetValue(), 200);
+		} else {
+			continue;
+		}
+		line += " \"" + Sanitize(e->GetAttribute<Rml::String>("name", ""), 40) + "\" \"" + value + "\"";
+		n++;
+	}
+	return line;
+}
+
+
 
 // A drag that starts on something scrollable scrolls it instead of pressing a
 // button. Walks up from what is under the finger.
@@ -316,6 +400,17 @@ Rml::Element* FindScrollable(Rml::Element* e)
 			return e;
 	}
 	return nullptr;
+}
+
+// a finger on a slider moves the slider, not the list it is in
+bool OnDragControl(Rml::Element* e)
+{
+	for (; e; e = e->GetParentNode()) {
+		const Rml::String& t = e->GetTagName();
+		if (t == "sliderbar" || t == "slidertrack" || t == "sliderprogress")
+			return true;
+	}
+	return false;
 }
 
 Rml::Vector2f ScrollMax(Rml::Element* e)
@@ -364,19 +459,139 @@ void EndScroll()
 	g->swallow = false;
 }
 
+void ActionListener::ProcessEvent(Rml::Event& event)
+{
+	// the click may land on a child of the element that carries the attribute
+	for (Rml::Element* e = event.GetCurrentElement(); e; e = e->GetParentNode()) {
+		bool close = e->HasAttribute("data-close");
+		bool reply = e->HasAttribute("data-reply");
+		bool cmd = e->HasAttribute("data-cmd");
+		if (!close && !reply && !cmd)
+			continue;
+		Document* d = DocumentOf(e);
+		if (!d)
+			return;
+		if (close) {
+			g->pending_close.push_back(DocumentName(d));
+		} else if (d->server) {
+			// A page from a server can only talk to that server: its answer,
+			// or a "cmd ..." line for the server's own game code. Nothing it
+			// writes runs on this computer.
+			if (reply) {
+				UIE_ServerCommand(BuildReply(d, e->GetAttribute<Rml::String>("data-reply", "")).c_str());
+			} else {
+				Rml::String c = e->GetAttribute<Rml::String>("data-cmd", "");
+				if (c.compare(0, 4, "cmd ") == 0 && c.size() < 200)
+					UIE_ServerCommand(Sanitize(c.substr(4), 190).c_str());
+				else
+					UIE_Log(1, "a page from the server asked for a local command; refused");
+			}
+		} else if (cmd) {
+			Rml::String c = e->GetAttribute<Rml::String>("data-cmd", "");
+			if (!c.empty())
+				UIE_Command(c.c_str());
+		}
+		return;
+	}
+}
+
+// Same text for a cvar and a control? Numbers compare as numbers, so "1" and
+// "1.000000" match.
+bool SameValue(const Rml::String& a, const Rml::String& b)
+{
+	if (a == b)
+		return true;
+	char *ea, *eb;
+	double x = strtod(a.c_str(), &ea), y = strtod(b.c_str(), &eb);
+	return !a.empty() && !b.empty() && !*ea && !*eb && std::fabs(x - y) < 1e-6;
+}
+
+Rml::ElementFormControl* AsControl(Rml::Element* e) { return rmlui_dynamic_cast<Rml::ElementFormControl*>(e); }
+
+// the cvar changed (or the document was just shown): bring the control in line
+void SyncControl(Rml::Element* e, const Rml::String& value)
+{
+	const Rml::String& tag = e->GetTagName();
+	if (tag == "input") {
+		const Rml::String type = e->GetAttribute<Rml::String>("type", "text");
+		if (type == "checkbox") {
+			bool on = !value.empty() && !SameValue(value, "0");
+			if (on != e->HasAttribute("checked")) {
+				if (on)
+					e->SetAttribute("checked", true);
+				else
+					e->RemoveAttribute("checked");
+			}
+			return;
+		}
+		if (type == "radio") {
+			bool on = SameValue(value, e->GetAttribute<Rml::String>("value", ""));
+			if (on != e->HasAttribute("checked")) {
+				if (on)
+					e->SetAttribute("checked", true);
+				else
+					e->RemoveAttribute("checked");
+			}
+			return;
+		}
+	}
+	// a field being typed in is the player's, not the cvar's
+	if (e == g->context->GetFocusElement())
+		return;
+	if (Rml::ElementFormControl* fc = AsControl(e))
+		if (!SameValue(fc->GetValue(), value))
+			fc->SetValue(value);
+}
+
+void CvarWriter::ProcessEvent(Rml::Event& event)
+{
+	Rml::Element* e = event.GetTargetElement();
+	while (e && !e->HasAttribute("data-cvar"))
+		e = e->GetParentNode();
+	Document* d = DocumentOf(e);
+	if (!e || !d || d->server)
+		return;
+	Rml::String value;
+	const Rml::String type = e->GetAttribute<Rml::String>("type", "text");
+	if (e->GetTagName() == "input" && type == "checkbox") {
+		value = e->HasAttribute("checked") ? "1" : "0";
+	} else if (e->GetTagName() == "input" && type == "radio") {
+		if (!e->HasAttribute("checked"))
+			return;
+		value = e->GetAttribute<Rml::String>("value", "");
+	} else if (Rml::ElementFormControl* fc = AsControl(e)) {
+		value = fc->GetValue();
+	} else {
+		return;
+	}
+	Rml::String name = e->GetAttribute<Rml::String>("data-cvar", "");
+	if (SameValue(UIE_CvarString(name.c_str()), value))
+		return;
+	UIE_CvarSet(name.c_str(), value.c_str());
+	g->bound[e] = UIE_CvarString(name.c_str());
+}
+
 void PrepareDocument(Document& d)
 {
 	Rml::ElementList list;
-	d.doc->QuerySelectorAll(list, "[data-cmd]");
+	d.doc->QuerySelectorAll(list, "[data-cmd], [data-close], [data-reply]");
 	for (Rml::Element* e : list)
-		e->AddEventListener("click", &g->commands);
+		e->AddEventListener("click", &g->actions);
+	if (!d.server) {
+		list.clear();
+		d.doc->QuerySelectorAll(list, "input[data-cvar], select[data-cvar], textarea[data-cvar]");
+		for (Rml::Element* e : list)
+			e->AddEventListener("change", &g->writer);
+	}
 	for (const auto& c : d.classes)
 		if (Rml::Element* body = d.doc)
 			body->SetClass(c.first, c.second);
 }
 
-// shows the cvar named in data-cvar as the element's text; checked a few
-// times a second, not every frame
+// Elements that show a cvar (data-cvar): a plain element shows its value as
+// text, a form control shows it and writes changes back (CvarWriter).
+// Checked a few times a second, not every frame. Pages from a server are not
+// bound at all: they must not read the player's settings.
 void UpdateBindings()
 {
 	double now = UIE_Time();
@@ -384,7 +599,7 @@ void UpdateBindings()
 		return;
 	g->next_binding = now + 0.25;
 	for (auto& kv : g->documents) {
-		if (!kv.second.shown)
+		if (!kv.second.shown || kv.second.server)
 			continue;
 		Rml::ElementList list;
 		kv.second.doc->QuerySelectorAll(list, "[data-cvar]");
@@ -394,6 +609,11 @@ void UpdateBindings()
 			if (it != g->bound.end() && it->second == value)
 				continue;
 			g->bound[e] = value;
+			const Rml::String& tag = e->GetTagName();
+			if (tag == "input" || tag == "select" || tag == "textarea") {
+				SyncControl(e, value);
+				continue;
+			}
 			Rml::String escaped;
 			for (char c : value) {
 				switch (c) {
@@ -406,6 +626,31 @@ void UpdateBindings()
 			e->SetInnerRML(escaped);
 		}
 	}
+}
+
+// takes a document away for good (pages from a server are made again on the
+// next show)
+void CloseDocument(const std::string& name)
+{
+	auto it = g->documents.find(name);
+	if (it == g->documents.end())
+		return;
+	Document& d = it->second;
+	if (!d.doc || !d.server) {
+		if (d.doc && d.shown) {
+			d.doc->Hide();
+			d.shown = false;
+		}
+	} else {
+		if (g->scroll_target && g->scroll_target->GetOwnerDocument() == d.doc)
+			EndScroll();
+		for (auto b = g->bound.begin(); b != g->bound.end();)
+			b = b->first->GetOwnerDocument() == d.doc ? g->bound.erase(b) : std::next(b);
+		g->context->UnloadDocument(d.doc);
+		g->documents.erase(it);
+	}
+	g->pressed = false;
+	g->scrolling = false;
 }
 
 void LoadFontIfPresent(const char* path, bool fallback)
@@ -490,6 +735,9 @@ int UIRml_Show(const char* name)
 {
 	if (!g)
 		return 0;
+	// only UIRml_ShowServer makes pages from a server, with their limits
+	if (IsServerName(name) || strstr(name, ".."))
+		return 0;
 	Document& d = g->documents[name];
 	if (!d.doc) {
 		d.doc = g->context->LoadDocument(DocumentPath(name));
@@ -513,23 +761,84 @@ void UIRml_Hide(const char* name)
 	auto it = g->documents.find(name);
 	if (it == g->documents.end() || !it->second.shown)
 		return;
-	it->second.doc->Hide();
-	it->second.shown = false;
-	g->pressed = false;
-	g->scrolling = false;
+	CloseDocument(name);
 }
 
 void UIRml_HideAll(void)
 {
 	if (!g)
 		return;
+	std::vector<std::string> names;
 	for (auto& kv : g->documents)
-		if (kv.second.shown) {
-			kv.second.doc->Hide();
-			kv.second.shown = false;
-		}
+		if (kv.second.shown)
+			names.push_back(kv.first);
+	for (const std::string& n : names)
+		CloseDocument(n);
 	g->pressed = false;
 	g->scrolling = false;
+}
+
+// A page a server sent. It is the one kind of document that is not ours, so
+// it is held to limits and loses abilities (see the listeners above): at most
+// one at a time, a file of at most 256 KB, at most 2000 elements, a path in
+// ui/ with a folder of its own, no cvar bindings and no local commands.
+const char* UIRml_ShowServer(const char* path)
+{
+	if (!g)
+		return "the UI is not running";
+	size_t size = 0;
+	unsigned char* probe = UIE_LoadFile(path, &size);
+	if (!probe)
+		return "the page is not in the files the server sent";
+	UIE_Free(probe);
+	if (size > 256 * 1024)
+		return "the page is too large";
+	// one at a time: a new page replaces the one before
+	std::vector<std::string> old;
+	for (auto& kv : g->documents)
+		if (kv.second.server)
+			old.push_back(kv.first);
+	for (const std::string& n : old)
+		CloseDocument(n);
+
+	std::string name = std::string(SERVER_PREFIX) + path;
+	Document& d = g->documents[name];
+	d.server = true;
+	d.path = path;
+	d.doc = g->context->LoadDocument(path);
+	if (!d.doc) {
+		g->documents.erase(name);
+		return "the page did not load";
+	}
+	int count = 0;
+	std::vector<Rml::Element*> todo{d.doc};
+	while (!todo.empty() && count <= 2000) {
+		Rml::Element* e = todo.back();
+		todo.pop_back();
+		count++;
+		for (int i = 0; i < e->GetNumChildren(true); i++)
+			todo.push_back(e->GetChild(i));
+	}
+	if (count > 2000) {
+		g->context->UnloadDocument(d.doc);
+		g->documents.erase(name);
+		return "the page has too many elements";
+	}
+	PrepareDocument(d);
+	d.doc->Show();
+	d.shown = true;
+	d.shown_at = UIE_Time();
+	return nullptr;
+}
+
+int UIRml_ServerShown(void)
+{
+	if (!g)
+		return 0;
+	for (auto& kv : g->documents)
+		if (kv.second.server && kv.second.shown)
+			return 1;
+	return 0;
 }
 
 int UIRml_IsShown(const char* name)
@@ -562,6 +871,12 @@ void UIRml_Reload(void)
 	Rml::Factory::ClearStyleSheetCache();
 	Rml::Factory::ClearTemplateCache();
 	Rml::ReleaseTextures();
+	std::vector<std::string> servers;
+	for (auto& kv : g->documents)
+		if (kv.second.server)
+			servers.push_back(kv.first);
+	for (const std::string& n : servers)
+		CloseDocument(n);
 	for (auto& kv : g->documents) {
 		Document& d = kv.second;
 		if (d.doc)
@@ -621,7 +936,7 @@ void UIRml_MouseMove(float x, float y)
 			if (d.x * d.x + d.y * d.y > slop * slop) {
 				// a list that is still moving from the last flick keeps being the one dragged
 				if (!(g->swallow && g->scroll_target))
-					g->scroll_target = FindScrollable(g->context->GetHoverElement());
+					g->scroll_target = OnDragControl(g->context->GetHoverElement()) ? nullptr : FindScrollable(g->context->GetHoverElement());
 				if (g->scroll_target) {
 					if (!g->swallow)
 						g->pos = Rml::Vector2f(g->scroll_target->GetScrollLeft(), g->scroll_target->GetScrollTop());
@@ -796,6 +1111,19 @@ void UIRml_Frame(void)
 	double now = UIE_Time();
 	double dt = now - g->last_frame_time;
 	g->last_frame_time = now;
+	// closing from inside a click would pull the document from under its own event
+	std::vector<std::string> closing;
+	closing.swap(g->pending_close);
+	for (const std::string& n : closing)
+		CloseDocument(n);
+	// a page from a server does not stay up for ever
+	double limit = atof(UIE_CvarString("cl_server_page_timeout"));
+	if (limit > 0)
+		for (auto& kv : g->documents)
+			if (kv.second.server && kv.second.shown && now - kv.second.shown_at > limit) {
+				CloseDocument(kv.first);
+				break;
+			}
 	// The fling after a drag: keep scrolling and slow down by friction. Past
 	// an end a spring pulls the content back instead, without overshooting.
 	if (g->scroll_target && !g->pressed) {
