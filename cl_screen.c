@@ -715,7 +715,11 @@ static void SCR_SetUpToDrawConsole (void)
 		framecounter = 0;
 #endif
 
-	if (scr_conforcewhiledisconnected.integer && key_dest == key_game && cls.signon != SIGNONS)
+	// Insanotic: only while really disconnected; connecting, downloading
+	// and loading show the loading screen (the forced console covered it,
+	// e.g. on a phone, where joining closes the menu)
+	if (scr_conforcewhiledisconnected.integer && key_dest == key_game && cls.signon != SIGNONS
+		&& cls.state != ca_connected && !cls.connect_trying)
 		key_consoleactive |= KEY_CONSOLEACTIVE_FORCED;
 	else
 		key_consoleactive &= ~KEY_CONSOLEACTIVE_FORCED;
@@ -2586,6 +2590,36 @@ static const char *SCR_LoadingMapName(void)
 
 // stage (what the player is waiting for), detail (file being loaded) and
 // the fraction of the whole load
+// download speed as "450 KB/s" / "1.2 MB/s"
+static void SCR_FormatRate(char *out, size_t outsize, double bytes_per_second)
+{
+	if (bytes_per_second <= 0)
+		strlcpy(out, "", outsize);
+	else if (bytes_per_second >= 1048576)
+		dpsnprintf(out, outsize, "%.1f MB/s", bytes_per_second / 1048576.0);
+	else
+		dpsnprintf(out, outsize, "%.0f KB/s", bytes_per_second / 1024.0);
+}
+
+// when the current batch of HTTP downloads started (0: none running)
+static double scr_download_batch_start;
+
+// time left as "0:42 left" / "12:05 left" ("" when unknown)
+static void SCR_FormatTimeLeft(char *out, size_t outsize, double seconds)
+{
+	int t;
+	if (seconds < 0 || seconds > 99 * 3600)
+	{
+		strlcpy(out, "", outsize);
+		return;
+	}
+	t = (int)(seconds + 0.5);
+	if (t >= 3600)
+		dpsnprintf(out, outsize, "%i:%02i:%02i left", t / 3600, (t / 60) % 60, t % 60);
+	else
+		dpsnprintf(out, outsize, "%i:%02i left", t / 60, t % 60);
+}
+
 static float SCR_LoadingStage(char *stage, size_t stagesize, char *detail, size_t detailsize)
 {
 	loadingscreenstack_t *s = loadingscreenstack;
@@ -2608,32 +2642,54 @@ static float SCR_LoadingStage(char *stage, size_t stagesize, char *detail, size_
 		// and HTTP downloads through libcurl
 		if (cls.qw_downloadname[0])
 		{
+			// the game connection's own download: one file at a time
 			const char *slash = strrchr(cls.qw_downloadname, '/');
+			char rate[32], left[32];
+			int have = cls.qw_downloadmemorycursize, total = cls.qw_downloadmemorymaxsize;
+			SCR_FormatRate(rate, sizeof(rate), cls.qw_downloadspeedrate);
+			SCR_FormatTimeLeft(left, sizeof(left), total > have && cls.qw_downloadspeedrate > 0 ? (total - have) / (double)cls.qw_downloadspeedrate : -1);
 			strlcpy(stage, "Downloading", stagesize);
-			dpsnprintf(detail, detailsize, "%s  %i%%", slash ? slash + 1 : cls.qw_downloadname, cls.qw_downloadpercent);
-			return 0.02f + 0.18f * bound(0, cls.qw_downloadpercent, 100) / 100.0f;
+			if (total > 0)
+				dpsnprintf(detail, detailsize, "%s   %.1f / %.1f MB   %s   %s", slash ? slash + 1 : cls.qw_downloadname,
+					have / 1048576.0, total / 1048576.0, rate, left);
+			else
+				dpsnprintf(detail, detailsize, "%s   %s", slash ? slash + 1 : cls.qw_downloadname, rate);
+			// downloads fill 20 % to 40 % of the bar (it never moves back,
+			// and connecting already reached 20 %)
+			return 0.20f + 0.20f * bound(0, cls.qw_downloadpercent, 100) / 100.0f;
 		}
+		if (!Curl_Running())
+			scr_download_batch_start = 0;
 		if (Curl_Running())
 		{
-			int n = 0;
+			// HTTP downloads, several at once (cl_curl_maxdownloads): the
+			// whole batch as one progress, the speed of all together and the
+			// time left from how fast the batch has moved so far
+			int n = 0, i, done_or_running = 0;
+			double sum = 0, speed = 0, f, elapsed;
+			char rate[32], left[32];
 			Curl_downloadinfo_t *info = Curl_GetDownloadInfo(&n, NULL, NULL, 0);
+			if (!scr_download_batch_start)
+				scr_download_batch_start = realtime;
 			strlcpy(stage, "Downloading", stagesize);
-			if (info)
+			for (i = 0; info && i < n; i++)
 			{
-				int i;
-				for (i = 0; i < n; i++)
-					if (!info[i].queued)
-					{
-						const char *slash = strrchr(info[i].filename, '/');
-						if (info[i].progress > 0)
-							dpsnprintf(detail, detailsize, "%s  %i%%", slash ? slash + 1 : info[i].filename, (int)(100 * info[i].progress));
-						else
-							strlcpy(detail, slash ? slash + 1 : info[i].filename, detailsize);
-						break;
-					}
-				Z_Free(info);
+				if (!info[i].queued)
+				{
+					done_or_running++;
+					sum += bound(0, info[i].progress, 1);
+					speed += info[i].speed;
+				}
 			}
-			return 0.02f;
+			f = n > 0 ? sum / n : 0;
+			elapsed = realtime - scr_download_batch_start;
+			SCR_FormatRate(rate, sizeof(rate), speed);
+			SCR_FormatTimeLeft(left, sizeof(left), f > 0.01 && elapsed > 1 ? elapsed * (1 - f) / f : -1);
+			dpsnprintf(detail, detailsize, "%i file%s   %i%%   %s   %s", n, n == 1 ? "" : "s", (int)(100 * f), rate, left);
+			if (info)
+				Z_Free(info);
+			(void)done_or_running;
+			return 0.20f + 0.20f * (float)f;
 		}
 		switch (cls.signon)
 		{
@@ -3082,7 +3138,7 @@ void CL_UpdateScreen(void)
 	// Insanotic: while connecting or joining (between the server's and the
 	// client's loading phases, and during the network handshake) keep the
 	// loading screen up instead of drawing the empty world, which was black
-	if (((cls.state == ca_connected && cls.signon < SIGNONS) || cls.connect_trying) && !key_consoleactive && !cls.demoplayback)
+	if (((cls.state == ca_connected && cls.signon < SIGNONS) || cls.connect_trying) && !(key_consoleactive & KEY_CONSOLEACTIVE_USER) && !cls.demoplayback)
 	{
 		SCR_UpdateLoadingScreen(loadingscreendone ? loadingscreencleared : false, false);
 		return;
