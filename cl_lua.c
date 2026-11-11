@@ -32,6 +32,7 @@ is the team, and the CSQC's own "teamplay" global says whether it is one.
 cvar_t cl_lua = {CVAR_SAVE, "cl_lua", "1", "load client Lua mods from mods/<name>/init.lua"};
 cvar_t cl_lua_instruction_limit = {0, "cl_lua_instruction_limit", "500000", "Lua VM instructions one client mod may execute per entry (loading, or one hook call) before it is killed and disabled"};
 cvar_t cl_lua_memory_limit = {0, "cl_lua_memory_limit", "32", "memory in MB one client mod may allocate before it is killed and disabled"};
+cvar_t cl_lua_disabled = {CVAR_SAVE, "cl_lua_disabled", "", "space separated list of client mod folder names not to load (mods/<name>)"};
 cvar_t cl_lua_touch_mouse = {0, "cl_lua_touch_mouse", "0", "development aid: the left mouse button acts as a finger on the touchscreen while a mod captures touch input"};
 
 qboolean cl_lua_touch_captured;
@@ -106,6 +107,23 @@ static qboolean CL_Lua_InGame(void)
 //============================================================================
 // loading
 
+// is name listed in cl_lua_disabled?
+static qboolean CL_Lua_IsDisabled(const char *name)
+{
+	const char *p = cl_lua_disabled.string;
+	size_t len = strlen(name);
+	while (*p)
+	{
+		while (*p && ISWHITESPACE(*p))
+			p++;
+		if (!strncmp(p, name, len) && (p[len] == 0 || ISWHITESPACE(p[len])))
+			return true;
+		while (*p && !ISWHITESPACE(*p))
+			p++;
+	}
+	return false;
+}
+
 static float CL_Lua_ManifestOrder(const char *dir)
 {
 	char path[MAX_QPATH];
@@ -148,6 +166,11 @@ static void CL_Lua_LoadAll(void)
 			strlcpy(dir, path, sizeof(dir));
 			if (strlen(dir) > 9)
 				dir[strlen(dir) - 9] = 0; // strip "/init.lua"
+			if (CL_Lua_IsDisabled(dir + 5)) // after "mods/"
+			{
+				Con_Printf("[lua] mod %s is disabled (cl_lua_disabled)\n", dir + 5);
+				continue;
+			}
 			order = CL_Lua_ManifestOrder(dir);
 			// insertion sort by (order, path)
 			for (j = n; j > 0 && (orders[j - 1] > order || (orders[j - 1] == order && strcmp(paths[j - 1], path) > 0)); j--)
@@ -1027,6 +1050,7 @@ void CL_Lua_Init(void)
 	Cvar_RegisterVariable(&cl_lua_instruction_limit);
 	Cvar_RegisterVariable(&cl_lua_memory_limit);
 	Cvar_RegisterVariable(&cl_lua_touch_mouse);
+	Cvar_RegisterVariable(&cl_lua_disabled);
 	Cmd_AddCommand("lua_mods", CL_Lua_Mods_f, "list client Lua mods and their status");
 	Cmd_AddCommand("lua_reload", CL_Lua_Reload_f, "reload every client Lua mod");
 }
