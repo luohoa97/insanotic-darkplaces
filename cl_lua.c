@@ -424,10 +424,266 @@ static int LuaCl_players(lua_State *L)
 	return 1;
 }
 
+//============================================================================
+// weapons, ammo and projectiles from the loaded CSQC
+//
+// Same binding as Xonotic Touch's touch_hud.c: Xonotic numbers its weapons
+// and stats registries per build, so ids are read from whatever CSQC is
+// loaded: STAT_WEAPONS.m_id, the weapon list from Weapons_first along
+// .enemy, the held weapon from viewmodels[0].activeweapon/switchweapon.
+
+#define CL_LUA_MAXWEAPONS 72
+typedef struct cl_lua_weapon_s
+{
+	char name[32];
+	int id;
+	int ammo_stat; // -1: no ammo needed
+} cl_lua_weapon_t;
+
+static struct
+{
+	double bound_starttime;
+	qboolean bound;
+	cl_lua_weapon_t weapons[CL_LUA_MAXWEAPONS];
+	int numweapons;
+	int stat_weapons;
+	int viewmodels_ofs;
+	int f_id, f_activeweapon, f_switchweapon, f_draw;
+	int f_id_type;
+	int fn_projectile_draw;
+} cl_lua_csqc;
+
+static int CL_Lua_FieldOfs(prvm_prog_t *prog, const char *name, int *type)
+{
+	ddef_t *d = PRVM_ED_FindField(prog, name);
+	if (type)
+		*type = d ? (d->type & ~DEF_SAVEGLOBAL) : ev_void;
+	return d ? (int)d->ofs : -1;
+}
+
+static int CL_Lua_FieldInt(prvm_prog_t *prog, prvm_edict_t *ed, int ofs, int type)
+{
+	if (ofs < 0)
+		return 0;
+	return type == ev_float ? (int)PRVM_EDICTFIELDFLOAT(ed, ofs) : PRVM_EDICTFIELDVALUE(ed, ofs)->_int;
+}
+
+static prvm_edict_t *CL_Lua_EdictOrNull(prvm_prog_t *prog, int n)
+{
+	if (n <= 0 || n >= prog->num_edicts)
+		return NULL;
+	return PRVM_EDICT_NUM(n);
+}
+
+static prvm_edict_t *CL_Lua_GlobalEdict(prvm_prog_t *prog, const char *name)
+{
+	ddef_t *g = PRVM_ED_FindGlobal(prog, name);
+	if (!g || (g->type & ~DEF_SAVEGLOBAL) != ev_entity)
+		return NULL;
+	return CL_Lua_EdictOrNull(prog, PRVM_GLOBALFIELDEDICT(g->ofs));
+}
+
+static qboolean CL_Lua_BindCSQC(void)
+{
+	prvm_prog_t *prog = CLVM_prog;
+	prvm_edict_t *ed;
+	ddef_t *g;
+	mfunction_t *fn;
+	int f_impulse, f_next, f_name, f_ammo, f_nametype, guard, stat_fuel = -1, stat_plasma = -1, res_none = 0, type;
+	if (!prog->loaded)
+	{
+		cl_lua_csqc.bound = false;
+		return false;
+	}
+	if (cl_lua_csqc.bound && cl_lua_csqc.bound_starttime == prog->starttime)
+		return true;
+	memset(&cl_lua_csqc, 0, sizeof(cl_lua_csqc));
+	cl_lua_csqc.bound = true;
+	cl_lua_csqc.bound_starttime = prog->starttime;
+	cl_lua_csqc.stat_weapons = -1;
+	cl_lua_csqc.viewmodels_ofs = -1;
+	cl_lua_csqc.f_id = CL_Lua_FieldOfs(prog, "m_id", &cl_lua_csqc.f_id_type);
+	cl_lua_csqc.f_activeweapon = CL_Lua_FieldOfs(prog, "activeweapon", NULL);
+	cl_lua_csqc.f_switchweapon = CL_Lua_FieldOfs(prog, "switchweapon", NULL);
+	cl_lua_csqc.f_draw = CL_Lua_FieldOfs(prog, "draw", NULL);
+	fn = PRVM_ED_FindFunction(prog, "Projectile_Draw");
+	cl_lua_csqc.fn_projectile_draw = fn ? (int)(fn - prog->functions) : -1;
+	f_impulse = CL_Lua_FieldOfs(prog, "impulse", NULL);
+	f_next = CL_Lua_FieldOfs(prog, "enemy", NULL);
+	f_name = CL_Lua_FieldOfs(prog, "netname", &f_nametype);
+	f_ammo = CL_Lua_FieldOfs(prog, "ammo_type", NULL);
+	if (cl_lua_csqc.f_id < 0 || f_next < 0 || f_name < 0)
+		return true;
+	if ((ed = CL_Lua_GlobalEdict(prog, "STAT_WEAPONS")))
+	{
+		cl_lua_csqc.stat_weapons = CL_Lua_FieldInt(prog, ed, cl_lua_csqc.f_id, cl_lua_csqc.f_id_type);
+		if (cl_lua_csqc.stat_weapons < 0 || cl_lua_csqc.stat_weapons + 2 >= MAX_CL_STATS)
+			cl_lua_csqc.stat_weapons = -1;
+	}
+	if ((ed = CL_Lua_GlobalEdict(prog, "STAT_FUEL")))
+		stat_fuel = CL_Lua_FieldInt(prog, ed, cl_lua_csqc.f_id, cl_lua_csqc.f_id_type);
+	if ((ed = CL_Lua_GlobalEdict(prog, "STAT_PLASMA")))
+		stat_plasma = CL_Lua_FieldInt(prog, ed, cl_lua_csqc.f_id, cl_lua_csqc.f_id_type);
+	if ((ed = CL_Lua_GlobalEdict(prog, "RES_NONE")))
+		res_none = PRVM_NUM_FOR_EDICT(ed);
+	g = PRVM_ED_FindGlobal(prog, "viewmodels");
+	if (g && (g->type & ~DEF_SAVEGLOBAL) == ev_entity)
+		cl_lua_csqc.viewmodels_ofs = g->ofs;
+	(void)f_impulse;
+	for (ed = CL_Lua_GlobalEdict(prog, "Weapons_first"), guard = 0; ed && guard < 256 && cl_lua_csqc.numweapons < CL_LUA_MAXWEAPONS; guard++)
+	{
+		int id = CL_Lua_FieldInt(prog, ed, cl_lua_csqc.f_id, cl_lua_csqc.f_id_type);
+		if (id > 0)
+		{
+			cl_lua_weapon_t *w = &cl_lua_csqc.weapons[cl_lua_csqc.numweapons++];
+			w->id = id;
+			strlcpy(w->name, PRVM_GetString(prog, PRVM_EDICTFIELDSTRING(ed, f_name)), sizeof(w->name));
+			w->ammo_stat = -1;
+			if (f_ammo >= 0)
+			{
+				int res = PRVM_EDICTFIELDEDICT(ed, f_ammo);
+				prvm_edict_t *re = res != res_none ? CL_Lua_EdictOrNull(prog, res) : NULL;
+				if (re)
+				{
+					const char *kind = PRVM_GetString(prog, PRVM_EDICTFIELDSTRING(re, f_name));
+					if (!strcmp(kind, "shells")) w->ammo_stat = STAT_SHELLS;
+					else if (!strcmp(kind, "bullets")) w->ammo_stat = STAT_NAILS;
+					else if (!strcmp(kind, "rockets")) w->ammo_stat = STAT_ROCKETS;
+					else if (!strcmp(kind, "cells")) w->ammo_stat = STAT_CELLS;
+					else if (!strcmp(kind, "fuel")) w->ammo_stat = stat_fuel;
+					else if (!strcmp(kind, "plasma")) w->ammo_stat = stat_plasma;
+					if (w->ammo_stat >= MAX_CL_STATS)
+						w->ammo_stat = -1;
+				}
+			}
+		}
+		ed = CL_Lua_EdictOrNull(prog, PRVM_EDICTFIELDEDICT(ed, f_next));
+	}
+	(void)type;
+	return true;
+}
+
+static qboolean CL_Lua_WeaponOwned(const cl_lua_weapon_t *w)
+{
+	int bit = w->id - 1, s = cl_lua_csqc.stat_weapons;
+	if (s < 0 || bit < 0)
+		return false;
+	if (bit < 24)
+		return (cl.stats[s] & (1 << bit)) != 0;
+	if (bit < 48)
+		return (cl.stats[s + 1] & (1 << (bit - 24))) != 0;
+	return (cl.stats[s + 2] & (1 << (bit - 48))) != 0;
+}
+
+// id of the weapon in hand (or being switched to), 0 when unknown
+static int CL_Lua_HeldWeaponId(qboolean switching)
+{
+	prvm_prog_t *prog = CLVM_prog;
+	prvm_edict_t *ve, *we;
+	int f;
+	if (!CL_Lua_BindCSQC() || cl_lua_csqc.viewmodels_ofs < 0)
+		return 0;
+	ve = CL_Lua_EdictOrNull(prog, PRVM_GLOBALFIELDEDICT(cl_lua_csqc.viewmodels_ofs));
+	f = switching ? cl_lua_csqc.f_switchweapon : cl_lua_csqc.f_activeweapon;
+	if (!ve || f < 0)
+		return 0;
+	we = CL_Lua_EdictOrNull(prog, PRVM_EDICTFIELDEDICT(ve, f));
+	return we ? CL_Lua_FieldInt(prog, we, cl_lua_csqc.f_id, cl_lua_csqc.f_id_type) : 0;
+}
+
+// xon.weapons(): every weapon of the game with name, impulse (selects it),
+// owned, ammo (nil when it needs none), held, switching_to
+static int LuaCl_weapons(lua_State *L)
+{
+	int i, n = 0, held, target;
+	lua_newtable(L);
+	if (cls.state != ca_connected || !CL_Lua_BindCSQC())
+		return 1;
+	held = CL_Lua_HeldWeaponId(false);
+	target = CL_Lua_HeldWeaponId(true);
+	for (i = 0; i < cl_lua_csqc.numweapons; i++)
+	{
+		cl_lua_weapon_t *w = &cl_lua_csqc.weapons[i];
+		lua_createtable(L, 0, 7);
+		lua_pushstring(L, w->name); lua_setfield(L, -2, "name");
+		lua_pushinteger(L, w->id); lua_setfield(L, -2, "id");
+		lua_pushinteger(L, 230 + w->id - 1); lua_setfield(L, -2, "impulse");
+		lua_pushboolean(L, CL_Lua_WeaponOwned(w)); lua_setfield(L, -2, "owned");
+		if (w->ammo_stat >= 0)
+		{
+			lua_pushinteger(L, cl.stats[w->ammo_stat]);
+			lua_setfield(L, -2, "ammo");
+		}
+		lua_pushboolean(L, w->id == held); lua_setfield(L, -2, "held");
+		lua_pushboolean(L, w->id == target && target != held); lua_setfield(L, -2, "switching_to");
+		lua_rawseti(L, -2, ++n);
+	}
+	return 1;
+}
+
+// xon.held_weapon(): name of the weapon in hand, or nil
+static int LuaCl_held_weapon(lua_State *L)
+{
+	int i, id;
+	if (cls.state != ca_connected || !CL_Lua_BindCSQC())
+		return 0;
+	id = CL_Lua_HeldWeaponId(false);
+	for (i = 0; i < cl_lua_csqc.numweapons; i++)
+		if (cl_lua_csqc.weapons[i].id == id)
+		{
+			lua_pushstring(L, cl_lua_csqc.weapons[i].name);
+			return 1;
+		}
+	return 0;
+}
+
+// xon.stats(): your health, armor and ammo reserves
+static int LuaCl_stats(lua_State *L)
+{
+	lua_createtable(L, 0, 6);
+	lua_pushinteger(L, cl.stats[STAT_HEALTH]); lua_setfield(L, -2, "health");
+	lua_pushinteger(L, cl.stats[STAT_ARMOR]); lua_setfield(L, -2, "armor");
+	lua_pushinteger(L, cl.stats[STAT_SHELLS]); lua_setfield(L, -2, "shells");
+	lua_pushinteger(L, cl.stats[STAT_NAILS]); lua_setfield(L, -2, "bullets");
+	lua_pushinteger(L, cl.stats[STAT_ROCKETS]); lua_setfield(L, -2, "rockets");
+	lua_pushinteger(L, cl.stats[STAT_CELLS]); lua_setfield(L, -2, "cells");
+	return 1;
+}
+
+// xon.projectiles(): projectiles in flight (Xonotic's CSQC projectiles):
+// num, kind (the PROJECTILE_* number), origin, velocity
+static int LuaCl_projectiles(lua_State *L)
+{
+	prvm_prog_t *prog = CLVM_prog;
+	int i, n = 0, f_cnt, cnt_type;
+	lua_newtable(L);
+	if (cls.state != ca_connected || !CL_Lua_BindCSQC() || cl_lua_csqc.f_draw < 0 || cl_lua_csqc.fn_projectile_draw < 0)
+		return 1;
+	f_cnt = CL_Lua_FieldOfs(prog, "cnt", &cnt_type);
+	for (i = 1; i < prog->num_edicts; i++)
+	{
+		prvm_edict_t *ed = PRVM_EDICT_NUM(i);
+		if (ed->priv.required->free || PRVM_EDICTFIELDFUNCTION(ed, cl_lua_csqc.f_draw) != cl_lua_csqc.fn_projectile_draw)
+			continue;
+		lua_createtable(L, 0, 4);
+		lua_pushinteger(L, i); lua_setfield(L, -2, "num");
+		lua_pushinteger(L, CL_Lua_FieldInt(prog, ed, f_cnt, cnt_type)); lua_setfield(L, -2, "kind");
+		LuaSandbox_PushVec(L, PRVM_clientedictvector(ed, origin)); lua_setfield(L, -2, "origin");
+		LuaSandbox_PushVec(L, PRVM_clientedictvector(ed, velocity)); lua_setfield(L, -2, "velocity");
+		lua_rawseti(L, -2, ++n);
+	}
+	return 1;
+}
+
+// xon.me(): your entity number and team colour (scoreboard pants colour)
 static int LuaCl_me(lua_State *L)
 {
 	lua_pushinteger(L, cl.playerentity);
-	return 1;
+	if (cl.scores && cl.playerentity >= 1 && cl.playerentity <= cl.maxclients)
+		lua_pushinteger(L, cl.scores[cl.playerentity - 1].colors & 15);
+	else
+		lua_pushnil(L);
+	return 2;
 }
 
 static int LuaCl_touches(lua_State *L)
@@ -639,6 +895,10 @@ static const luaL_Reg cl_luaxon_funcs[] =
 	{"teamplay", LuaCl_teamplay},
 	{"players", LuaCl_players},
 	{"me", LuaCl_me},
+	{"weapons", LuaCl_weapons},
+	{"held_weapon", LuaCl_held_weapon},
+	{"stats", LuaCl_stats},
+	{"projectiles", LuaCl_projectiles},
 	{"touches", LuaCl_touches},
 	{"touch_capture", LuaCl_touch_capture},
 	{"touchscreen", LuaCl_touchscreen},
