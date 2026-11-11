@@ -750,14 +750,14 @@ int CDAudio_Startup (void)
 
 	if (CDAudio_GetAudioDiskInfo())
 	{
-		Con_Print("CDAudio_Init: No CD in player.\n");
+		Con_DPrint("Music: no CD drive, playing music files only.\n");
 		cdValid = false;
 	}
 
 	saved_vol = CDAudio_SysGetVolume ();
 	if (saved_vol < 0.0f)
 	{
-		Con_Print ("Can't get initial CD volume\n");
+		Con_DPrint ("Music: no CD volume control.\n");
 		saved_vol = 1.0f;
 	}
 	else
@@ -765,7 +765,7 @@ int CDAudio_Startup (void)
 
 	initialized = true;
 
-	Con_Print("CD Audio Initialized\n");
+	Con_DPrint("Music initialized\n");
 
 	return 0;
 }

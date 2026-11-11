@@ -298,6 +298,7 @@ void Host_SaveConfig_f(void);
 void Host_LoadConfig_f(void);
 extern cvar_t sv_writepicture_quality;
 extern cvar_t r_texture_jpeg_fastpicmip;
+extern cvar_t insanotic_version;
 static void Host_InitLocal (void)
 {
 	Cmd_AddCommand("saveconfig", Host_SaveConfig_f, "save settings to config.cfg (or a specified filename) immediately (also automatic when quitting)");
@@ -305,6 +306,7 @@ static void Host_InitLocal (void)
 
 	Cvar_RegisterVariable (&cl_maxphysicsframesperserverframe);
 	Cvar_RegisterVariable (&host_framerate);
+	Cvar_RegisterVariable (&insanotic_version);
 	Cvar_RegisterVariable (&host_speeds);
 	Cvar_RegisterVariable (&host_maxwait);
 	Cvar_RegisterVariable (&cl_minfps);
@@ -1190,6 +1192,18 @@ static void Host_StartVideo_Inner(void)
 
 char engineversion[128];
 
+// Insanotic: its own version, next to the Xonotic one (g_xonoticversion) in
+// the menu. The build passes INSANOTIC_VERSION (git describe, or the release
+// or nightly name); a plain engine build is "dev".
+#define INSANOTIC_STRINGIFY2(arg) #arg
+#define INSANOTIC_STRINGIFY(arg) INSANOTIC_STRINGIFY2(arg)
+#ifdef INSANOTIC_VERSION
+#define INSANOTIC_VERSION_STRING INSANOTIC_STRINGIFY(INSANOTIC_VERSION)
+#else
+#define INSANOTIC_VERSION_STRING "dev"
+#endif
+cvar_t insanotic_version = {CVAR_READONLY, "insanotic_version", INSANOTIC_VERSION_STRING, "Insanotic version of this build"};
+
 qboolean sys_nostdout = false;
 
 extern qboolean host_stuffcmdsrun;
@@ -1361,6 +1375,7 @@ static void Host_Init (void)
 	os = DP_OS_NAME;
 	dpsnprintf (engineversion, sizeof (engineversion), "%s %s %s", gamename, os, buildstring);
 	Con_Printf("%s\n", engineversion);
+	Con_Printf("Insanotic %s\n", insanotic_version.string);
 
 	// initialize process nice level
 	Sys_InitProcessNice();
