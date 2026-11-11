@@ -7300,6 +7300,13 @@ void R_RenderScene(int fbo, rtexture_t *depthtexture, rtexture_t *colortexture)
 		R_Shadow_DrawPrepass();
 
 	// now we begin the forward pass of the view render
+	// Insanotic: no depth prepass on GLES. Phone GPUs sort by depth on the
+	// chip anyway (a prepass only costs), and without "invariant" in the
+	// shaders the depth-only pass and the colour pass can compute slightly
+	// different depths, so the colour pass fails its depth test (a black
+	// world)
+	if (vid.renderpath == RENDERPATH_GLES2 && r_depthfirst.integer)
+		Cvar_SetValueQuick(&r_depthfirst, 0);
 	if (r_depthfirst.integer >= 1 && cl.csqc_vidvars.drawworld && r_refdef.scene.worldmodel && r_refdef.scene.worldmodel->DrawDepth)
 	{
 		r_refdef.scene.worldmodel->DrawDepth(r_refdef.scene.worldentity);
