@@ -81,7 +81,38 @@ OBJ_NOCD=cd_null.o
 ###### Common objects and flags #####
 
 # Common objects
+# Lua 5.4 (vendored in lua/, sandboxed subset only: see lua/LICENSE)
+OBJ_LUA= \
+	lua_lapi.o \
+	lua_lcode.o \
+	lua_lctype.o \
+	lua_ldebug.o \
+	lua_ldo.o \
+	lua_ldump.o \
+	lua_lfunc.o \
+	lua_lgc.o \
+	lua_llex.o \
+	lua_lmem.o \
+	lua_lobject.o \
+	lua_lopcodes.o \
+	lua_lparser.o \
+	lua_lstate.o \
+	lua_lstring.o \
+	lua_ltable.o \
+	lua_ltm.o \
+	lua_lundump.o \
+	lua_lvm.o \
+	lua_lzio.o \
+	lua_lauxlib.o \
+	lua_lbaselib.o \
+	lua_lcorolib.o \
+	lua_lmathlib.o \
+	lua_lstrlib.o \
+	lua_ltablib.o \
+	lua_lutf8lib.o
+
 OBJ_COMMON= \
+	$(OBJ_LUA) \
 	bih.o \
 	crypto.o \
 	cl_collision.o \
@@ -517,6 +548,12 @@ nexuiz.o: %.o : %.rc
 	$(WINDRES) -o $@ $<
 
 .c.o:
+	$(CHECKLEVEL2)
+	$(DO_CC)
+
+# Lua sources live in lua/; prefix the objects so lua/lutf8lib.c and the
+# engine's utf8lib.c (and any future clash) never collide in the build dir
+lua_%.o: lua/%.c
 	$(CHECKLEVEL2)
 	$(DO_CC)
 
