@@ -21,6 +21,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #include "quakedef.h"
 #include "sv_demo.h"
+#include "sv_lua.h"
 #define DEBUGMOVES 0
 
 static usercmd_t cmd;
@@ -895,6 +896,8 @@ void SV_ReadClientMessage(void)
 				Cmd_ExecuteString (s, src_client, true);
 			else if (strncasecmp(s, "setinfo ", 8) == 0)
 				SV_ClientSetInfo(s + 8);
+			else if (strncasecmp(s, "rml_reply ", 10) == 0 && LuaMods_PageReply(host_client, s))
+				; // a Lua plugin took the answer of a page
 			else if (PRVM_serverfunction(SV_ParseClientCommand))
 			{
 				int restorevm_tempstringsbuf_cursize;

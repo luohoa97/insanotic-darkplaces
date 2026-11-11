@@ -384,6 +384,62 @@ static int LuaEnt_centerprint(lua_State *L)
 	return 0;
 }
 
+
+//============================================================================
+// pages: a plugin shows an RmlUi page in a client and hears back from it
+//
+// show_page sends "rml_show_server <path>" to the client; the client checks
+// the path again and may refuse (cl_allow_server_pages 0). A button in the
+// page answers with "rml_reply <page> <action> [name value]...", which the
+// engine turns into the PageReply hook (see LuaMods_PageReply).
+
+// a path a page may have: ui/<folder>/<name>.rml in the characters of a
+// file name, no ".." and nothing a console line could be split by
+static qboolean LuaMods_PagePathOK(const char *path)
+{
+	size_t n = strlen(path);
+	const char *c;
+	if (n < 8 || n > 120 || strncmp(path, "ui/", 3) || strcmp(path + n - 4, ".rml") || strstr(path, ".."))
+		return false;
+	for (c = path; *c; c++)
+		if (!((*c >= 'a' && *c <= 'z') || (*c >= 'A' && *c <= 'Z') || (*c >= '0' && *c <= '9') || *c == '_' || *c == '-' || *c == '.' || *c == '/'))
+			return false;
+	return true;
+}
+
+static void LuaMods_StuffClient(client_t *c, const char *text)
+{
+	if (c && c->netconnection)
+	{
+		MSG_WriteChar(&c->netconnection->message, svc_stufftext);
+		MSG_WriteString(&c->netconnection->message, text);
+	}
+}
+
+static int LuaEnt_show_page(lua_State *L)
+{
+	luaent_t *e;
+	const char *path;
+	char line[160];
+	LuaMods_CheckLiveEdict(L, 1, NULL);
+	e = (luaent_t *)lua_touserdata(L, 1);
+	path = luaL_checkstring(L, 2);
+	if (!LuaMods_PagePathOK(path))
+		return luaL_error(L, "show_page: the path must be ui/<folder>/<name>.rml, got \"%s\"", path);
+	dpsnprintf(line, sizeof(line), "rml_show_server %s\n", path);
+	LuaMods_StuffClient(LuaMods_Client(e->num), line);
+	return 0;
+}
+
+static int LuaEnt_close_page(lua_State *L)
+{
+	luaent_t *e;
+	LuaMods_CheckLiveEdict(L, 1, NULL);
+	e = (luaent_t *)lua_touserdata(L, 1);
+	LuaMods_StuffClient(LuaMods_Client(e->num), "rml_close_server\n");
+	return 0;
+}
+
 static const luaL_Reg luaent_methods[] =
 {
 	{"valid", LuaEnt_valid},
@@ -393,6 +449,8 @@ static const luaL_Reg luaent_methods[] =
 	{"userinfo", LuaEnt_userinfo},
 	{"sprint", LuaEnt_sprint},
 	{"centerprint", LuaEnt_centerprint},
+	{"show_page", LuaEnt_show_page},
+	{"close_page", LuaEnt_close_page},
 	{NULL, NULL}
 };
 
@@ -863,6 +921,90 @@ static qboolean LuaMods_Dispatch(prvm_prog_t *prog, const char *hook, const char
 		if (vals[k].s)
 			Mem_Free(vals[k].s);
 	return ret;
+}
+
+
+//============================================================================
+// page replies
+
+#define PAGEREPLY_MAXLEN 1024
+#define PAGEREPLY_PERSECOND 20
+#define PAGEREPLY_MAXWORDS 40
+
+// Called for "rml_reply ..." from a client (sv_user.c). Returns true when a
+// plugin listens to PageReply, so the line is not passed to the game code too.
+qboolean LuaMods_PageReply(client_t *c, const char *line)
+{
+	static double window[256];
+	static int count[256];
+	prvm_prog_t *prog = LuaMods_Prog();
+	int slot = (int)(c - svs.clients);
+	char words[PAGEREPLY_MAXWORDS][256];
+	int i, j, argc;
+	qboolean handled = false;
+
+	if (!prog || LuaSandbox_HookCount(&sv_luahost, "PageReply") <= 0)
+		return false;
+	if (slot < 0 || slot >= 256 || strlen(line) > PAGEREPLY_MAXLEN)
+		return true; // too much to be a page; do not hand it on either
+	// a page answers to a click, not to a loop: a client cannot flood a plugin
+	if (realtime - window[slot] >= 1.0)
+	{
+		window[slot] = realtime;
+		count[slot] = 0;
+	}
+	if (++count[slot] > PAGEREPLY_PERSECOND)
+		return true;
+
+	// words, quoted as the client wrote them; the first is "rml_reply"
+	{
+		const char *p = line;
+		argc = 0;
+		while (argc < PAGEREPLY_MAXWORDS && COM_ParseToken_Console(&p))
+			strlcpy(words[argc++], com_token, sizeof(words[0]));
+	}
+	if (argc < 3) // "rml_reply" page action
+		return true;
+
+	for (i = 0; i < sv_luahost.num; i++)
+	{
+		luasandbox_t *m = sv_luahost.items[i];
+		lua_State *L = m->L;
+		int handlers, ev, n;
+		n = LuaSandbox_PushHandlers(m, "PageReply");
+		if (!n)
+			continue;
+		handlers = lua_gettop(L);
+		lua_createtable(L, 3, 4);
+		ev = lua_gettop(L);
+		lua_pushstring(L, "PageReply");
+		lua_setfield(L, ev, "hook");
+		LuaMods_PushEntity(L, prog, (int)(c - svs.clients) + 1);
+		lua_seti(L, ev, 0);
+		lua_pushstring(L, words[1]);
+		lua_seti(L, ev, 1);
+		lua_pushstring(L, words[2]);
+		lua_seti(L, ev, 2);
+		lua_newtable(L); // values by name
+		for (j = 3; j + 1 < argc; j += 2)
+		{
+			lua_pushstring(L, words[j + 1]);
+			lua_setfield(L, -2, words[j]);
+		}
+		lua_setfield(L, ev, "values");
+		for (j = 1; j <= n; j++)
+		{
+			lua_geti(L, handlers, j);
+			lua_pushvalue(L, ev);
+			if (!LuaSandbox_Call(m, 1, 1, "PageReply"))
+				break; // state is gone
+			lua_pop(L, 1);
+		}
+		if (!m->disabled)
+			lua_settop(L, handlers - 1);
+	}
+	handled = true;
+	return handled;
 }
 
 //============================================================================
