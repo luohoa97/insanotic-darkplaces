@@ -2773,6 +2773,15 @@ void CL_UpdateScreen(void)
 	if (!scr_initialized || !con_initialized || !scr_refresh.integer)
 		return;				// not initialized yet
 
+	// Insanotic: while connecting or joining (between the server's and the
+	// client's loading phases, and during the network handshake) keep the
+	// loading screen up instead of drawing the empty world, which was black
+	if (((cls.state == ca_connected && cls.signon < SIGNONS) || cls.connect_trying) && !key_consoleactive && !cls.demoplayback)
+	{
+		SCR_UpdateLoadingScreen(loadingscreendone ? loadingscreencleared : false, false);
+		return;
+	}
+
 	loadingscreendone = false;
 
 	if(IS_NEXUIZ_DERIVED(gamemode))
