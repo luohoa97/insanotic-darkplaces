@@ -1,4 +1,5 @@
 #include "quakedef.h"
+#include "loadtimes.h"
 #include "progsvm.h"
 #include "clprogdefs.h"
 #include "csprogs.h"
@@ -980,7 +981,14 @@ qboolean MakeDownloadPacket(const char *filename, unsigned char *data, size_t le
 }
 
 extern cvar_t csqc_usedemoprogs;
+static void CL_VM_Init_Inner (void);
 void CL_VM_Init (void)
+{
+	double t = Sys_DirtyTime();
+	CL_VM_Init_Inner();
+	loadtimes.csqc_init += Sys_DirtyTime() - t;
+}
+static void CL_VM_Init_Inner (void)
 {
 	prvm_prog_t *prog = CLVM_prog;
 	const char* csprogsfn = NULL;

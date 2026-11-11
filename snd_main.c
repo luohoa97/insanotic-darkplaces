@@ -20,6 +20,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // snd_main.c -- main control for any streaming sound output device
 
 #include "quakedef.h"
+#include "loadtimes.h"
 
 #include "snd_main.h"
 #include "snd_ogg.h"
@@ -1129,7 +1130,16 @@ void S_PurgeUnused(void)
 S_PrecacheSound
 ==================
 */
+static sfx_t *S_PrecacheSound_Inner (const char *name, qboolean complain, qboolean levelsound);
 sfx_t *S_PrecacheSound (const char *name, qboolean complain, qboolean levelsound)
+{
+	double t = Sys_DirtyTime();
+	sfx_t *r = S_PrecacheSound_Inner(name, complain, levelsound);
+	loadtimes.sounds += Sys_DirtyTime() - t;
+	loadtimes.sounds_count++;
+	return r;
+}
+static sfx_t *S_PrecacheSound_Inner (const char *name, qboolean complain, qboolean levelsound)
 {
 	sfx_t *sfx;
 

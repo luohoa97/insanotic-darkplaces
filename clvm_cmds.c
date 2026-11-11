@@ -128,6 +128,7 @@ static void VM_CL_setmodel (prvm_prog_t *prog)
 	}
 
 	if( mod ) {
+		Mod_Ensure(mod); // its size is needed right now
 		// TODO: check if this breaks needed consistency and maybe add a cvar for it too?? [1/10/2008 Black]
 		// LordHavoc: erm you broke it by commenting this out - setmodel must do setsize or else the qc can't find out the model size, and ssqc does this by necessity, consistency.
 		SetMinMaxSize (prog, e, mod->normalmins, mod->normalmaxs);
@@ -437,8 +438,13 @@ static void VM_CL_precache_model (prvm_prog_t *prog)
 		}
 	}
 	PRVM_G_FLOAT(OFS_RETURN) = 0;
-	m = Mod_ForName(name, false, false, name[0] == '*' ? cl.model_name[1] : NULL);
-	if(m && m->loaded)
+	// Insanotic: with mod_lazyload a file that exists is only registered here
+	// and loads when first used (setmodel, drawing) or in the background
+	if (mod_lazyload.integer && name[0] != '*' && FS_FileExists(name))
+		m = Mod_FindName(name, NULL);
+	else
+		m = Mod_ForName(name, false, false, name[0] == '*' ? cl.model_name[1] : NULL);
+	if(m && (m->loaded || mod_lazyload.integer))
 	{
 		for (i = 0;i < MAX_MODELS;i++)
 		{

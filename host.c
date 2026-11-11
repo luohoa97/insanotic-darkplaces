@@ -20,6 +20,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // host.c -- coordinates spawning and killing of local servers
 
 #include "quakedef.h"
+#include "loadtimes.h"
 #include "cl_lua.h"
 
 #include <time.h>
@@ -84,6 +85,9 @@ cvar_t developer = {CVAR_SAVE, "developer","0", "shows debugging messages and in
 cvar_t developer_extra = {0, "developer_extra", "0", "prints additional debugging messages, often very verbose!"};
 cvar_t developer_insane = {0, "developer_insane", "0", "prints huge streams of information about internal workings, entire contents of files being read/written, etc.  Not recommended!"};
 cvar_t developer_loadfile = {0, "developer_loadfile","0", "prints name and size of every file loaded via the FS_LoadFile function (which is almost everything)"};
+loadtimes_t loadtimes;
+static double host_starttime;
+cvar_t developer_loadtimes = {0, "developer_loadtimes", "0", "print how long each part of loading a map took, once the game is ready"};
 cvar_t developer_loading = {0, "developer_loading","0", "prints information about files as they are loaded or unloaded successfully"};
 cvar_t developer_entityparsing = {0, "developer_entityparsing", "0", "prints detailed network entities information each time a packet is received"};
 
@@ -261,6 +265,7 @@ static void Host_InitLocal (void)
 	Cvar_RegisterVariable (&developer_insane);
 	Cvar_RegisterVariable (&developer_loadfile);
 	Cvar_RegisterVariable (&developer_loading);
+	Cvar_RegisterVariable (&developer_loadtimes);
 	Cvar_RegisterVariable (&developer_entityparsing);
 
 	Cvar_RegisterVariable (&timestamps);
@@ -793,6 +798,11 @@ void Host_Main(void)
 		else
 			wait = max(cl_timer, sv_timer) * -1000000.0;
 
+		// Insanotic: never sleep while connecting or loading; the handshake
+		// with a server (also a local one) advances one step per frame
+		if (cls.state == ca_connected && cls.signon < SIGNONS)
+			wait = 0;
+
 		if (!cls.timedemo && wait >= 1)
 		{
 			double time0, delta;
@@ -1016,6 +1026,11 @@ void Host_Main(void)
 			CL_SendMove();
 			R_TimeReport("sendmove");
 
+			// Insanotic: load the not yet used precached models a few at a
+			// time once the game is running
+			if (mod_lazyload.integer && cls.signon == SIGNONS)
+				Mod_LoadPending(0);
+
 			// update client world (interpolate entities, create trails, etc)
 			CL_UpdateWorld();
 			R_TimeReport("lerpworld");
@@ -1083,7 +1098,14 @@ void Host_Main(void)
 //============================================================================
 
 qboolean vid_opened = false;
+static void Host_StartVideo_Inner(void);
 void Host_StartVideo(void)
+{
+	double t = Sys_DirtyTime();
+	Host_StartVideo_Inner();
+	loadtimes.video += Sys_DirtyTime() - t;
+}
+static void Host_StartVideo_Inner(void)
 {
 	if (!vid_opened && cls.state != ca_dedicated)
 	{
@@ -1192,6 +1214,7 @@ static void Host_Init (void)
 	int i;
 	const char* os;
 	char vabuf[1024];
+	host_starttime = Sys_DirtyTime();
 
 	if (COM_CheckParm("-profilegameonly"))
 		Sys_AllowProfiling(false);
@@ -1490,3 +1513,15 @@ void Host_Shutdown(void)
 	Memory_Shutdown();
 }
 
+
+void LoadTimes_Report(void)
+{
+	if (!developer_loadtimes.integer || loadtimes.map_start <= 0)
+		return;
+	Con_Printf("load times (ms): map ready %.0f after start; spawn server %.0f, models %.0f (%d), sounds %.0f (%d), csqc init %.0f, world setup %.0f, video %.0f; since process start %.0f\n",
+		(Sys_DirtyTime() - loadtimes.map_start) * 1000, loadtimes.spawnserver * 1000,
+		loadtimes.models * 1000, loadtimes.models_count, loadtimes.sounds * 1000, loadtimes.sounds_count,
+		loadtimes.csqc_init * 1000, loadtimes.world_setup * 1000, loadtimes.video * 1000,
+		(Sys_DirtyTime() - host_starttime) * 1000);
+	memset(&loadtimes, 0, sizeof(loadtimes));
+}

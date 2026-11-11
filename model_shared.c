@@ -23,6 +23,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // on the same machine.
 
 #include "quakedef.h"
+#include "loadtimes.h"
 #include "image.h"
 #include "r_shadow.h"
 #include "polygon.h"
@@ -153,6 +154,7 @@ static void Mod_Print(void);
 static void Mod_Precache (void);
 static void Mod_Decompile_f(void);
 static void Mod_GenerateLightmaps_f(void);
+extern cvar_t mod_lazyload_budget;
 void Mod_Init (void)
 {
 	mod_mempool = Mem_AllocPool("modelinfo", 0, NULL);
@@ -163,6 +165,8 @@ void Mod_Init (void)
 	Mod_SpriteInit();
 
 	Cvar_RegisterVariable(&r_enableshadowvolumes);
+	Cvar_RegisterVariable(&mod_lazyload);
+	Cvar_RegisterVariable(&mod_lazyload_budget);
 	Cvar_RegisterVariable(&r_mipskins);
 	Cvar_RegisterVariable(&r_mipnormalmaps);
 	Cvar_RegisterVariable(&mod_generatelightmaps_unitspersample);
@@ -374,7 +378,16 @@ Mod_LoadModel
 Loads a model
 ==================
 */
+static dp_model_t *Mod_LoadModel_Inner(dp_model_t *mod, qboolean crash, qboolean checkdisk);
 dp_model_t *Mod_LoadModel(dp_model_t *mod, qboolean crash, qboolean checkdisk)
+{
+	double t = Sys_DirtyTime();
+	dp_model_t *r = Mod_LoadModel_Inner(mod, crash, checkdisk);
+	loadtimes.models += Sys_DirtyTime() - t;
+	loadtimes.models_count++;
+	return r;
+}
+static dp_model_t *Mod_LoadModel_Inner(dp_model_t *mod, qboolean crash, qboolean checkdisk)
 {
 	int num;
 	unsigned int crc;
@@ -541,6 +554,34 @@ void Mod_ClearUsed(void)
 	for (i = 0;i < nummodels;i++)
 		if ((mod = (dp_model_t*) Mem_ExpandableArray_RecordAtIndex(&models, i)) && mod->name[0])
 			mod->used = false;
+}
+
+cvar_t mod_lazyload = {CVAR_SAVE, "mod_lazyload", "1", "precached models load on first use, the rest in the background after the map started (Insanotic; 0 = load everything up front like stock DarkPlaces)"};
+cvar_t mod_lazyload_budget = {CVAR_SAVE, "mod_lazyload_budget", "2", "milliseconds per frame spent loading not yet used models in the background"};
+
+dp_model_t *Mod_Ensure(dp_model_t *mod)
+{
+	if (mod && !mod->loaded && mod->name[0])
+		Mod_LoadModel(mod, false, false);
+	return mod;
+}
+
+void Mod_LoadPending(double budget_seconds)
+{
+	int i, nummodels = (int)Mem_ExpandableArray_IndexRange(&models);
+	double start = Sys_DirtyTime();
+	dp_model_t *mod;
+	if (budget_seconds <= 0)
+		budget_seconds = mod_lazyload_budget.value * 0.001;
+	for (i = 0; i < nummodels; i++)
+	{
+		if ((mod = (dp_model_t*) Mem_ExpandableArray_RecordAtIndex(&models, i)) && mod->name[0] && mod->used && !mod->loaded)
+		{
+			Mod_LoadModel(mod, false, false);
+			if (Sys_DirtyTime() - start >= budget_seconds)
+				return;
+		}
+	}
 }
 
 void Mod_PurgeUnused(void)

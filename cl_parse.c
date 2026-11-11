@@ -20,6 +20,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // cl_parse.c  -- parse a message received from the server
 
 #include "quakedef.h"
+#include "loadtimes.h"
 #ifdef CONFIG_CD
 #include "cdaudio.h"
 #endif
@@ -472,7 +473,14 @@ void CL_ParseEntityLump(char *entdata)
 
 static const vec3_t defaultmins = {-4096, -4096, -4096};
 static const vec3_t defaultmaxs = {4096, 4096, 4096};
+static void CL_SetupWorldModel_Inner(void);
 static void CL_SetupWorldModel(void)
+{
+	double t = Sys_DirtyTime();
+	CL_SetupWorldModel_Inner();
+	loadtimes.world_setup += Sys_DirtyTime() - t;
+}
+static void CL_SetupWorldModel_Inner(void)
 {
 	prvm_prog_t *prog = CLVM_prog;
 	// update the world model
@@ -1080,7 +1088,15 @@ static void CL_UpdateItemsAndWeapon(void)
 #define LOADPROGRESSWEIGHT_WORLDMODEL      30.0
 #define LOADPROGRESSWEIGHT_WORLDMODEL_INIT  2.0
 
+static void CL_BeginDownloads_Inner(qboolean aborteddownload);
 static void CL_BeginDownloads(qboolean aborteddownload)
+{
+	double t = Sys_DirtyTime();
+	CL_BeginDownloads_Inner(aborteddownload);
+	if (developer_loadtimes.integer && loadtimes.map_start > 0)
+		Con_Printf("load times: begindownloads %.0f ms -> %.0f ms\n", (t - loadtimes.map_start) * 1000, (Sys_DirtyTime() - loadtimes.map_start) * 1000);
+}
+static void CL_BeginDownloads_Inner(qboolean aborteddownload)
 {
 	char vabuf[1024];
 	// quakeworld works differently
@@ -1301,6 +1317,13 @@ static void CL_BeginDownloads(qboolean aborteddownload)
 				Mod_FreeQ3Shaders();
 			}
 
+			// Insanotic: with mod_lazyload a model whose file is present stays
+			// registered and loads on first use or in the background
+			if (mod_lazyload.integer && cl.downloadmodel_current != 1 && cl.model_name[cl.downloadmodel_current][0] != '*')
+			{
+				cl.model_precache[cl.downloadmodel_current] = Mod_FindName(cl.model_name[cl.downloadmodel_current], NULL);
+				continue;
+			}
 			cl.model_precache[cl.downloadmodel_current] = Mod_ForName(cl.model_name[cl.downloadmodel_current], false, true, cl.model_name[cl.downloadmodel_current][0] == '*' ? cl.model_name[1] : NULL);
 			if (cl.downloadmodel_current == 1)
 			{
@@ -1608,6 +1631,9 @@ An svc_signonnum has been received, perform a client side setup
 static void CL_SignonReply (void)
 {
 	Con_DPrintf("CL_SignonReply: %i\n", cls.signon);
+	if (developer_loadtimes.integer && loadtimes.map_start > 0)
+		Con_Printf("load times: signon %i at %.0f ms (models so far %.0f ms / %d, csqc %.0f, world %.0f)\n", cls.signon, (Sys_DirtyTime() - loadtimes.map_start) * 1000,
+			loadtimes.models * 1000, loadtimes.models_count, loadtimes.csqc_init * 1000, loadtimes.world_setup * 1000);
 
 	switch (cls.signon)
 	{
@@ -1660,6 +1686,7 @@ static void CL_SignonReply (void)
 		S_PurgeUnused();
 
 		Con_ClearNotify();
+		LoadTimes_Report();
 		if (COM_CheckParm("-profilegameonly"))
 			Sys_AllowProfiling(true);
 		break;

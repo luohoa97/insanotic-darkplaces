@@ -101,7 +101,10 @@ void PRVM_MEM_IncreaseEdicts(prvm_prog_t *prog)
 	prog->begin_increase_edicts(prog);
 
 	// increase edicts
-	prog->max_edicts = min(prog->max_edicts + 256, prog->limit_edicts);
+	// Insanotic: grow geometrically; Xonotic creates thousands of entities at
+	// startup and each growth step reallocates, relinks and (on the server)
+	// unlinks and relinks every entity in the world
+	prog->max_edicts = min(max(prog->max_edicts * 2, prog->max_edicts + 256), prog->limit_edicts);
 
 	prog->entityfieldsarea = prog->entityfields * prog->max_edicts;
 	prog->edictsfields = (prvm_vec_t*)Mem_Realloc(prog->progs_mempool, (void *)prog->edictsfields, prog->entityfieldsarea * sizeof(prvm_vec_t));

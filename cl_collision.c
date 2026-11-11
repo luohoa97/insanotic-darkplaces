@@ -91,12 +91,12 @@ dp_model_t *CL_GetModelByIndex(int modelindex)
 	{
 		modelindex = -(modelindex+1);
 		if (modelindex < MAX_MODELS)
-			return cl.csqc_model_precache[modelindex];
+			return Mod_Ensure(cl.csqc_model_precache[modelindex]);
 	}
 	else
 	{
 		if(modelindex < MAX_MODELS)
-			return cl.model_precache[modelindex];
+			return Mod_Ensure(cl.model_precache[modelindex]); // Insanotic: lazy models
 	}
 	return NULL;
 }

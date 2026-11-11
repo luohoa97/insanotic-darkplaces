@@ -1150,6 +1150,12 @@ void Mod_UnloadModel (dp_model_t *mod);
 
 void Mod_ClearUsed(void);
 void Mod_PurgeUnused(void);
+// Insanotic lazy model loading (mod_lazyload): precache only registers a
+// model; Mod_Ensure loads it on first use and Mod_LoadPending streams the
+// rest in the background within a time budget
+extern cvar_t mod_lazyload;
+dp_model_t *Mod_Ensure(dp_model_t *mod);
+void Mod_LoadPending(double budget_seconds);
 void Mod_RemoveStaleWorldModels(dp_model_t *skip); // only used during loading!
 
 extern dp_model_t *loadmodel;

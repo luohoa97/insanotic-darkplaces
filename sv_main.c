@@ -20,6 +20,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // sv_main.c -- server main program
 
 #include "quakedef.h"
+#include "loadtimes.h"
 #include "sv_lua.h"
 #include "sv_demo.h"
 #include "libcurl.h"
@@ -2930,7 +2931,12 @@ int SV_ModelIndex(const char *s, int precachemode)
 				if (sv.state == ss_loading)
 				{
 					// running from SV_SpawnServer which is launched from the client console command interpreter
-					sv.models[i] = Mod_ForName (sv.model_precache[i], true, false, s[0] == '*' ? sv.worldname : NULL);
+					// Insanotic: with mod_lazyload only register it; it loads on
+					// first use (SV_GetModelByIndex) or in the background later
+					if (mod_lazyload.integer && s[0] != '*' && !svs.threaded)
+						sv.models[i] = Mod_FindName (sv.model_precache[i], NULL);
+					else
+						sv.models[i] = Mod_ForName (sv.model_precache[i], true, false, s[0] == '*' ? sv.worldname : NULL);
 				}
 				else
 				{
@@ -3101,7 +3107,7 @@ int SV_ParticleEffectIndex(const char *name)
 
 dp_model_t *SV_GetModelByIndex(int modelindex)
 {
-	return (modelindex > 0 && modelindex < MAX_MODELS) ? sv.models[modelindex] : NULL;
+	return (modelindex > 0 && modelindex < MAX_MODELS) ? (svs.threaded ? sv.models[modelindex] : Mod_Ensure(sv.models[modelindex])) : NULL;
 }
 
 dp_model_t *SV_GetModelFromEdict(prvm_edict_t *ed)
@@ -3111,7 +3117,7 @@ dp_model_t *SV_GetModelFromEdict(prvm_edict_t *ed)
 	if (!ed || ed->priv.server->free)
 		return NULL;
 	modelindex = (int)PRVM_serveredictfloat(ed, modelindex);
-	return (modelindex > 0 && modelindex < MAX_MODELS) ? sv.models[modelindex] : NULL;
+	return SV_GetModelByIndex(modelindex);
 }
 
 /*
@@ -3282,7 +3288,18 @@ This is called at the start of each level
 ================
 */
 
+static void SV_SpawnServer_Inner (const char *server);
 void SV_SpawnServer (const char *server)
+{
+	double t = Sys_DirtyTime();
+	if (loadtimes.map_start <= 0)
+		loadtimes.map_start = t;
+	SV_SpawnServer_Inner(server);
+	loadtimes.spawnserver += Sys_DirtyTime() - t;
+	if (developer_loadtimes.integer)
+		Con_Printf("load times: server spawned at %.0f ms\n", (Sys_DirtyTime() - loadtimes.map_start) * 1000);
+}
+static void SV_SpawnServer_Inner (const char *server)
 {
 	prvm_prog_t *prog = SVVM_prog;
 	prvm_edict_t *ent;
