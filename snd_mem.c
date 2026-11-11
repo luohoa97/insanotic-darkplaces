@@ -342,15 +342,24 @@ qboolean S_LoadSound (sfx_t *sfx, qboolean complain)
 		{
 			if (OGG_LoadVorbisFile (namebuffer, sfx))
 				goto loaded;
+			memcpy (namebuffer + len - 3, "opus", 5);
+			len++;
+		}
+		if (len >= 5 && !strcasecmp (namebuffer + len - 5, ".opus"))
+		{
+			if (OGG_LoadVorbisFile (namebuffer, sfx))
+				goto loaded;
 		}
 	}
 
 	// LordHavoc: then try without the added sound/ as wav and ogg
 	dpsnprintf (namebuffer, sizeof(namebuffer), "%s", sfx->name);
 	len = strlen(namebuffer);
-	// request foo.wav: tries foo.wav, then foo.ogg
-	// request foo.ogg: tries foo.ogg only
+	// request foo.wav: tries foo.wav, then foo.ogg, then foo.opus
+	// request foo.ogg: tries foo.ogg, then foo.opus
+	// request foo.opus: tries foo.opus only
 	// request foo.mod: tries foo.mod only
+	// (the Ogg loader also takes Opus data under an .ogg name)
 	if (len >= 4 && !strcasecmp (namebuffer + len - 4, ".wav"))
 	{
 		if (S_LoadWavFile (namebuffer, sfx))
@@ -358,6 +367,13 @@ qboolean S_LoadSound (sfx_t *sfx, qboolean complain)
 		memcpy (namebuffer + len - 3, "ogg", 4);
 	}
 	if (len >= 4 && !strcasecmp (namebuffer + len - 4, ".ogg"))
+	{
+		if (OGG_LoadVorbisFile (namebuffer, sfx))
+			goto loaded;
+		memcpy (namebuffer + len - 3, "opus", 5);
+		len++;
+	}
+	if (len >= 5 && !strcasecmp (namebuffer + len - 5, ".opus"))
 	{
 		if (OGG_LoadVorbisFile (namebuffer, sfx))
 			goto loaded;

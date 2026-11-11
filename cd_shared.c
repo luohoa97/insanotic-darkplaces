@@ -306,6 +306,12 @@ void CDAudio_Play_byName (const char *trackname, qboolean looping, qboolean tryr
 		if (!FS_FileExists(filename)) dpsnprintf(filename, sizeof(filename), "sound/cdtracks/%s.ogg", trackname);
 		if (!FS_FileExists(filename)) dpsnprintf(filename, sizeof(filename), "music/%s.ogg", trackname); // added by motorsep
 		if (!FS_FileExists(filename)) dpsnprintf(filename, sizeof(filename), "music/cdtracks/%s.ogg", trackname); // added by motorsep
+		// Opus files are accepted by the sound loader like .ogg ones
+		if (!FS_FileExists(filename)) dpsnprintf(filename, sizeof(filename), "%s.opus", trackname);
+		if (!FS_FileExists(filename)) dpsnprintf(filename, sizeof(filename), "sound/%s.opus", trackname);
+		if (!FS_FileExists(filename)) dpsnprintf(filename, sizeof(filename), "sound/cdtracks/%s.opus", trackname);
+		if (!FS_FileExists(filename)) dpsnprintf(filename, sizeof(filename), "music/%s.opus", trackname);
+		if (!FS_FileExists(filename)) dpsnprintf(filename, sizeof(filename), "music/cdtracks/%s.opus", trackname);
 	}
 	if (FS_FileExists(filename) && (sfx = S_PrecacheSound (filename, false, false)))
 	{

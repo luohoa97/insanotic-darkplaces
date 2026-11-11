@@ -3170,7 +3170,6 @@ fs_offset_t FS_Read (qfile_t* file, void* buffer, size_t buffersize)
 	while (buffersize > 0)
 	{
 		ztoolkit_t *ztk = file->ztk;
-		int error;
 
 		// NOTE: at this point, the read buffer is always empty
 

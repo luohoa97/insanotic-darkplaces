@@ -333,6 +333,139 @@ void OGG_CloseLibrary (void)
 /*
 =================================================================
 
+  Opus (libopusfile)
+
+  Only the small part of the opusfile API that is needed is declared
+  here, so that building does not need the opusfile headers: desktop
+  builds load libopusfile at run time, mobile builds link it statically.
+
+=================================================================
+*/
+
+typedef struct OggOpusFile OggOpusFile;
+
+typedef struct
+{
+	int			(*read)		(void *stream, unsigned char *ptr, int nbytes);
+	int			(*seek)		(void *stream, long long offset, int whence);
+	long long	(*tell)		(void *stream);
+	int			(*close)	(void *stream);
+} OpusFileCallbacks;
+
+typedef struct
+{
+	int				version;
+	int				channel_count;
+	unsigned int	pre_skip;
+	unsigned int	input_sample_rate;
+	int				output_gain;
+	int				mapping_family;
+	int				stream_count;
+	int				coupled_count;
+	unsigned char	mapping[255];
+} OpusHead;
+
+typedef struct
+{
+	char	**user_comments;
+	int		*comment_lengths;
+	int		comments;
+	char	*vendor;
+} OpusTags;
+
+#ifdef LINK_TO_LIBOPUS
+
+OggOpusFile *op_open_callbacks (void *source, const OpusFileCallbacks *cb, const unsigned char *initial_data, size_t initial_bytes, int *error);
+void op_free (OggOpusFile *of);
+const OpusHead *op_head (const OggOpusFile *of, int li);
+const OpusTags *op_tags (const OggOpusFile *of, int li);
+long long op_pcm_total (const OggOpusFile *of, int li);
+int op_pcm_seek (OggOpusFile *of, long long pcm_offset);
+int op_read (OggOpusFile *of, short *pcm, int buf_size, int *li);
+const char *opus_tags_query (const OpusTags *tags, const char *tag, int count);
+
+#define qop_open_callbacks op_open_callbacks
+#define qop_free op_free
+#define qop_head op_head
+#define qop_tags op_tags
+#define qop_pcm_total op_pcm_total
+#define qop_pcm_seek op_pcm_seek
+#define qop_read op_read
+#define qopus_tags_query opus_tags_query
+
+qboolean OPUS_OpenLibrary (void) {return true;}
+void OPUS_CloseLibrary (void) {}
+
+#else
+
+static OggOpusFile *(*qop_open_callbacks) (void *source, const OpusFileCallbacks *cb, const unsigned char *initial_data, size_t initial_bytes, int *error);
+static void (*qop_free) (OggOpusFile *of);
+static const OpusHead *(*qop_head) (const OggOpusFile *of, int li);
+static const OpusTags *(*qop_tags) (const OggOpusFile *of, int li);
+static long long (*qop_pcm_total) (const OggOpusFile *of, int li);
+static int (*qop_pcm_seek) (OggOpusFile *of, long long pcm_offset);
+static int (*qop_read) (OggOpusFile *of, short *pcm, int buf_size, int *li);
+static const char *(*qopus_tags_query) (const OpusTags *tags, const char *tag, int count);
+
+static dllfunction_t opusfilefuncs[] =
+{
+	{"op_open_callbacks",	(void **) &qop_open_callbacks},
+	{"op_free",				(void **) &qop_free},
+	{"op_head",				(void **) &qop_head},
+	{"op_tags",				(void **) &qop_tags},
+	{"op_pcm_total",		(void **) &qop_pcm_total},
+	{"op_pcm_seek",			(void **) &qop_pcm_seek},
+	{"op_read",				(void **) &qop_read},
+	{"opus_tags_query",		(void **) &qopus_tags_query},
+	{NULL, NULL}
+};
+
+static dllhandle_t op_dll = NULL;
+
+/*
+====================
+OPUS_OpenLibrary
+
+Try to load libopusfile (it pulls in libopus and libogg by itself)
+====================
+*/
+qboolean OPUS_OpenLibrary (void)
+{
+	const char* dllnames_op [] =
+	{
+#if defined(WIN32)
+		"libopusfile-0.dll",
+		"opusfile.dll",
+#elif defined(MACOSX)
+		"libopusfile.0.dylib",
+		"libopusfile.dylib",
+#else
+		"libopusfile.so.0",
+		"libopusfile.so",
+#endif
+		NULL
+	};
+
+	if (op_dll)
+		return true;
+
+// COMMANDLINEOPTION: Sound: -noopus disables Opus sound support
+	if (COM_CheckParm("-noopus"))
+		return false;
+
+	return Sys_LoadLibrary (dllnames_op, &op_dll, opusfilefuncs);
+}
+
+void OPUS_CloseLibrary (void)
+{
+	Sys_UnloadLibrary (&op_dll);
+}
+
+#endif
+
+/*
+=================================================================
+
 	Ogg Vorbis decoding
 
 =================================================================
@@ -394,17 +527,43 @@ static long ovcb_tell (void *ov_decode)
 	return ((ov_decode_t*)ov_decode)->ind;
 }
 
+static int opcb_read (void *datasource, unsigned char *ptr, int nbytes)
+{
+	ov_decode_t *ov_decode = (ov_decode_t*)datasource;
+	ogg_int64_t remain = ov_decode->buffsize - ov_decode->ind;
+
+	if (nbytes > remain)
+		nbytes = (int)remain;
+	memcpy (ptr, ov_decode->buffer + ov_decode->ind, nbytes);
+	ov_decode->ind += nbytes;
+	return nbytes;
+}
+
+static int opcb_seek (void *datasource, long long offset, int whence)
+{
+	return ovcb_seek (datasource, (ogg_int64_t)offset, whence);
+}
+
+static long long opcb_tell (void *datasource)
+{
+	return ((ov_decode_t*)datasource)->ind;
+}
+
+static const OpusFileCallbacks opus_callbacks = {opcb_read, opcb_seek, opcb_tell, NULL};
+
 // Per-sfx data structure
 typedef struct
 {
 	unsigned char	*file;
 	size_t			filesize;
+	qboolean		opus; ///< the file is Ogg Opus rather than Ogg Vorbis
 } ogg_stream_persfx_t;
 
 // Per-channel data structure
 typedef struct
 {
 	OggVorbis_File	vf;
+	OggOpusFile		*of; ///< used instead of vf for Opus files
 	ov_decode_t		ov_decode;
 	int				bs;
 	int				buffer_firstframe;
@@ -414,6 +573,23 @@ typedef struct
 
 
 static const ov_callbacks callbacks = {ovcb_read, ovcb_seek, ovcb_close, ovcb_tell};
+
+/*
+====================
+OPUS_ReadBytes
+
+op_read counts in samples, ov_read in bytes; this makes the Opus decoder
+look like the Vorbis one for the loops below. Opus always decodes to 48 kHz,
+16 bit here.
+====================
+*/
+static long OPUS_ReadBytes (OggOpusFile *of, char *buffer, int length, int channels)
+{
+	int frames = qop_read(of, (short *)buffer, length / 2, NULL);
+	if (frames <= 0)
+		return frames;
+	return (long)frames * channels * 2;
+}
 
 /*
 ====================
@@ -438,7 +614,16 @@ static void OGG_GetSamplesFloat (channel_t *ch, sfx_t *sfx, int firstsampleframe
 		per_ch->ov_decode.buffer = per_sfx->file;
 		per_ch->ov_decode.ind = 0;
 		per_ch->ov_decode.buffsize = per_sfx->filesize;
-		if (qov_open_callbacks(&per_ch->ov_decode, &per_ch->vf, NULL, 0, callbacks) < 0)
+		if (per_sfx->opus)
+		{
+			per_ch->of = qop_open_callbacks(&per_ch->ov_decode, &opus_callbacks, NULL, 0, NULL);
+			if (per_ch->of == NULL)
+			{
+				Mem_Free(per_ch);
+				return;
+			}
+		}
+		else if (qov_open_callbacks(&per_ch->ov_decode, &per_ch->vf, NULL, 0, callbacks) < 0)
 		{
 			// this never happens - this function succeeded earlier on the same data
 			Mem_Free(per_ch);
@@ -469,7 +654,10 @@ static void OGG_GetSamplesFloat (channel_t *ch, sfx_t *sfx, int firstsampleframe
 		// we expect to decode forward from here so this will be our new buffer start
 		per_ch->buffer_firstframe = firstsampleframe;
 		per_ch->buffer_numframes = 0;
-		ret = qov_pcm_seek(&per_ch->vf, (ogg_int64_t)firstsampleframe);
+		if (per_sfx->opus)
+			ret = qop_pcm_seek(per_ch->of, (long long)firstsampleframe);
+		else
+			ret = qov_pcm_seek(&per_ch->vf, (ogg_int64_t)firstsampleframe);
 		if (ret != 0)
 		{
 			// LordHavoc: we can't Con_Printf here, not thread safe...
@@ -491,8 +679,16 @@ static void OGG_GetSamplesFloat (channel_t *ch, sfx_t *sfx, int firstsampleframe
 		// decompress as much as we can fit in the buffer
 		newlength = sizeof(per_ch->buffer) - per_ch->buffer_numframes * f;
 		done = 0;
-		while (newlength > done && (ret = qov_read(&per_ch->vf, (char *)per_ch->buffer + per_ch->buffer_numframes * f + done, (int)(newlength - done), mem_bigendian, 2, 1, &per_ch->bs)) > 0)
-			done += ret;
+		if (per_sfx->opus)
+		{
+			while (newlength > done && (ret = OPUS_ReadBytes(per_ch->of, (char *)per_ch->buffer + per_ch->buffer_numframes * f + done, (int)(newlength - done), sfx->format.channels)) > 0)
+				done += ret;
+		}
+		else
+		{
+			while (newlength > done && (ret = qov_read(&per_ch->vf, (char *)per_ch->buffer + per_ch->buffer_numframes * f + done, (int)(newlength - done), mem_bigendian, 2, 1, &per_ch->bs)) > 0)
+				done += ret;
+		}
 		// clear the missing space if any
 		if (done < newlength)
 			memset(per_ch->buffer + done, 0, newlength - done);
@@ -516,10 +712,14 @@ OGG_StopChannel
 static void OGG_StopChannel(channel_t *ch)
 {
 	ogg_stream_perchannel_t *per_ch = (ogg_stream_perchannel_t *)ch->fetcher_data;
+	ogg_stream_persfx_t *per_sfx = (ogg_stream_persfx_t *)ch->sfx->fetcher_data;
 	if (per_ch != NULL)
 	{
-		// release the vorbis decompressor
-		qov_clear(&per_ch->vf);
+		// release the decompressor
+		if (per_sfx->opus)
+			qop_free(per_ch->of);
+		else
+			qov_clear(&per_ch->vf);
 		Mem_Free(per_ch);
 	}
 }
@@ -542,7 +742,15 @@ static void OGG_FreeSfx(sfx_t *sfx)
 
 static const snd_fetcher_t ogg_fetcher = {OGG_GetSamplesFloat, OGG_StopChannel, OGG_FreeSfx};
 
-static void OGG_DecodeTags(vorbis_comment *vc, unsigned int *start, unsigned int *length, unsigned int numsamples, double *peak, double *gaindb)
+// Look a tag up in the comments of a Vorbis or an Opus stream
+static const char *OGG_QueryTag(void *tags, qboolean opus, const char *name)
+{
+	if (opus)
+		return qopus_tags_query((const OpusTags *)tags, name, 0);
+	return qvorbis_comment_query((vorbis_comment *)tags, name, 0);
+}
+
+static void OGG_DecodeTags(void *vc, qboolean opus, unsigned int *start, unsigned int *length, unsigned int numsamples, double *peak, double *gaindb)
 {
 	const char *startcomment = NULL, *lengthcomment = NULL, *endcomment = NULL, *thiscomment = NULL;
 
@@ -554,32 +762,32 @@ static void OGG_DecodeTags(vorbis_comment *vc, unsigned int *start, unsigned int
 	if(!vc)
 		return;
 
-	thiscomment = qvorbis_comment_query(vc, "REPLAYGAIN_TRACK_PEAK", 0);
+	thiscomment = OGG_QueryTag(vc, opus, "REPLAYGAIN_TRACK_PEAK");
 	if(thiscomment)
 		*peak = atof(thiscomment);
-	thiscomment = qvorbis_comment_query(vc, "REPLAYGAIN_TRACK_GAIN", 0);
+	thiscomment = OGG_QueryTag(vc, opus, "REPLAYGAIN_TRACK_GAIN");
 	if(thiscomment)
 		*gaindb = atof(thiscomment);
 	
-	startcomment = qvorbis_comment_query(vc, "LOOP_START", 0); // DarkPlaces, and some Japanese app
+	startcomment = OGG_QueryTag(vc, opus, "LOOP_START"); // DarkPlaces, and some Japanese app
 	if(startcomment)
 	{
-		endcomment = qvorbis_comment_query(vc, "LOOP_END", 0);
+		endcomment = OGG_QueryTag(vc, opus, "LOOP_END");
 		if(!endcomment)
-			lengthcomment = qvorbis_comment_query(vc, "LOOP_LENGTH", 0);
+			lengthcomment = OGG_QueryTag(vc, opus, "LOOP_LENGTH");
 	}
 	else
 	{
-		startcomment = qvorbis_comment_query(vc, "LOOPSTART", 0); // RPG Maker VX
+		startcomment = OGG_QueryTag(vc, opus, "LOOPSTART"); // RPG Maker VX
 		if(startcomment)
 		{
-			lengthcomment = qvorbis_comment_query(vc, "LOOPLENGTH", 0);
+			lengthcomment = OGG_QueryTag(vc, opus, "LOOPLENGTH");
 			if(!lengthcomment)
-				endcomment = qvorbis_comment_query(vc, "LOOPEND", 0);
+				endcomment = OGG_QueryTag(vc, opus, "LOOPEND");
 		}
 		else
 		{
-			startcomment = qvorbis_comment_query(vc, "LOOPPOINT", 0); // Sonic Robo Blast 2
+			startcomment = OGG_QueryTag(vc, opus, "LOOPPOINT"); // Sonic Robo Blast 2
 		}
 	}
 
@@ -591,6 +799,143 @@ static void OGG_DecodeTags(vorbis_comment *vc, unsigned int *start, unsigned int
 		else if(lengthcomment)
 			*length = (unsigned int) bound(0, *start + atof(lengthcomment), numsamples);
 	}
+}
+
+/*
+====================
+OGG_ApplyReplayGain
+
+Scale the sound by the ReplayGain tags of its file, when it has any
+====================
+*/
+static void OGG_ApplyReplayGain(const char *filename, sfx_t *sfx, double peak, double gaindb)
+{
+	if(peak)
+	{
+		sfx->volume_mult = min(1.0f / peak, exp(gaindb * 0.05f * log(10.0f)));
+		sfx->volume_peak = peak;
+		if (developer_loading.integer >= 2)
+			Con_Printf ("Ogg sound file \"%s\" uses ReplayGain (gain %f, peak %f)\n", filename, sfx->volume_mult, sfx->volume_peak);
+	}
+	else if(gaindb != 0)
+	{
+		sfx->volume_mult = min(1.0f / peak, exp(gaindb * 0.05f * log(10.0f)));
+		sfx->volume_peak = 1.0; // if peak is not defined, we won't trust it
+		if (developer_loading.integer >= 2)
+			Con_Printf ("Ogg sound file \"%s\" uses ReplayGain (gain %f, peak not defined and assumed to be %f)\n", filename, sfx->volume_mult, sfx->volume_peak);
+	}
+}
+
+/*
+====================
+OGG_IsOpus
+
+An Ogg file whose first packet is an OpusHead is Opus, anything else Vorbis
+====================
+*/
+static qboolean OGG_IsOpus(const unsigned char *data, fs_offset_t filesize)
+{
+	// 27 byte page header, a segment table, then the first packet
+	if (filesize < 28 || memcmp(data, "OggS", 4) != 0)
+		return false;
+	return filesize >= 27 + data[26] + 8 && memcmp(data + 27 + data[26], "OpusHead", 8) == 0;
+}
+
+/*
+====================
+OGG_LoadOpusData
+
+Set up an Opus sound from the loaded file (which this takes over)
+====================
+*/
+static qboolean OGG_LoadOpusData(const char *filename, sfx_t *sfx, unsigned char *data, fs_offset_t filesize)
+{
+	ov_decode_t ov_decode;
+	OggOpusFile *of;
+	const OpusHead *head;
+	double peak, gaindb;
+	int error = 0;
+
+#ifndef LINK_TO_LIBOPUS
+	if (!op_dll)
+	{
+		Con_DPrintf("%s is Opus but libopusfile is not available\n", filename);
+		Mem_Free(data);
+		return false;
+	}
+#endif
+
+	if (developer_loading.integer >= 2)
+		Con_Printf("Loading Ogg Opus file \"%s\"\n", filename);
+
+	ov_decode.buffer = data;
+	ov_decode.ind = 0;
+	ov_decode.buffsize = filesize;
+	of = qop_open_callbacks(&ov_decode, &opus_callbacks, NULL, 0, &error);
+	if (of == NULL)
+	{
+		Con_Printf("error while opening Ogg Opus file \"%s\" (%i)\n", filename, error);
+		Mem_Free(data);
+		return false;
+	}
+
+	head = qop_head(of, -1);
+	if (head->channel_count < 1 || head->channel_count > 2)
+	{
+		Con_Printf("%s has an unsupported number of channels (%i)\n", sfx->name, head->channel_count);
+		qop_free(of);
+		Mem_Free(data);
+		return false;
+	}
+
+	// Opus always decodes at 48 kHz, whatever rate the source had
+	sfx->format.speed = 48000;
+	sfx->format.channels = head->channel_count;
+	sfx->format.width = 2;
+	sfx->total_length = (int)qop_pcm_total(of, -1);
+
+	if (snd_streaming.integer && (snd_streaming.integer >= 2 || sfx->total_length > max(sizeof(ogg_stream_perchannel_t), snd_streaming_length.value * sfx->format.speed)))
+	{
+		// long sounds are decoded on demand (the compressed file stays in memory)
+		ogg_stream_persfx_t* per_sfx;
+		if (developer_loading.integer >= 2)
+			Con_Printf("Opus sound file \"%s\" will be streamed\n", filename);
+		per_sfx = (ogg_stream_persfx_t *)Mem_Alloc(snd_mempool, sizeof(*per_sfx));
+		sfx->memsize += sizeof (*per_sfx);
+		per_sfx->file = data;
+		per_sfx->filesize = filesize;
+		per_sfx->opus = true;
+		sfx->memsize += filesize;
+		sfx->fetcher_data = per_sfx;
+		sfx->fetcher = &ogg_fetcher;
+		sfx->flags |= SFXFLAG_STREAMED;
+		OGG_DecodeTags((void *)qop_tags(of, -1), true, &sfx->loopstart, &sfx->total_length, sfx->total_length, &peak, &gaindb);
+		qop_free(of);
+	}
+	else
+	{
+		// short sounds are decoded once into memory
+		char *buff;
+		long long len;
+		long long done = 0;
+		long ret;
+		if (developer_loading.integer >= 2)
+			Con_Printf("Opus sound file \"%s\" will be cached\n", filename);
+		len = (long long)sfx->total_length * sfx->format.channels * sfx->format.width;
+		sfx->flags &= ~SFXFLAG_STREAMED;
+		sfx->memsize += len;
+		sfx->fetcher = &wav_fetcher;
+		sfx->fetcher_data = Mem_Alloc(snd_mempool, (size_t)len);
+		buff = (char *)sfx->fetcher_data;
+		while ((ret = OPUS_ReadBytes(of, &buff[done], (int)(len - done), sfx->format.channels)) > 0)
+			done += ret;
+		OGG_DecodeTags((void *)qop_tags(of, -1), true, &sfx->loopstart, &sfx->total_length, sfx->total_length, &peak, &gaindb);
+		qop_free(of);
+		Mem_Free(data);
+	}
+
+	OGG_ApplyReplayGain(filename, sfx, peak, gaindb);
+	return true;
 }
 
 /*
@@ -610,11 +955,6 @@ qboolean OGG_LoadVorbisFile(const char *filename, sfx_t *sfx)
 	vorbis_comment *vc;
 	double peak, gaindb;
 
-#ifndef LINK_TO_LIBVORBIS
-	if (!vf_dll)
-		return false;
-#endif
-
 	// Return if already loaded
 	if (sfx->fetcher != NULL)
 		return true;
@@ -623,6 +963,19 @@ qboolean OGG_LoadVorbisFile(const char *filename, sfx_t *sfx)
 	data = FS_LoadFile(filename, snd_mempool, false, &filesize);
 	if (data == NULL)
 		return false;
+
+	// Opus is stored in the same Ogg container (and often under the same
+	// .ogg name) so the content decides, not the extension
+	if (OGG_IsOpus(data, filesize))
+		return OGG_LoadOpusData(filename, sfx, data, filesize);
+
+#ifndef LINK_TO_LIBVORBIS
+	if (!vf_dll)
+	{
+		Mem_Free(data);
+		return false;
+	}
+#endif
 
 	if (developer_loading.integer >= 2)
 		Con_Printf("Loading Ogg Vorbis file \"%s\"\n", filename);
@@ -670,7 +1023,7 @@ qboolean OGG_LoadVorbisFile(const char *filename, sfx_t *sfx)
 		sfx->fetcher = &ogg_fetcher;
 		sfx->flags |= SFXFLAG_STREAMED;
 		vc = qov_comment(&vf, -1);
-		OGG_DecodeTags(vc, &sfx->loopstart, &sfx->total_length, sfx->total_length, &peak, &gaindb);
+		OGG_DecodeTags(vc, false, &sfx->loopstart, &sfx->total_length, sfx->total_length, &peak, &gaindb);
 		qov_clear(&vf);
 	}
 	else
@@ -694,25 +1047,12 @@ qboolean OGG_LoadVorbisFile(const char *filename, sfx_t *sfx)
 		while ((ret = qov_read(&vf, &buff[done], (int)(len - done), mem_bigendian, 2, 1, &bs)) > 0)
 			done += ret;
 		vc = qov_comment(&vf, -1);
-		OGG_DecodeTags(vc, &sfx->loopstart, &sfx->total_length, sfx->total_length, &peak, &gaindb);
+		OGG_DecodeTags(vc, false, &sfx->loopstart, &sfx->total_length, sfx->total_length, &peak, &gaindb);
 		qov_clear(&vf);
 		Mem_Free(data);
 	}
 
-	if(peak)
-	{
-		sfx->volume_mult = min(1.0f / peak, exp(gaindb * 0.05f * log(10.0f)));
-		sfx->volume_peak = peak;
-		if (developer_loading.integer >= 2)
-			Con_Printf ("Ogg sound file \"%s\" uses ReplayGain (gain %f, peak %f)\n", filename, sfx->volume_mult, sfx->volume_peak);
-	}
-	else if(gaindb != 0)
-	{
-		sfx->volume_mult = min(1.0f / peak, exp(gaindb * 0.05f * log(10.0f)));
-		sfx->volume_peak = 1.0; // if peak is not defined, we won't trust it
-		if (developer_loading.integer >= 2)
-			Con_Printf ("Ogg sound file \"%s\" uses ReplayGain (gain %f, peak not defined and assumed to be %f)\n", filename, sfx->volume_mult, sfx->volume_peak);
-	}
+	OGG_ApplyReplayGain(filename, sfx, peak, gaindb);
 
 	return true;
 }

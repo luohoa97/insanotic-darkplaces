@@ -960,6 +960,7 @@ void S_Init(void)
 	memset(channels, 0, MAX_CHANNELS * sizeof(channel_t));
 
 	OGG_OpenLibrary ();
+	OPUS_OpenLibrary ();
 }
 
 
@@ -974,6 +975,7 @@ void S_Terminate (void)
 {
 	S_Shutdown ();
 	OGG_CloseLibrary ();
+	OPUS_CloseLibrary ();
 
 	// Free all SFXs
 	while (known_sfx != NULL)

@@ -336,6 +336,44 @@ static void RML_Click_f(void)
 	Key_Event(K_MOUSE1, 0, false);
 }
 
+// A drag, for tests of drag scrolling: the button goes down at the start, the
+// pointer takes ten frames to the end, then the button goes up.
+static struct { qboolean active; int frame; int x0, y0, x1, y1; } ui_drag;
+
+static void RML_Drag_f(void)
+{
+	if (Cmd_Argc() < 5)
+	{
+		Con_Printf("usage: rml_drag <x0> <y0> <x1> <y1>   press at the first pixel, drag to the second, release\n");
+		return;
+	}
+	ui_drag.x0 = atoi(Cmd_Argv(1));
+	ui_drag.y0 = atoi(Cmd_Argv(2));
+	ui_drag.x1 = atoi(Cmd_Argv(3));
+	ui_drag.y1 = atoi(Cmd_Argv(4));
+	ui_drag.frame = 0;
+	ui_drag.active = true;
+}
+
+static void UI_RML_DragStep(void)
+{
+	float t;
+
+	if (!ui_drag.active)
+		return;
+	t = ui_drag.frame > 10 ? 1.0f : ui_drag.frame / 10.0f;
+	in_windowmouse_x = (int)(ui_drag.x0 + (ui_drag.x1 - ui_drag.x0) * t);
+	in_windowmouse_y = (int)(ui_drag.y0 + (ui_drag.y1 - ui_drag.y0) * t);
+	if (ui_drag.frame == 0)
+		Key_Event(K_MOUSE1, 0, true);
+	else if (ui_drag.frame == 12)
+	{
+		Key_Event(K_MOUSE1, 0, false);
+		ui_drag.active = false;
+	}
+	ui_drag.frame++;
+}
+
 static void RML_List_f(void)
 {
 	if (!ui_created)
@@ -357,6 +395,7 @@ void UI_RML_Init(void)
 	Cmd_AddCommand("rml_hide", RML_Hide_f, "hide an RmlUi document (all of them without a name)");
 	Cmd_AddCommand("rml_reload", RML_Reload_f, "load the RmlUi documents, stylesheets and images again (for editing them)");
 	Cmd_AddCommand("rml_click", RML_Click_f, "click at a window pixel as if with the mouse (for tests)");
+	Cmd_AddCommand("rml_drag", RML_Drag_f, "press, drag and release the primary button between window pixels (for tests)");
 	Cmd_AddCommand("rml_list", RML_List_f, "list the RmlUi documents");
 }
 
@@ -424,6 +463,7 @@ void UI_RML_Draw(void)
 		UI_RML_Create();
 	if (!ui_created)
 		return;
+	UI_RML_DragStep();
 
 	// the QuakeC menu draws its own main screen unless it is told not to
 	active = menu_rmlui.integer && !ui_mainmenu_failed;
@@ -519,7 +559,7 @@ int UI_RML_KeyEvent(int key, int ascii, int down)
 	{
 		ui_routed[key] = 0;
 		if (key >= K_MOUSE1 && key <= K_MOUSE3)
-			UIRml_MouseButton(key - K_MOUSE1, 0, UI_RML_Modifiers(), VID_InputIsTouch());
+			UIRml_MouseButton(key - K_MOUSE1, 0, UI_RML_Modifiers(), vid_touchscreen.integer || VID_InputIsTouch());
 		else if (key == K_MWHEELUP || key == K_MWHEELDOWN)
 			;
 		else if ((k = UI_RML_TranslateKey(key)) != 0)
@@ -537,7 +577,7 @@ int UI_RML_KeyEvent(int key, int ascii, int down)
 		UIRml_MouseMove((float)in_windowmouse_x, (float)in_windowmouse_y);
 		ui_mouse_sent[0] = (float)in_windowmouse_x;
 		ui_mouse_sent[1] = (float)in_windowmouse_y;
-		UIRml_MouseButton(key - K_MOUSE1, 1, mods, VID_InputIsTouch());
+		UIRml_MouseButton(key - K_MOUSE1, 1, mods, vid_touchscreen.integer || VID_InputIsTouch());
 		ui_routed[key] = 1;
 		return 1;
 	}

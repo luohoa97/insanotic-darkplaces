@@ -27,6 +27,8 @@
 
 qboolean OGG_OpenLibrary (void);
 void OGG_CloseLibrary (void);
+qboolean OPUS_OpenLibrary (void);
+void OPUS_CloseLibrary (void);
 qboolean OGG_LoadVorbisFile (const char *filename, sfx_t *sfx);
 
 

@@ -18,6 +18,8 @@
 #include <RmlUi/Core.h>
 
 #include <cmath>
+#include <cstdio>
+#include <cstring>
 #include <map>
 #include <memory>
 #include <string>
@@ -619,6 +621,11 @@ int UIRml_MouseButton(int button, int down, int modifiers, int touch)
 			g->pressed = false;
 			g->scrolling = false;
 			if (was_scrolling) {
+				if (g->scroll_target) {
+					char line[96];
+					snprintf(line, sizeof(line), "dragged a list to scroll position %d", (int)g->scroll_target->GetScrollTop());
+					UIE_Log(2, line);
+				}
 				// the context was told the pointer left; release without a click
 				g->context->ProcessMouseButtonUp(0, modifiers);
 				return 1;
