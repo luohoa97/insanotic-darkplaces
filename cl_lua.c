@@ -490,6 +490,7 @@ static int LuaCl_players(lua_State *L)
 typedef struct cl_lua_weapon_s
 {
 	char name[32];
+	char icon[64]; // the HUD's icon file name (the weapon's model2), "" when unknown
 	int id;
 	int ammo_stat; // -1: no ammo needed
 } cl_lua_weapon_t;
@@ -547,7 +548,7 @@ static qboolean CL_Lua_BindCSQC(void)
 	prvm_edict_t *ed;
 	ddef_t *g;
 	mfunction_t *fn;
-	int f_impulse, f_next, f_name, f_ammo, f_nametype, guard, stat_fuel = -1, stat_plasma = -1, res_none = 0, type;
+	int f_impulse, f_next, f_name, f_ammo, f_nametype, f_icon, f_icontype = 0, guard, stat_fuel = -1, stat_plasma = -1, res_none = 0, type;
 	if (!prog->loaded)
 	{
 		cl_lua_csqc.bound = false;
@@ -578,6 +579,8 @@ static qboolean CL_Lua_BindCSQC(void)
 	f_next = CL_Lua_FieldOfs(prog, "enemy", NULL);
 	f_name = CL_Lua_FieldOfs(prog, "netname", &f_nametype);
 	f_ammo = CL_Lua_FieldOfs(prog, "ammo_type", NULL);
+	// the HUD icon name: custom server weapons bring their own, named freely
+	f_icon = CL_Lua_FieldOfs(prog, "model2", &f_icontype);
 	if (cl_lua_csqc.f_id < 0 || f_next < 0 || f_name < 0)
 		return true;
 	if ((ed = CL_Lua_GlobalEdict(prog, "STAT_WEAPONS")))
@@ -611,6 +614,9 @@ static qboolean CL_Lua_BindCSQC(void)
 			cl_lua_weapon_t *w = &cl_lua_csqc.weapons[cl_lua_csqc.numweapons++];
 			w->id = id;
 			strlcpy(w->name, PRVM_GetString(prog, PRVM_EDICTFIELDSTRING(ed, f_name)), sizeof(w->name));
+			w->icon[0] = 0;
+			if (f_icon >= 0 && f_icontype == ev_string)
+				strlcpy(w->icon, PRVM_GetString(prog, PRVM_EDICTFIELDSTRING(ed, f_icon)), sizeof(w->icon));
 			w->ammo_stat = -1;
 			if (f_ammo >= 0)
 			{
@@ -701,6 +707,11 @@ static int LuaCl_weapons(lua_State *L)
 		cl_lua_weapon_t *w = &cl_lua_csqc.weapons[i];
 		lua_createtable(L, 0, 7);
 		lua_pushstring(L, w->name); lua_setfield(L, -2, "name");
+		if (w->icon[0])
+		{
+			lua_pushstring(L, w->icon);
+			lua_setfield(L, -2, "icon");
+		}
 		lua_pushinteger(L, w->id); lua_setfield(L, -2, "id");
 		lua_pushinteger(L, 230 + w->id - 1); lua_setfield(L, -2, "impulse");
 		lua_pushboolean(L, CL_Lua_WeaponOwned(w)); lua_setfield(L, -2, "owned");
