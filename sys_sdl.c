@@ -34,6 +34,41 @@
 
 #include "quakedef.h"
 
+#ifdef __ANDROID__
+#include <dlfcn.h>
+#include <unwind.h>
+
+// Insanotic: something other than the engine's own error path can end the
+// process with exit() (the system then reports only "exit status 1"). Log
+// where every unexpected exit came from, as library + offset pairs that
+// addr2line resolves against the unstripped libraries of the build.
+static _Unwind_Reason_Code Sys_Android_LogFrame(struct _Unwind_Context *context, void *arg)
+{
+	int *depth = (int *)arg;
+	uintptr_t pc = _Unwind_GetIP(context);
+	Dl_info info;
+	if (!pc)
+		return _URC_END_OF_STACK;
+	if (dladdr((void *)pc, &info) && info.dli_fname)
+		__android_log_print(ANDROID_LOG_ERROR, "darkplaces", "  #%02d pc %08lx %s (%s)", *depth,
+			(unsigned long)(pc - (uintptr_t)info.dli_fbase), info.dli_fname,
+			info.dli_sname ? info.dli_sname : "?");
+	else
+		__android_log_print(ANDROID_LOG_ERROR, "darkplaces", "  #%02d pc %p", *depth, (void *)pc);
+	return ++*depth < 48 ? _URC_NO_REASON : _URC_END_OF_STACK;
+}
+
+extern qboolean host_shuttingdown;
+static void Sys_Android_AtExit(void)
+{
+	int depth = 0;
+	if (host_shuttingdown)
+		return; // Sys_Quit: a normal quit
+	__android_log_print(ANDROID_LOG_ERROR, "darkplaces", "unexpected exit, called from:");
+	_Unwind_Backtrace(Sys_Android_LogFrame, &depth);
+}
+#endif
+
 // =======================================================================
 // General routines
 // =======================================================================
@@ -69,6 +104,12 @@ void Sys_Error (const char *error, ...)
 
 #ifdef WIN32
 	MessageBox(NULL, string, "Quake Error", MB_OK | MB_SETFOREGROUND | MB_ICONSTOP);
+#endif
+#ifdef __ANDROID__
+	// the console line above can be lost (some phones rate limit logcat),
+	// and a player sees only the app closing: log it as an error and show it
+	__android_log_print(ANDROID_LOG_ERROR, "darkplaces", "Engine Error: %s", string);
+	SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Insanotic error", string, NULL);
 #endif
 
 	Host_Shutdown ();
@@ -223,6 +264,7 @@ int main (int argc, char *argv[])
 
 #ifdef __ANDROID__
 	Sys_AllowProfiling(true);
+	atexit(Sys_Android_AtExit);
 #endif
 
 	com_argc = argc;
