@@ -1297,6 +1297,12 @@ void Sys_SendKeyEvents( void )
 				if (!vid_touchscreen.integer)
 				if (event.type == SDL_MOUSEBUTTONDOWN && event.button.which != SDL_TOUCH_MOUSEID && !cl_lua_touch_mouse.integer)
 					vid_input_touch = false;
+				// Insanotic: the menu reads the pointer when the button
+				// event arrives; IN_Move updates it only later in the frame,
+				// so a tap (motion and press at once) pressed where the
+				// previous tap had been and every button took two taps
+				in_windowmouse_x = event.button.x;
+				in_windowmouse_y = event.button.y;
 				if (!(cl_lua_touch_captured && (event.button.which == SDL_TOUCH_MOUSEID || (cl_lua_touch_mouse.integer && event.button.button == SDL_BUTTON_LEFT))))
 				if (event.button.button > 0 && event.button.button <= ARRAY_SIZE(buttonremap))
 					Key_Event( buttonremap[event.button.button - 1], 0, event.button.state == SDL_PRESSED );
