@@ -199,6 +199,11 @@ const char *UIE_CvarString(const char *name)
 	return Cvar_VariableString(name);
 }
 
+int UIE_FileExists(const char *path)
+{
+	return FS_FileExists(path) != 0;
+}
+
 int UIE_VideoModes(UIE_VideoMode *out, int max)
 {
 	int i, n = 0;

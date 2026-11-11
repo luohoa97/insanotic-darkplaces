@@ -17,6 +17,7 @@
 #include <RmlUi/Core.h>
 
 #include <algorithm>
+#include <map>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -175,6 +176,7 @@ std::vector<PlayerRow> ParsePlayers(const char* text)
 
 struct ServerRow {
 	std::string address, name, map, type, players;
+	std::string image; // the map's picture, only while the row is near the screen (else empty)
 	int ping = 0;
 	int humans = 0;
 	int slots = 0;
@@ -201,9 +203,64 @@ struct ServersModel {
 	bool was_shown = false;
 	std::string signature; // what the rows were built from, to tell when they changed
 	double next_update = 0;
+	double next_images = 0;
+	Rml::Context* context = nullptr;
+	std::map<std::string, std::string> pictures; // map name -> picture path, "" when the client has none
 };
 
 ServersModel* servers = nullptr;
+
+// The picture of a map as the menu can load it ("/maps/<name>"), or "" when
+// the game files have none. Maps the player once downloaded count: their
+// packs are in the file system. The answer is remembered for each map, as
+// many servers share maps, and forgotten when the list is asked again, in
+// case a map was downloaded in between.
+std::string MapPicture(const std::string& map)
+{
+	if (map.empty() || map.find_first_of("/\\.:") != std::string::npos)
+		return "";
+	auto it = servers->pictures.find(map);
+	if (it != servers->pictures.end())
+		return it->second;
+	std::string found;
+	for (const char* ext : {".jpg", ".png", ".tga"})
+		if (UIE_FileExists(("maps/" + map + ext).c_str())) {
+			found = "/maps/" + map;
+			break;
+		}
+	servers->pictures[map] = found;
+	return found;
+}
+
+// Only the rows in view (and a few around them) get their picture: a
+// texture is loaded for each one, and a phone should not hold hundreds.
+// Rows that scroll out lose theirs again.
+void UpdateRowImages()
+{
+	ServersModel& m = *servers;
+	if (!m.context || m.rows.empty())
+		return;
+	Rml::Element* list = nullptr;
+	for (int i = 0; i < m.context->GetNumDocuments() && !list; i++)
+		list = m.context->GetDocument(i)->GetElementById("serverlist");
+	if (!list || list->GetNumChildren() < 1)
+		return;
+	float rh = list->GetChild(0)->GetOffsetHeight();
+	if (rh < 1)
+		return;
+	int first = std::max(0, (int)(list->GetScrollTop() / rh) - 2);
+	int last = (int)((list->GetScrollTop() + list->GetClientHeight()) / rh) + 2;
+	bool changed = false;
+	for (int i = 0; i < (int)m.rows.size(); i++) {
+		std::string want = (i >= first && i <= last) ? MapPicture(m.rows[i].map) : "";
+		if (m.rows[i].image != want) {
+			m.rows[i].image = want;
+			changed = true;
+		}
+	}
+	if (changed)
+		m.handle.DirtyVariable("rows");
+}
 
 bool CvarBool(const char* name, bool fallback)
 {
@@ -278,6 +335,7 @@ void ServersRebuild(bool force)
 		return;
 	m.signature = sig;
 	m.rows.swap(rows);
+	UpdateRowImages(); // so the pictures do not blink when the list changes
 	m.status = status;
 	m.handle.DirtyVariable("rows");
 	m.handle.DirtyVariable("status");
@@ -302,7 +360,7 @@ void InfoRefresh()
 			m.info_ping = r.ping;
 			m.info_name = r.name;
 			m.info_map = r.map;
-			m.info_image = "/maps/" + r.map;
+			m.info_image = MapPicture(r.map);
 			m.info_mode = r.type;
 		}
 	for (const char* v : {"info_players", "info_humans", "info_bots", "info_slots", "info_mod", "info_favorite", "info_ping", "info_name", "info_map", "info_image", "info_mode"})
@@ -331,6 +389,7 @@ void ServersCvars(bool write)
 void ServersAsk(double now, bool reset)
 {
 	UIE_ServerRefresh(reset ? 1 : 0);
+	servers->pictures.clear();
 	servers->refreshing = true;
 	servers->refresh_until = now + 6; // long enough for the first answers
 	servers->next_update = 0;
@@ -349,7 +408,13 @@ void ServersUpdate(double now, bool shown)
 		servers->refreshing = false;
 		servers->signature.clear();
 	}
-	if (!shown || now < servers->next_update)
+	if (!shown)
+		return;
+	if (now >= servers->next_images) {
+		servers->next_images = now + 0.12;
+		UpdateRowImages();
+	}
+	if (now < servers->next_update)
 		return;
 	servers->next_update = now + 0.4;
 	ServersCvars(true);
@@ -363,9 +428,11 @@ void CreateServers(Rml::Context* context)
 	if (!c)
 		return;
 	servers = new ServersModel;
+	servers->context = context;
 	ServersModel& m = *servers;
 	if (auto s = c.RegisterStruct<ServerRow>()) {
 		s.RegisterMember("address", &ServerRow::address);
+		s.RegisterMember("image", &ServerRow::image);
 		s.RegisterMember("name", &ServerRow::name);
 		s.RegisterMember("map", &ServerRow::map);
 		s.RegisterMember("type", &ServerRow::type);

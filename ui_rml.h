@@ -81,6 +81,8 @@ void UIE_Log(int level, const char *text);
 void UIE_Command(const char *command);
 /* value of a cvar as text, empty when there is none */
 const char *UIE_CvarString(const char *name);
+/* whether a file is in the game files (packs, folders, downloaded packs) */
+int UIE_FileExists(const char *path);
 /* the screen sizes the video code offers */
 typedef struct UIE_VideoMode { int width, height; } UIE_VideoMode;
 int UIE_VideoModes(UIE_VideoMode *out, int max);
