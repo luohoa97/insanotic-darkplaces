@@ -79,10 +79,9 @@ static int outfd = 1;
 void Sys_PrintToTerminal(const char *text)
 {
 #ifdef __ANDROID__
-	if (developer.integer > 0)
-	{
-		__android_log_write(ANDROID_LOG_DEBUG, com_argv[0], text);
-	}
+	// always: without a terminal, logcat is the only place a failed start
+	// (missing data, QC errors) can be read
+	__android_log_write(ANDROID_LOG_INFO, "darkplaces", text);
 #else
 	if(outfd < 0)
 		return;
