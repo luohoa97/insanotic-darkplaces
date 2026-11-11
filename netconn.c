@@ -21,6 +21,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 */
 
 #include "quakedef.h"
+#include "loadtimes.h"
 #include "thread.h"
 #include "lhnet.h"
 
@@ -90,8 +91,10 @@ cvar_t cl_netlocalping = {0, "cl_netlocalping","0", "lags local loopback connect
 static cvar_t cl_netpacketloss_send = {0, "cl_netpacketloss_send","0", "drops this percentage of outgoing packets, useful for testing network protocol robustness (jerky movement, prediction errors, etc)"};
 static cvar_t cl_netpacketloss_receive = {0, "cl_netpacketloss_receive","0", "drops this percentage of incoming packets, useful for testing network protocol robustness (jerky movement, effects failing to start, sounds failing to play, etc)"};
 static cvar_t net_slist_queriespersecond = {0, "net_slist_queriespersecond", "20", "how many server information requests to send per second"};
-static cvar_t net_slist_queriesperframe = {0, "net_slist_queriesperframe", "4", "maximum number of server information requests to send each rendered frame (guards against low framerates causing problems)"};
+static cvar_t net_slist_queriesperframe = {0, "net_slist_queriesperframe", "100", "maximum number of server information requests to send each rendered frame (guards against low framerates causing problems)"};
 static cvar_t net_slist_timeout = {0, "net_slist_timeout", "4", "how long to listen for a server information response before giving up"};
+static cvar_t net_slist_burst = {CVAR_SAVE, "net_slist_burst", "1", "query up to net_slist_queriesperframe servers every frame instead of net_slist_queriespersecond (Insanotic: the list fills in about one ping time)"};
+static cvar_t net_slist_querywait = {CVAR_SAVE, "net_slist_querywait", "0", "seconds to wait after a master server reply before querying the servers it listed (stock DarkPlaces: 3)"};
 static cvar_t net_slist_pause = {0, "net_slist_pause", "0", "when set to 1, the server list won't update until it is set back to 0"};
 static cvar_t net_slist_maxtries = {0, "net_slist_maxtries", "3", "how many times to ask the same server for information (more times gives better ping reports but takes longer)"};
 static cvar_t net_slist_favorites = {CVAR_SAVE | CVAR_NQUSERINFOHACK, "net_slist_favorites", "", "contains a list of IP addresses and ports to always query explicitly"};
@@ -577,6 +580,93 @@ static void _ServerList_Test(void)
 }
 #endif
 
+/*
+Insanotic: the server list is saved on exit (serverlist_cache.dat in the
+user directory). On the next full refresh the saved servers are shown at
+once with their last known details and asked again straight away, before
+the master servers answer; servers that no longer reply drop off as usual.
+*/
+#define SERVERLIST_CACHEFILE "serverlist_cache.dat"
+#define SERVERLIST_CACHEMAGIC "ISLC1"
+
+static void ServerList_SaveCache(void)
+{
+	qfile_t *f;
+	int n, count = 0, infosize = (int)sizeof(serverlist_info_t);
+	for (n = 0; n < serverlist_cachecount; n++)
+		if (serverlist_cache[n].query == SQS_QUERIED)
+			count++;
+	if (!count)
+		return;
+	f = FS_OpenRealFile(SERVERLIST_CACHEFILE, "wb", false);
+	if (!f)
+		return;
+	FS_Write(f, SERVERLIST_CACHEMAGIC, 5);
+	FS_Write(f, &infosize, sizeof(infosize));
+	FS_Write(f, &count, sizeof(count));
+	for (n = 0; n < serverlist_cachecount; n++)
+	{
+		serverlist_entry_t *e = &serverlist_cache[n];
+		if (e->query != SQS_QUERIED)
+			continue;
+		FS_Write(f, &e->protocol, sizeof(e->protocol));
+		FS_Write(f, &e->info, sizeof(e->info));
+		FS_Write(f, e->line1, sizeof(e->line1));
+		FS_Write(f, e->line2, sizeof(e->line2));
+	}
+	FS_Close(f);
+}
+
+static void ServerList_LoadCache(void)
+{
+	unsigned char *buf, *p;
+	fs_offset_t size;
+	int infosize, count, n, recsize = (int)(sizeof(int) + sizeof(serverlist_info_t) + 256);
+	buf = FS_LoadFile(SERVERLIST_CACHEFILE, tempmempool, true, &size);
+	if (!buf)
+		return;
+	if (size < 5 + 2 * (fs_offset_t)sizeof(int) || memcmp(buf, SERVERLIST_CACHEMAGIC, 5))
+	{
+		Mem_Free(buf);
+		return;
+	}
+	memcpy(&infosize, buf + 5, sizeof(int));
+	memcpy(&count, buf + 5 + sizeof(int), sizeof(int));
+	p = buf + 5 + 2 * sizeof(int);
+	if (infosize != (int)sizeof(serverlist_info_t) || count <= 0 || count > SERVERLIST_TOTALSIZE || size < (p - buf) + (fs_offset_t)count * recsize)
+	{
+		Mem_Free(buf);
+		return;
+	}
+	for (n = 0; n < count && serverlist_cachecount < SERVERLIST_TOTALSIZE; n++, p += recsize)
+	{
+		serverlist_entry_t *e;
+		if (serverlist_maxcachecount <= serverlist_cachecount)
+		{
+			serverlist_maxcachecount += 64;
+			serverlist_cache = (serverlist_entry_t *)Mem_Realloc(netconn_mempool, (void *)serverlist_cache, sizeof(serverlist_entry_t) * serverlist_maxcachecount);
+		}
+		e = &serverlist_cache[serverlist_cachecount++];
+		memset(e, 0, sizeof(*e));
+		memcpy(&e->protocol, p, sizeof(int));
+		memcpy(&e->info, p + sizeof(int), sizeof(serverlist_info_t));
+		memcpy(e->line1, p + sizeof(int) + sizeof(serverlist_info_t), sizeof(e->line1));
+		memcpy(e->line2, p + sizeof(int) + sizeof(serverlist_info_t) + 128, sizeof(e->line2));
+		e->info.cname[sizeof(e->info.cname) - 1] = 0;
+		e->line1[sizeof(e->line1) - 1] = 0;
+		e->line2[sizeof(e->line2) - 1] = 0;
+		// shown now, asked again right away
+		e->query = SQS_REFRESHING;
+		e->querycounter = 0;
+		serverreplycount++;
+		if (!serverlist_paused)
+			ServerList_ViewList_Insert(e);
+	}
+	Mem_Free(buf);
+	serverlist_querysleep = false;
+	serverlist_querywaittime = 0;
+}
+
 void ServerList_QueryList(qboolean resetcache, qboolean querydp, qboolean queryqw, qboolean consoleoutput)
 {
 	masterquerytime = realtime;
@@ -589,6 +679,7 @@ void ServerList_QueryList(qboolean resetcache, qboolean querydp, qboolean queryq
 		serverlist_viewcount = 0;
 		serverlist_maxcachecount = 0;
 		serverlist_cache = (serverlist_entry_t *)Mem_Realloc(netconn_mempool, (void *)serverlist_cache, sizeof(serverlist_entry_t) * serverlist_maxcachecount);
+		ServerList_LoadCache();
 	} else {
 		// refresh all entries
 		int n;
@@ -1781,7 +1872,7 @@ static void NetConn_ClientParsePacket_ServerList_ParseDPList(lhnetaddress_t *sen
 
 	// begin or resume serverlist queries
 	serverlist_querysleep = false;
-	serverlist_querywaittime = realtime + 3;
+	serverlist_querywaittime = realtime + net_slist_querywait.value;
 }
 #endif
 
@@ -2085,7 +2176,7 @@ static int NetConn_ClientParsePacket(lhnetsocket_t *mysocket, unsigned char *dat
 			}
 			// begin or resume serverlist queries
 			serverlist_querysleep = false;
-			serverlist_querywaittime = realtime + 3;
+			serverlist_querywaittime = realtime + net_slist_querywait.value;
 			return true;
 		}
 #endif
@@ -2352,10 +2443,27 @@ void NetConn_QueryQueueFrame(void)
 		return;
 
 	// each time querycounter reaches 1.0 issue a query
-	querycounter += cl.realframetime * net_slist_queriespersecond.value;
-	maxqueries = (int)querycounter;
-	maxqueries = bound(0, maxqueries, net_slist_queriesperframe.integer);
-	querycounter -= maxqueries;
+	if (developer_loadtimes.integer && masterquerytime > 0 && realtime - masterquerytime < 6)
+	{
+		static double lastprint = 0;
+		if (realtime - lastprint >= 0.5)
+		{
+			lastprint = realtime;
+			Con_Printf("server list: %d shown after %.1f s\n", serverlist_viewcount, realtime - masterquerytime);
+		}
+	}
+	if (net_slist_burst.integer)
+	{
+		maxqueries = net_slist_queriesperframe.integer;
+		querycounter = 0;
+	}
+	else
+	{
+		querycounter += cl.realframetime * net_slist_queriespersecond.value;
+		maxqueries = (int)querycounter;
+		maxqueries = bound(0, maxqueries, net_slist_queriesperframe.integer);
+		querycounter -= maxqueries;
+	}
 
 	if( maxqueries == 0 ) {
 		return;
@@ -3890,6 +3998,8 @@ void NetConn_Init(void)
 	Cvar_RegisterVariable(&net_slist_maxtries);
 	Cvar_RegisterVariable(&net_slist_favorites);
 	Cvar_RegisterVariable(&net_slist_pause);
+	Cvar_RegisterVariable(&net_slist_burst);
+	Cvar_RegisterVariable(&net_slist_querywait);
 	if(LHNET_DefaultDSCP(-1) >= 0) // register cvar only if supported
 		Cvar_RegisterVariable(&net_tos_dscp);
 	Cvar_RegisterVariable(&net_messagetimeout);
@@ -3953,6 +4063,9 @@ void NetConn_Init(void)
 
 void NetConn_Shutdown(void)
 {
+#ifdef CONFIG_MENU
+	ServerList_SaveCache();
+#endif
 	NetConn_CloseClientPorts();
 	NetConn_CloseServerPorts();
 	LHNET_Shutdown();
