@@ -2762,7 +2762,7 @@ static void SV_Download_f(void)
 		
 		Con_DPrintf("Downloading %s to %s\n", host_client->download_name, host_client->name);
 
-		if(host_client->download_deflate && svs.csqc_progdata_deflated)
+		if(host_client->download_deflate && SV_CSQC_Deflated())
 			host_client->download_file = FS_FileFromData(svs.csqc_progdata_deflated, svs.csqc_progsize_deflated, true);
 		else
 			host_client->download_file = FS_FileFromData(svs.csqc_progdata, sv.csqc_progsize, true);
@@ -2904,6 +2904,20 @@ SV_ModelIndex
 
 ================
 */
+// compresses the CSQC progs for downloads the first time a client asks for
+// them compressed; returns whether a compressed copy exists
+qboolean SV_CSQC_Deflated(void)
+{
+	size_t deflated_size;
+	if (svs.csqc_progdata_deflated || !svs.csqc_progdata || sv.csqc_progsize <= 0)
+		return svs.csqc_progdata_deflated != NULL;
+	svs.csqc_progdata_deflated = FS_Deflate(svs.csqc_progdata, sv.csqc_progsize, &deflated_size, -1, sv_mempool);
+	svs.csqc_progsize_deflated = (int)deflated_size;
+	if (!svs.csqc_progdata_deflated)
+		Con_DPrintf("Cannot compress - need zlib for this. Using uncompressed progs only.\n");
+	return svs.csqc_progdata_deflated != NULL;
+}
+
 int SV_ModelIndex(const char *s, int precachemode)
 {
 	int i, limit = ((sv.protocol == PROTOCOL_QUAKE || sv.protocol == PROTOCOL_QUAKEDP || sv.protocol == PROTOCOL_NEHAHRAMOVIE || sv.protocol == PROTOCOL_NEHAHRABJP || sv.protocol == PROTOCOL_NEHAHRABJP2 || sv.protocol == PROTOCOL_NEHAHRABJP3) ? 256 : MAX_MODELS);
@@ -3237,17 +3251,9 @@ static void SV_Prepare_CSQC(void)
 		strlcpy(sv.csqc_progname, csqc_progname.string, sizeof(sv.csqc_progname));
 		Con_DPrintf("server detected csqc progs file \"%s\" with size %i and crc %i\n", sv.csqc_progname, sv.csqc_progsize, sv.csqc_progcrc);
 
-		Con_DPrint("Compressing csprogs.dat\n");
-		//unsigned char *FS_Deflate(const unsigned char *data, size_t size, size_t *deflated_size, int level, mempool_t *mempool);
-		svs.csqc_progdata_deflated = FS_Deflate(svs.csqc_progdata, progsize, &deflated_size, -1, sv_mempool);
-		svs.csqc_progsize_deflated = (int)deflated_size;
-		if(svs.csqc_progdata_deflated)
-		{
-			Con_DPrintf("Deflated: %g%%\n", 100.0 - 100.0 * (deflated_size / (float)progsize));
-			Con_DPrintf("Uncompressed: %u\nCompressed:   %u\n", (unsigned)sv.csqc_progsize, (unsigned)svs.csqc_progsize_deflated);
-		}
-		else
-			Con_DPrintf("Cannot compress - need zlib for this. Using uncompressed progs only.\n");
+		// Insanotic: compressed on the first compressed download request
+		// (SV_CSQC_Deflated) instead of at every map start
+		(void)deflated_size;
 	}
 }
 

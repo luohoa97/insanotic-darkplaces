@@ -542,6 +542,7 @@ int SV_SoundIndex(const char *s, int precachemode);
 int SV_ParticleEffectIndex(const char *name);
 
 dp_model_t *SV_GetModelByIndex(int modelindex);
+qboolean SV_CSQC_Deflated(void);
 dp_model_t *SV_GetModelFromEdict(prvm_edict_t *ed);
 
 void SV_SetIdealPitch (void);

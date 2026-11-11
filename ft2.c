@@ -36,6 +36,8 @@ CVars introduced with the freetype extension
 cvar_t r_font_disable_freetype = {CVAR_SAVE, "r_font_disable_freetype", "1", "disable freetype support for fonts entirely"};
 cvar_t r_font_use_alpha_textures = {CVAR_SAVE, "r_font_use_alpha_textures", "0", "use alpha-textures for font rendering, this should safe memory"};
 cvar_t r_font_size_snapping = {CVAR_SAVE, "r_font_size_snapping", "1", "stick to good looking font sizes whenever possible - bad when the mod doesn't support it!"};
+#define FONT_KERNING_UNKNOWN 1e30f // kerning pair not looked up yet
+
 cvar_t r_font_kerning = {CVAR_SAVE, "r_font_kerning", "1", "Use kerning if available"};
 cvar_t r_font_diskcache = {CVAR_SAVE, "r_font_diskcache", "0", "save font textures to disk for future loading rather than generating them every time"};
 cvar_t r_font_compress = {CVAR_SAVE, "r_font_compress", "0", "use texture compression on font textures to save video memory"};
@@ -946,32 +948,34 @@ static qboolean Font_LoadSize(ft2_font_t *font, float size, qboolean check_only)
 	fmap->sfx = temp.sfx;
 	fmap->sfy = temp.sfy;
 
-	// load the default kerning vector:
+	// Insanotic: the default kerning table (256 x 256 pairs per font size) is
+	// filled on first use of each pair instead of all at once; computing it
+	// up front took a large part of the game's startup
 	if (font->has_kerning)
 	{
 		Uchar l, r;
-		FT_Vector kernvec;
 		for (l = 0; l < 256; ++l)
-		{
 			for (r = 0; r < 256; ++r)
-			{
-				FT_ULong ul, ur;
-				ul = qFT_Get_Char_Index((FT_Face)font->face, l);
-				ur = qFT_Get_Char_Index((FT_Face)font->face, r);
-				if (qFT_Get_Kerning((FT_Face)font->face, ul, ur, FT_KERNING_DEFAULT, &kernvec))
-				{
-					fmap->kerning.kerning[l][r][0] = 0;
-					fmap->kerning.kerning[l][r][1] = 0;
-				}
-				else
-				{
-					fmap->kerning.kerning[l][r][0] = Font_SnapTo((kernvec.x / 64.0) / fmap->size, 1 / fmap->size);
-					fmap->kerning.kerning[l][r][1] = Font_SnapTo((kernvec.y / 64.0) / fmap->size, 1 / fmap->size);
-				}
-			}
-		}
+				fmap->kerning.kerning[l][r][0] = FONT_KERNING_UNKNOWN;
 	}
 	return true;
+}
+
+static void Font_FillKerning(ft2_font_t *font, ft2_font_map_t *fmap, Uchar l, Uchar r)
+{
+	FT_Vector kernvec;
+	FT_ULong ul = qFT_Get_Char_Index((FT_Face)font->face, l);
+	FT_ULong ur = qFT_Get_Char_Index((FT_Face)font->face, r);
+	if (qFT_Get_Kerning((FT_Face)font->face, ul, ur, FT_KERNING_DEFAULT, &kernvec))
+	{
+		fmap->kerning.kerning[l][r][0] = 0;
+		fmap->kerning.kerning[l][r][1] = 0;
+	}
+	else
+	{
+		fmap->kerning.kerning[l][r][0] = Font_SnapTo((kernvec.x / 64.0) / fmap->size, 1 / fmap->size);
+		fmap->kerning.kerning[l][r][1] = Font_SnapTo((kernvec.y / 64.0) / fmap->size, 1 / fmap->size);
+	}
 }
 
 int Font_IndexForSize(ft2_font_t *font, float _fsize, float *outw, float *outh)
@@ -1074,6 +1078,8 @@ qboolean Font_GetKerningForMap(ft2_font_t *font, int map_index, float w, float h
 	{
 		//Con_Printf("%g : %f, %f, %f :: %f\n", (w / (float)fmap->size), w, fmap->size, fmap->intSize, Font_VirtualToRealSize(w));
 		// quick-kerning, be aware of the size: scale it
+		if (fmap->kerning.kerning[left][right][0] == FONT_KERNING_UNKNOWN)
+			Font_FillKerning(font, fmap, left, right);
 		if (outx) *outx = fmap->kerning.kerning[left][right][0];// * (w / (float)fmap->size);
 		if (outy) *outy = fmap->kerning.kerning[left][right][1];// * (h / (float)fmap->size);
 		return true;
