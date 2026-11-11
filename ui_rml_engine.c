@@ -180,6 +180,7 @@ void UIE_Log(int level, const char *text)
 
 void UIE_Command(const char *command)
 {
+	Con_DPrintf("RmlUi: command %s\n", command);
 	Cbuf_AddText(command);
 	Cbuf_AddText("\n");
 }
