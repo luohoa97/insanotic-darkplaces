@@ -2379,11 +2379,11 @@ rtexture_t *R_LoadTextureDDSFile(rtexturepool_t *rtexturepool, const char *filen
 
 #ifdef __ANDROID__
 	// ELUAN: FIXME: separate this code
+	// Insanotic: a missing .ktx falls through to the .dds file, which
+	// R_LoadTextureDDSFile decodes in software when the GPU has no S3TC
+	// (game packs ship DDS, not KTX)
 	if (vid.renderpath != RENDERPATH_GLES2)
-	{
-		Con_DPrintf("KTX texture format is only supported on the GLES2 renderpath\n");
-		return NULL;
-	}
+		goto loaddds;
 
 	// some textures are specified with extensions, so it becomes .tga.dds
 	FS_StripExtension (filename, vabuf2, sizeof(vabuf2));
@@ -2401,7 +2401,7 @@ rtexture_t *R_LoadTextureDDSFile(rtexturepool_t *rtexturepool, const char *filen
 	if (!dds)
 	{
 		Con_DPrintf("Not found!\n");
-		return NULL; // not found
+		goto loaddds;
 	}
 	Con_DPrintf("Found!\n");
 
@@ -2512,6 +2512,7 @@ rtexture_t *R_LoadTextureDDSFile(rtexturepool_t *rtexturepool, const char *filen
 			return NULL;
 		}
 	}
+loaddds:
 #endif // __ANDROID__
 
 	dds = FS_LoadFile(filename, tempmempool, true, &ddsfilesize);
