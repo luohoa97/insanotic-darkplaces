@@ -199,9 +199,17 @@ OBJ_COMMON= \
 	world.o \
 	zone.o
 
+# RmlUi (rmlui/, vendored) and the engine side of it. Needs a C++ compiler
+# and FreeType; the objects get an rml_ prefix so they never collide with the
+# engine's own (e.g. rmlui/Source/Core/Context.cpp vs. any future Context.c).
+RMLUI_SRCDIRS=rmlui/Source/Core rmlui/Source/Core/Elements rmlui/Source/Core/FontEngineDefault rmlui/Source/Core/Layout
+OBJ_RMLUI=$(patsubst %.cpp,rml_%.o,$(notdir $(wildcard $(addsuffix /*.cpp,$(addprefix ../../../,$(RMLUI_SRCDIRS))))))
+OBJ_RML=ui_rml_engine.o rml_ui_rml.o $(OBJ_RMLUI)
+
 OBJ_MENU= \
 	menu.o \
-	mvm_cmds.o
+	mvm_cmds.o \
+	$(OBJ_RML)
 
 # note that builddate.c is very intentionally not compiled to a .o before
 # being linked, because it should be recompiled every time an executable is
@@ -240,6 +248,15 @@ OPTIM_RELEASE=-O3 -fno-strict-aliasing -fno-math-errno -fno-trapping-math $(CPUO
 
 DO_CC=$(CC) $(CFLAGS) -c $< -o $@
 
+# RmlUi and its glue are C++17. They share the engine's flags minus the C
+# dialect and the C-only warnings, and take FreeType's headers from
+# pkg-config (or the usual place when there is no pkg-config).
+CXX?=g++
+FREETYPE_CFLAGS?=$(or $(filter %freetype2,$(shell pkg-config --cflags-only-I freetype2 2>/dev/null)),-I/usr/include/freetype2)
+CXXFLAGS_RML=-std=gnu++17 -w -DRMLUI_STATIC_LIB -DRMLUI_FONT_ENGINE_FREETYPE -I../../../rmlui/Include $(FREETYPE_CFLAGS)
+DO_CXX=$(CXX) $(filter-out -std=gnu11 -W%,$(CFLAGS)) $(CXXFLAGS_RML) -c $< -o $@
+LIB_RMLUI=-lstdc++ -lfreetype
+
 
 # Link
 LDFLAGS_DEBUG=-g -ggdb $(OPTIM_DEBUG) -DSVNREVISION=`{ test -d .svn && svnversion; } || { test -d .git && git describe --always; } || echo -` -DBUILDTYPE=debug
@@ -252,13 +269,13 @@ LDFLAGS_RELEASE=$(OPTIM_RELEASE) -DSVNREVISION=`{ test -d .svn && svnversion; } 
 OBJ_GLX= builddate.c sys_linux.o vid_glx.o thread_pthread.o keysym2ucs.o $(OBJ_MENU) $(OBJ_SOUND) $(OBJ_CD) $(OBJ_VIDEO_CAPTURE) $(OBJ_COMMON)
 
 LDFLAGS_UNIXCOMMON=-lm $(LIB_ODE) $(LIB_Z) $(LIB_JPEG) $(LIB_CRYPTO) $(LIB_CRYPTO_RIJNDAEL)
-LDFLAGS_UNIXCL=-L$(UNIX_X11LIBPATH) -lX11 -lXpm -lXext -lXxf86vm -pthread $(LIB_SOUND)
+LDFLAGS_UNIXCL=-L$(UNIX_X11LIBPATH) -lX11 -lXpm -lXext -lXxf86vm -pthread $(LIB_SOUND) $(LIB_RMLUI)
 LDFLAGS_UNIXCL_PRELOAD=-lz -ljpeg -lpng -logg -ltheora -lvorbis -lvorbisenc -lvorbisfile -lcurl
 LDFLAGS_UNIXSV_PRELOAD=-lz -ljpeg -lpng -lcurl
 LDFLAGS_UNIXSDL_PRELOAD=-lz -ljpeg -lpng -logg -ltheora -lvorbis -lvorbisenc -lvorbisfile -lcurl
 CFLAGS_UNIX_PRELOAD=-DPREFER_PRELOAD
 
-LDFLAGS_UNIXSDL=$(SDLCONFIG_LIBS)
+LDFLAGS_UNIXSDL=$(SDLCONFIG_LIBS) $(LIB_RMLUI)
 EXE_UNIXCL=darkplaces-glx
 EXE_UNIXSV=darkplaces-dedicated
 EXE_UNIXSDL=darkplaces-sdl
@@ -285,9 +302,9 @@ LDFLAGS_LINUXSDL=$(LDFLAGS_UNIXCOMMON) -lrt -ldl $(LDFLAGS_UNIXSDL)
 OBJ_MACOSXCD=$(OBJ_NOCD)
 
 # Link
-LDFLAGS_MACOSXCL=$(LDFLAGS_UNIXCOMMON) -ldl -framework IOKit -framework Carbon $(LIB_SOUND)
+LDFLAGS_MACOSXCL=$(LDFLAGS_UNIXCOMMON) -ldl -framework IOKit -framework Carbon $(LIB_SOUND) $(LIB_RMLUI)
 LDFLAGS_MACOSXSV=$(LDFLAGS_UNIXCOMMON) -ldl
-LDFLAGS_MACOSXSDL=$(LDFLAGS_UNIXCOMMON) -ldl -framework IOKit $(SDLCONFIG_STATICLIBS) ../../../SDLMain.m
+LDFLAGS_MACOSXSDL=$(LDFLAGS_UNIXCOMMON) -ldl -framework IOKit $(SDLCONFIG_STATICLIBS) $(LIB_RMLUI) ../../../SDLMain.m
 
 OBJ_AGL= builddate.c sys_linux.o vid_agl.o thread_null.o $(OBJ_MENU) $(OBJ_SOUND) $(OBJ_CD) $(OBJ_VIDEO_CAPTURE) $(OBJ_COMMON)
 
@@ -324,9 +341,9 @@ OBJ_WGL= builddate.c sys_win.o vid_wgl.o thread_null.o $(OBJ_MENU) $(OBJ_SND_WIN
 
 # Link
 # see LDFLAGS_WINCOMMON in makefile
-LDFLAGS_WINCL=$(LDFLAGS_WINCOMMON) $(LIB_CRYPTO) $(LIB_CRYPTO_RIJNDAEL) -mwindows -lwinmm -luser32 -lgdi32 -ldxguid -ldinput -lcomctl32 -lws2_32 $(LDFLAGS_D3D) $(LIB_Z) $(LIB_JPEG)
+LDFLAGS_WINCL=$(LDFLAGS_WINCOMMON) $(LIB_CRYPTO) $(LIB_CRYPTO_RIJNDAEL) -mwindows -lwinmm -luser32 -lgdi32 -ldxguid -ldinput -lcomctl32 -lws2_32 $(LDFLAGS_D3D) $(LIB_Z) $(LIB_JPEG) $(LIB_RMLUI)
 LDFLAGS_WINSV=$(LDFLAGS_WINCOMMON) $(LIB_CRYPTO) $(LIB_CRYPTO_RIJNDAEL) -mconsole -lwinmm -lws2_32 $(LIB_Z) $(LIB_JPEG)
-LDFLAGS_WINSDL=$(LDFLAGS_WINCOMMON) $(LIB_CRYPTO) $(LIB_CRYPTO_RIJNDAEL) $(SDLCONFIG_LIBS) -lwinmm -lws2_32 $(LIB_Z) $(LIB_JPEG)
+LDFLAGS_WINSDL=$(LDFLAGS_WINCOMMON) $(LIB_CRYPTO) $(LIB_CRYPTO_RIJNDAEL) $(SDLCONFIG_LIBS) -lwinmm -lws2_32 $(LIB_Z) $(LIB_JPEG) $(LIB_RMLUI)
 EXE_WINCL=darkplaces.exe
 EXE_WINSV=darkplaces-dedicated.exe
 EXE_WINSDL=darkplaces-sdl.exe
@@ -556,6 +573,13 @@ nexuiz.o: %.o : %.rc
 .c.o:
 	$(CHECKLEVEL2)
 	$(DO_CC)
+
+# RmlUi sources live in several directories under rmlui/ (see RMLUI_SRCDIRS)
+vpath %.cpp $(addprefix ../../../,$(RMLUI_SRCDIRS))
+
+rml_%.o: %.cpp
+	$(CHECKLEVEL2)
+	$(DO_CXX)
 
 # Lua sources live in lua/; prefix the objects so lua/lutf8lib.c and the
 # engine's utf8lib.c (and any future clash) never collide in the build dir

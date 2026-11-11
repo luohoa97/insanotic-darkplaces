@@ -22,6 +22,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "cdaudio.h"
 #endif
 #include "image.h"
+#include "ui_rml.h"
 #include "progsvm.h"
 
 #include "mprogdefs.h"
@@ -5291,6 +5292,11 @@ static void MP_KeyEvent (int key, int ascii, qboolean downevent)
 {
 	prvm_prog_t *prog = MVM_prog;
 
+	// Insanotic: an RmlUi document (the main menu, or one shown with
+	// rml_show) gets the event first
+	if (UI_RML_KeyEvent(key, ascii, downevent))
+		return;
+
 	// pass key
 	prog->globals.fp[OFS_PARM0] = (prvm_vec_t) key;
 	prog->globals.fp[OFS_PARM1] = (prvm_vec_t) ascii;
@@ -5479,6 +5485,7 @@ void MR_Init_Commands(void)
 	Cvar_RegisterVariable (&menu_progs);
 	Cmd_AddCommand ("menu_restart",MR_Restart, "restart menu system (reloads menu.dat)");
 	Cmd_AddCommand ("togglemenu", Call_MR_ToggleMenu_f, "opens or closes menu");
+	UI_RML_Init();
 }
 
 void MR_Init(void)

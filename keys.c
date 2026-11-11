@@ -23,6 +23,7 @@
 #include "quakedef.h"
 #include "cl_video.h"
 #include "utf8lib.h"
+#include "ui_rml.h"
 #include "csprogs.h"
 
 cvar_t con_closeontoggleconsole = {CVAR_SAVE, "con_closeontoggleconsole","1", "allows toggleconsole binds to close the console as well; when set to 2, this even works when not at the start of the line in console input; when set to 3, this works even if the toggleconsole key is the color tag"};
@@ -1740,6 +1741,11 @@ void Key_EventQueue_Unblock(void)
 	eventqueue_idx = 0;
 }
 
+qboolean Key_IsDown(int key)
+{
+	return key >= 0 && key < MAX_KEYS && keydown[key] != 0;
+}
+
 void
 Key_Event (int key, int ascii, qboolean down)
 {
@@ -1791,6 +1797,14 @@ Key_Event (int key, int ascii, qboolean down)
 
 	if(keydest == key_void)
 		return;
+
+	// Insanotic: a document shown with rml_show takes every key and mouse
+	// event, except while the console is up
+#ifdef CONFIG_MENU
+	if (keydest != key_console && UI_RML_Modal())
+		if (UI_RML_KeyEvent(key, ascii, down))
+			return;
+#endif
 
 	// key_consoleactive is a flag not a key_dest because the console is a
 	// high priority overlay ontop of the normal screen (designed as a safety

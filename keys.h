@@ -377,6 +377,8 @@ void Key_Init(void);
 void Key_Shutdown(void);
 void Key_Init_Cvars(void);
 void Key_Event(int key, int ascii, qboolean down);
+// Insanotic: whether a key or mouse button is held down
+qboolean Key_IsDown(int key);
 void Key_ReleaseAll (void);
 void Key_EventQueue_Block(void);
 void Key_EventQueue_Unblock(void);

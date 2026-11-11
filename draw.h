@@ -184,6 +184,10 @@ float DrawQ_TextWidth_UntilWidth_TrackColors_Scale(const char *text, size_t *max
 void DrawQ_SuperPic(float x, float y, cachepic_t *pic, float width, float height, float s1, float t1, float r1, float g1, float b1, float a1, float s2, float t2, float r2, float g2, float b2, float a2, float s3, float t3, float r3, float g3, float b3, float a3, float s4, float t4, float r4, float g4, float b4, float a4, int flags);
 // draw a triangle mesh
 void DrawQ_Mesh(drawqueuemesh_t *mesh, int flags, qboolean hasalpha);
+// Insanotic: draw a mesh whose colors and texture are premultiplied by alpha (RmlUi)
+void DrawQ_MeshPremultiplied(drawqueuemesh_t *mesh);
+// Insanotic: set the clipping area in window pixels (top left origin)
+void DrawQ_SetClipAreaPixels(int x, int y, int width, int height);
 // set the clipping area
 void DrawQ_SetClipArea(float x, float y, float width, float height);
 // reset the clipping area

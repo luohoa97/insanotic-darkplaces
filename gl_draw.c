@@ -19,6 +19,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 */
 
 #include "quakedef.h"
+#include "ui_rml.h"
 #include "image.h"
 #include "wad.h"
 
@@ -1051,6 +1052,9 @@ static void gl_draw_start(void)
 static void gl_draw_shutdown(void)
 {
 	font_shutdown();
+
+	// Insanotic: RmlUi's textures live in this pool, so it goes first
+	UI_RML_Shutdown();
 
 	R_FreeTexturePool(&drawtexturepool);
 
@@ -2131,6 +2135,51 @@ void DrawQ_Lines (float width, int numlines, int flags, qboolean hasalpha)
 		//Con_DPrintf("FIXME GLES2 %s:%i %s\n", __FILE__, __LINE__, __FUNCTION__);
 		return;
 	}
+}
+
+// Insanotic (RmlUi): like DrawQ_Mesh, but the vertex colors and the texture
+// carry premultiplied alpha, which is what RmlUi produces. Plain alpha
+// blending would darken every soft edge of a glyph or a rounded corner.
+void DrawQ_MeshPremultiplied(drawqueuemesh_t *mesh)
+{
+	_DrawQ_Setup();
+	if(!r_draw2d.integer && !r_draw2d_force)
+		return;
+	GL_DepthMask(false);
+	GL_BlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
+
+	R_SetupShader_Generic(mesh->texture, NULL, GL_MODULATE, 1, true, true, false);
+
+	R_Mesh_PrepareVertices_Generic_Arrays(mesh->num_vertices, mesh->data_vertex3f, mesh->data_color4f, mesh->data_texcoord2f);
+	R_Mesh_Draw(0, mesh->num_vertices, 0, mesh->num_triangles, mesh->data_element3i, NULL, 0, mesh->data_element3s, NULL, 0);
+}
+
+// Insanotic (RmlUi): scissor in window pixels, top left origin. DrawQ_SetClipArea
+// takes console units and rounds, which is a pixel off for layouts that are
+// laid out in real pixels.
+void DrawQ_SetClipAreaPixels(int x, int y, int width, int height)
+{
+	_DrawQ_Setup();
+	x += r_refdef.view.x;
+	y += r_refdef.view.y;
+	switch(vid.renderpath)
+	{
+	case RENDERPATH_GL11:
+	case RENDERPATH_GL13:
+	case RENDERPATH_GL20:
+	case RENDERPATH_GLES1:
+	case RENDERPATH_GLES2:
+	case RENDERPATH_SOFT:
+		GL_Scissor(x, vid.height - y - height, width, height);
+		break;
+	case RENDERPATH_D3D9:
+		GL_Scissor(x, y, width, height);
+		break;
+	case RENDERPATH_D3D10:
+	case RENDERPATH_D3D11:
+		break;
+	}
+	GL_ScissorTest(true);
 }
 
 void DrawQ_SetClipArea(float x, float y, float width, float height)

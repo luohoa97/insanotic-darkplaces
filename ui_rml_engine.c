@@ -1,0 +1,588 @@
+/*
+ * Insanotic: RmlUi in the engine, C side. See ui_rml.h for how the two halves
+ * fit together.
+ *
+ * The main menu is the one document the engine shows by itself. The QuakeC
+ * menu keeps running underneath and tells the engine (cvar _menu_overview)
+ * when it is showing its main screen, the one with the big buttons. Then, if
+ * menu_rmlui is on, this file shows ui/mainmenu.rml instead and tells the
+ * QuakeC menu (cvar _menu_rml_active) to leave out its own buttons and
+ * pointer. Buttons of the document run console commands such as
+ * "menu_cmd directmenu Settings", which makes the QuakeC menu open that
+ * dialog; the document then goes away until the main screen is back.
+ *
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ */
+
+#include "quakedef.h"
+
+#include "ui_rml.h"
+
+#include "cl_lua.h"
+#include "draw.h"
+#include "image.h"
+#include "keys.h"
+
+#define MAINMENU "mainmenu"
+
+cvar_t menu_rmlui = {CVAR_SAVE, "menu_rmlui", "1", "show the main menu as an RmlUi document (ui/mainmenu.rml) instead of the QuakeC one"};
+cvar_t rml_scale = {CVAR_SAVE, "rml_scale", "0", "size of RmlUi documents: how many pixels a dp is; 0 picks one from the window height (and a bigger one on touch screens)"};
+// QuakeC sets this each frame: 1 while its main screen (the overview of
+// Singleplayer, Multiplayer, ...) is showing and no dialog is open
+static cvar_t menu_overview = {0, "_menu_overview", "0", "set by the menu: 1 while the menu's main screen is up"};
+// and reads this one to know it should not draw that screen itself
+static cvar_t menu_rml_active = {0, "_menu_rml_active", "0", "set by the engine: 1 while an RmlUi document draws the menu's main screen"};
+
+static qboolean ui_created;
+static qboolean ui_mainmenu_failed;
+static unsigned int ui_texture_serial;
+
+// documents shown with rml_show, to bring back after a renderer restart
+#define MAX_REMEMBERED 8
+static char ui_remembered[MAX_REMEMBERED][MAX_QPATH];
+static int ui_num_remembered;
+
+// which keys and buttons went to a document when they went down, so the
+// release goes there too
+static unsigned char ui_routed[MAX_KEYS];
+
+static float ui_mouse_sent[2] = {-1, -1};
+
+/*
+================================================================================
+The engine side of RmlUi's interfaces (see ui_rml.h)
+================================================================================
+*/
+
+unsigned char *UIE_LoadFile(const char *path, size_t *size)
+{
+	fs_offset_t len = 0;
+	unsigned char *data = FS_LoadFile(path, tempmempool, true, &len);
+	if (!data)
+		return NULL;
+	*size = (size_t)len;
+	return data;
+}
+
+void UIE_Free(void *data)
+{
+	if (data)
+		Mem_Free(data);
+}
+
+unsigned char *UIE_LoadImage(const char *path, int *width, int *height)
+{
+	unsigned char *bgra;
+	unsigned char *rgba;
+	int i, n;
+
+	while (*path == '/')
+		path++;
+	bgra = loadimagepixelsbgra(path, false, false, false, NULL);
+	if (!bgra)
+	{
+		Con_Printf("RmlUi: image %s not found\n", path);
+		return NULL;
+	}
+	*width = image_width;
+	*height = image_height;
+	// RmlUi wants premultiplied alpha, the engine decodes straight BGRA
+	n = image_width * image_height;
+	rgba = (unsigned char *)Mem_Alloc(tempmempool, (size_t)n * 4);
+	for (i = 0; i < n; i++)
+	{
+		unsigned int a = bgra[i * 4 + 3];
+		rgba[i * 4 + 0] = (unsigned char)((bgra[i * 4 + 2] * a + 127) / 255);
+		rgba[i * 4 + 1] = (unsigned char)((bgra[i * 4 + 1] * a + 127) / 255);
+		rgba[i * 4 + 2] = (unsigned char)((bgra[i * 4 + 0] * a + 127) / 255);
+		rgba[i * 4 + 3] = (unsigned char)a;
+	}
+	Mem_Free(bgra);
+	return rgba;
+}
+
+void *UIE_TextureCreate(const unsigned char *rgba, int width, int height, int mipmap)
+{
+	char name[32];
+	int flags = TEXF_ALPHA | TEXF_CLAMP | TEXF_FORCELINEAR;
+
+	if (!drawtexturepool)
+		return NULL;
+	if (mipmap)
+		flags |= TEXF_MIPMAP;
+	// a name of its own, or the texture code hands back an earlier one that
+	// happens to have the same size
+	dpsnprintf(name, sizeof(name), "rmlui%u", ++ui_texture_serial);
+	return R_LoadTexture2D(drawtexturepool, name, width, height, rgba, TEXTYPE_RGBA, flags, -1, NULL);
+}
+
+void UIE_TextureFree(void *texture)
+{
+	if (texture)
+		R_FreeTexture((rtexture_t *)texture);
+}
+
+void UIE_DrawTriangles(const float *xy, const float *uv, const float *rgba, int numvertices, const int *indices, int numindices, void *texture)
+{
+	static float *vertex3f;
+	static int capacity;
+	drawqueuemesh_t mesh;
+	float sx, sy;
+	int i;
+
+	if (numvertices > capacity)
+	{
+		capacity = numvertices + 256;
+		if (vertex3f)
+			Mem_Free(vertex3f);
+		vertex3f = (float *)Mem_Alloc(cls.permanentmempool, sizeof(float) * 3 * capacity);
+	}
+	// DrawQ works in console units; the document is laid out in window pixels
+	sx = (float)vid_conwidth.integer / (float)vid.width;
+	sy = (float)vid_conheight.integer / (float)vid.height;
+	for (i = 0; i < numvertices; i++)
+	{
+		vertex3f[i * 3 + 0] = xy[i * 2 + 0] * sx;
+		vertex3f[i * 3 + 1] = xy[i * 2 + 1] * sy;
+		vertex3f[i * 3 + 2] = 0;
+	}
+	mesh.texture = (rtexture_t *)texture;
+	mesh.num_triangles = numindices / 3;
+	mesh.num_vertices = numvertices;
+	mesh.data_element3i = (int *)indices;
+	mesh.data_element3s = NULL;
+	mesh.data_vertex3f = vertex3f;
+	mesh.data_texcoord2f = (float *)uv;
+	mesh.data_color4f = (float *)rgba;
+	DrawQ_MeshPremultiplied(&mesh);
+}
+
+void UIE_Scissor(int enable, int x, int y, int width, int height)
+{
+	if (enable)
+		DrawQ_SetClipAreaPixels(x, y, width, height);
+	else
+		DrawQ_ResetClipArea();
+}
+
+double UIE_Time(void)
+{
+	return realtime;
+}
+
+void UIE_Log(int level, const char *text)
+{
+	if (level >= 2)
+		Con_DPrintf("RmlUi: %s\n", text);
+	else
+		Con_Printf("RmlUi: %s\n", text);
+}
+
+void UIE_Command(const char *command)
+{
+	Cbuf_AddText(command);
+	Cbuf_AddText("\n");
+}
+
+const char *UIE_CvarString(const char *name)
+{
+	return Cvar_VariableString(name);
+}
+
+void UIE_Keyboard(int show)
+{
+	VID_ShowKeyboard(show != 0);
+}
+
+/*
+================================================================================
+Life cycle
+================================================================================
+*/
+
+static float UI_RML_DPRatio(void)
+{
+	if (rml_scale.value > 0)
+		return rml_scale.value;
+	// 720 dp of height on a monitor; touch screens are held close and used
+	// with a finger, so they get fewer, bigger dps (a phone in landscape
+	// ends up about 450 dp high)
+	return (float)vid.height / (vid_touchscreen.integer ? 450.0f : 720.0f);
+}
+
+static void UI_RML_Create(void)
+{
+	int i;
+
+	if (ui_created || !vid.width || !vid.height)
+		return;
+	if (!UIRml_Create(vid.width, vid.height, UI_RML_DPRatio()))
+	{
+		ui_mainmenu_failed = true;
+		return;
+	}
+	ui_created = true;
+	ui_mainmenu_failed = false;
+	// load the main menu now rather than on first use, so a document that
+	// does not load is found out before the QuakeC menu leaves its own out
+	if (UIRml_Show(MAINMENU))
+		UIRml_Hide(MAINMENU);
+	else
+	{
+		Con_Printf("RmlUi: ui/" MAINMENU ".rml did not load, the QuakeC main menu stays\n");
+		ui_mainmenu_failed = true;
+	}
+	for (i = 0; i < ui_num_remembered; i++)
+		UIRml_Show(ui_remembered[i]);
+	ui_num_remembered = 0;
+	ui_mouse_sent[0] = ui_mouse_sent[1] = -1;
+	memset(ui_routed, 0, sizeof(ui_routed));
+}
+
+static void UI_RML_Remember(const char *name)
+{
+	if (strcmp(name, MAINMENU) && ui_num_remembered < MAX_REMEMBERED)
+		dpsnprintf(ui_remembered[ui_num_remembered++], sizeof(ui_remembered[0]), "%s", name);
+}
+
+static void UI_RML_Destroy(void)
+{
+	if (!ui_created)
+		return;
+	ui_num_remembered = 0;
+	UIRml_EachShown(UI_RML_Remember);
+	UIRml_Destroy();
+	ui_created = false;
+}
+
+// The renderer is restarting or the engine is quitting. The textures RmlUi
+// holds are in the draw module's pool, which is about to be freed, so give
+// them back first; everything is made again on the next frame drawn.
+void UI_RML_Shutdown(void)
+{
+	UI_RML_Destroy();
+}
+
+/*
+================================================================================
+Console commands
+================================================================================
+*/
+
+static void UI_RML_PrintLine(const char *line)
+{
+	Con_Printf("  %s\n", line);
+}
+
+static void RML_Show_f(void)
+{
+	if (Cmd_Argc() < 2)
+	{
+		Con_Printf("usage: rml_show <document>   shows ui/<document>.rml\n");
+		return;
+	}
+	Host_StartVideo();
+	UI_RML_Create();
+	if (!ui_created)
+		return;
+	if (!UIRml_Show(Cmd_Argv(1)))
+		Con_Printf("rml_show: ui/%s.rml did not load\n", Cmd_Argv(1));
+}
+
+static void RML_Hide_f(void)
+{
+	if (Cmd_Argc() < 2)
+	{
+		UIRml_HideAll();
+		return;
+	}
+	UIRml_Hide(Cmd_Argv(1));
+}
+
+static void RML_Reload_f(void)
+{
+	if (!ui_created)
+	{
+		Con_Printf("rml_reload: nothing loaded yet\n");
+		return;
+	}
+	UIRml_Reload();
+	// a main menu that failed to load may work now
+	ui_mainmenu_failed = false;
+	if (UIRml_Show(MAINMENU))
+	{
+		if (!Cvar_VariableValue("_menu_overview") || !menu_rmlui.integer)
+			UIRml_Hide(MAINMENU);
+	}
+	else
+		ui_mainmenu_failed = true;
+	Con_Printf("RmlUi documents reloaded\n");
+}
+
+// A click the way the window system would deliver it, for tests: the pointer
+// moves, the button goes down and up through Key_Event, so it takes the same
+// route into the menu as a real one.
+static void RML_Click_f(void)
+{
+	if (Cmd_Argc() < 3)
+	{
+		Con_Printf("usage: rml_click <x> <y>   click the primary button at a window pixel\n");
+		return;
+	}
+	in_windowmouse_x = atoi(Cmd_Argv(1));
+	in_windowmouse_y = atoi(Cmd_Argv(2));
+	Key_Event(K_MOUSE1, 0, true);
+	Key_Event(K_MOUSE1, 0, false);
+}
+
+static void RML_List_f(void)
+{
+	if (!ui_created)
+	{
+		Con_Printf("RmlUi is not running\n");
+		return;
+	}
+	Con_Printf("RmlUi documents:\n");
+	UIRml_List(UI_RML_PrintLine);
+}
+
+void UI_RML_Init(void)
+{
+	Cvar_RegisterVariable(&menu_rmlui);
+	Cvar_RegisterVariable(&rml_scale);
+	Cvar_RegisterVariable(&menu_overview);
+	Cvar_RegisterVariable(&menu_rml_active);
+	Cmd_AddCommand("rml_show", RML_Show_f, "show an RmlUi document: rml_show <name> loads ui/<name>.rml and draws it above the menu");
+	Cmd_AddCommand("rml_hide", RML_Hide_f, "hide an RmlUi document (all of them without a name)");
+	Cmd_AddCommand("rml_reload", RML_Reload_f, "load the RmlUi documents, stylesheets and images again (for editing them)");
+	Cmd_AddCommand("rml_click", RML_Click_f, "click at a window pixel as if with the mouse (for tests)");
+	Cmd_AddCommand("rml_list", RML_List_f, "list the RmlUi documents");
+}
+
+/*
+================================================================================
+Drawing
+================================================================================
+*/
+
+static int UI_RML_Modifiers(void)
+{
+	int m = 0;
+	if (Key_IsDown(K_CTRL))
+		m |= UIMOD_CTRL;
+	if (Key_IsDown(K_SHIFT))
+		m |= UIMOD_SHIFT;
+	if (Key_IsDown(K_ALT))
+		m |= UIMOD_ALT;
+	return m;
+}
+
+int UI_RML_Modal(void)
+{
+	return ui_created && UIRml_AnyShownExcept(MAINMENU);
+}
+
+static qboolean UI_RML_MainMenuShown(void)
+{
+	return ui_created && UIRml_IsShown(MAINMENU);
+}
+
+static void UI_RML_DrawCursor(void)
+{
+	cachepic_t *pic;
+	char name[MAX_QPATH];
+	const char *skin = Cvar_VariableString("menu_skin");
+	float x, y;
+
+	if (vid_touchscreen.integer || VID_InputIsTouch())
+		return; // a finger is no pointer
+	dpsnprintf(name, sizeof(name), "gfx/menu/%s/cursor", *skin ? skin : "luminos");
+	pic = Draw_CachePic_Flags(name, CACHEPICFLAG_QUIET);
+	if (!pic || !Draw_GetPicTexture(pic))
+		pic = Draw_CachePic_Flags("gfx/menu/luminos/cursor", CACHEPICFLAG_QUIET);
+	if (!pic || !Draw_GetPicTexture(pic))
+		return;
+	x = in_windowmouse_x * (float)vid_conwidth.integer / (float)vid.width;
+	y = in_windowmouse_y * (float)vid_conheight.integer / (float)vid.height;
+	// the skin's cursor is 32x32 console units
+	DrawQ_Pic(x, y, pic, 32, 32, 1, 1, 1, 1, 0);
+}
+
+void UI_RML_Draw(void)
+{
+	qboolean want_main;
+	qboolean active;
+
+	if (!menu_rmlui.integer && !ui_created)
+	{
+		if (menu_rml_active.integer)
+			Cvar_SetValueQuick(&menu_rml_active, 0);
+		return;
+	}
+	if (!ui_created)
+		UI_RML_Create();
+	if (!ui_created)
+		return;
+
+	// the QuakeC menu draws its own main screen unless it is told not to
+	active = menu_rmlui.integer && !ui_mainmenu_failed;
+	if (menu_rml_active.integer != (active ? 1 : 0))
+		Cvar_SetValueQuick(&menu_rml_active, active);
+
+	want_main = active && Cvar_VariableValue("_menu_overview") != 0 && (key_dest == key_menu || key_dest == key_menu_grabbed);
+	if (want_main != UI_RML_MainMenuShown())
+	{
+		if (want_main)
+		{
+			UIRml_Show(MAINMENU);
+			// the finger or pointer that went down on the dialog's close
+			// button must not click what is now under it
+			UIRml_MouseLeave();
+			ui_mouse_sent[0] = ui_mouse_sent[1] = -1;
+		}
+		else
+			UIRml_Hide(MAINMENU);
+	}
+	if (!UI_RML_MainMenuShown() && !UIRml_AnyShownExcept(MAINMENU))
+		return;
+
+	UIRml_Resize(vid.width, vid.height, UI_RML_DPRatio());
+	UIRml_SetBodyClass(MAINMENU, "touch", vid_touchscreen.integer != 0);
+	UIRml_SetBodyClass(MAINMENU, "ingame", cls.state == ca_connected);
+	// a finger is only a pointer while it is down
+	if (!vid_touchscreen.integer && !VID_InputIsTouch())
+	{
+		if (ui_mouse_sent[0] != in_windowmouse_x || ui_mouse_sent[1] != in_windowmouse_y)
+		{
+			ui_mouse_sent[0] = (float)in_windowmouse_x;
+			ui_mouse_sent[1] = (float)in_windowmouse_y;
+			UIRml_MouseMove(ui_mouse_sent[0], ui_mouse_sent[1]);
+		}
+	}
+	else if (Key_IsDown(K_MOUSE1) && (ui_mouse_sent[0] != in_windowmouse_x || ui_mouse_sent[1] != in_windowmouse_y))
+	{
+		ui_mouse_sent[0] = (float)in_windowmouse_x;
+		ui_mouse_sent[1] = (float)in_windowmouse_y;
+		UIRml_MouseMove(ui_mouse_sent[0], ui_mouse_sent[1]);
+	}
+
+	UIRml_Frame();
+	DrawQ_ResetClipArea();
+	UI_RML_DrawCursor();
+}
+
+/*
+================================================================================
+Input
+================================================================================
+*/
+
+static int UI_RML_TranslateKey(int key)
+{
+	if (key >= 'a' && key <= 'z')
+		return key;
+	if (key >= '0' && key <= '9')
+		return key;
+	switch (key)
+	{
+	case K_SPACE: return ' ';
+	case K_ESCAPE: return UIKEY_ESCAPE;
+	case K_TAB: return UIKEY_TAB;
+	case K_ENTER: case K_KP_ENTER: return UIKEY_RETURN;
+	case K_BACKSPACE: return UIKEY_BACKSPACE;
+	case K_DEL: return UIKEY_DELETE;
+	case K_INS: return UIKEY_INSERT;
+	case K_HOME: return UIKEY_HOME;
+	case K_END: return UIKEY_END;
+	case K_PGUP: return UIKEY_PAGEUP;
+	case K_PGDN: return UIKEY_PAGEDOWN;
+	case K_LEFTARROW: return UIKEY_LEFT;
+	case K_RIGHTARROW: return UIKEY_RIGHT;
+	case K_UPARROW: return UIKEY_UP;
+	case K_DOWNARROW: return UIKEY_DOWN;
+	default: return 0;
+	}
+}
+
+int UI_RML_KeyEvent(int key, int ascii, int down)
+{
+	int mods, k;
+	qboolean modal, main_shown;
+
+	if (!ui_created || key < 0 || key >= MAX_KEYS)
+		return 0;
+	main_shown = UI_RML_MainMenuShown();
+	modal = UI_RML_Modal();
+	// a release goes where the press went, shown or not
+	if (!down && ui_routed[key])
+	{
+		ui_routed[key] = 0;
+		if (key >= K_MOUSE1 && key <= K_MOUSE3)
+			UIRml_MouseButton(key - K_MOUSE1, 0, UI_RML_Modifiers(), VID_InputIsTouch());
+		else if (key == K_MWHEELUP || key == K_MWHEELDOWN)
+			;
+		else if ((k = UI_RML_TranslateKey(key)) != 0)
+			UIRml_Key(k, 0, UI_RML_Modifiers());
+		return 1;
+	}
+	if (!main_shown && !modal)
+		return 0;
+	if (!down)
+		return 0;
+	mods = UI_RML_Modifiers();
+
+	if (key >= K_MOUSE1 && key <= K_MOUSE3)
+	{
+		UIRml_MouseMove((float)in_windowmouse_x, (float)in_windowmouse_y);
+		ui_mouse_sent[0] = (float)in_windowmouse_x;
+		ui_mouse_sent[1] = (float)in_windowmouse_y;
+		UIRml_MouseButton(key - K_MOUSE1, 1, mods, VID_InputIsTouch());
+		ui_routed[key] = 1;
+		return 1;
+	}
+	if (key == K_MWHEELUP || key == K_MWHEELDOWN)
+	{
+		UIRml_MouseWheel(key == K_MWHEELUP ? 1.0f : -1.0f, mods);
+		return 1;
+	}
+	if (key == K_TEXT)
+	{
+		if (UIRml_TextFocus() && ascii)
+		{
+			UIRml_Text((unsigned int)ascii);
+			return 1;
+		}
+		return 0;
+	}
+	if (key == K_ESCAPE)
+	{
+		// escape closes a document shown with rml_show; on the main menu it is
+		// the QuakeC menu's (it leaves the menu when a game is running)
+		if (modal)
+		{
+			UIRml_HideAll();
+			ui_routed[key] = 1;
+			return 1;
+		}
+		return 0;
+	}
+	k = UI_RML_TranslateKey(key);
+	if (!k)
+		return 0;
+	// with a text field focused, typing belongs to it entirely
+	if (UIRml_TextFocus())
+	{
+		UIRml_Key(k, 1, mods);
+		ui_routed[key] = 1;
+		return 1;
+	}
+	// otherwise only what moves between or presses buttons; letters stay
+	// with the QuakeC menu's shortcuts
+	if (k == UIKEY_TAB || k == UIKEY_RETURN || k == ' ' || k == UIKEY_LEFT || k == UIKEY_RIGHT || k == UIKEY_UP || k == UIKEY_DOWN || modal)
+		if (UIRml_Key(k, 1, mods))
+		{
+			ui_routed[key] = 1;
+			return 1;
+		}
+	return modal ? 1 : 0;
+}

@@ -3,6 +3,7 @@
 #include "cl_lua.h"
 #include "cl_video.h"
 #include "image.h"
+#include "ui_rml.h"
 #include "jpeg.h"
 #include "image_png.h"
 #include "cl_collision.h"
@@ -2260,6 +2261,7 @@ static void SCR_DrawScreen (void)
 	SCR_DrawNetGraph ();
 #ifdef CONFIG_MENU
 	MR_Draw();
+	UI_RML_Draw(); // Insanotic: RmlUi documents above the QuakeC menu
 #endif
 	CL_DrawVideo();
 	R_Shadow_EditLights_DrawSelectedLightProperties();
@@ -3244,11 +3246,11 @@ void CL_UpdateScreen(void)
 	else if (key_consoleactive)
 		VID_SetMouse(vid.fullscreen, false, false);
 	else if (key_dest == key_menu_grabbed)
-		VID_SetMouse(true, vid_mouse.integer && !in_client_mouse && !vid_touchscreen.integer, !vid_touchscreen.integer);
+		VID_SetMouse(true, vid_mouse.integer && !in_client_mouse && !UI_RML_Modal() && !vid_touchscreen.integer, !vid_touchscreen.integer);
 	else if (key_dest == key_menu)
-		VID_SetMouse(vid.fullscreen, vid_mouse.integer && !in_client_mouse && !vid_touchscreen.integer, !vid_touchscreen.integer);
+		VID_SetMouse(vid.fullscreen, vid_mouse.integer && !in_client_mouse && !UI_RML_Modal() && !vid_touchscreen.integer, !vid_touchscreen.integer);
 	else
-		VID_SetMouse(vid.fullscreen, vid_mouse.integer && !cl.csqc_wantsmousemove && cl_prydoncursor.integer <= 0 && (!cls.demoplayback || cl_demo_mousegrab.integer) && !vid_touchscreen.integer, !vid_touchscreen.integer);
+		VID_SetMouse(vid.fullscreen, vid_mouse.integer && !UI_RML_Modal() && !cl.csqc_wantsmousemove && cl_prydoncursor.integer <= 0 && (!cls.demoplayback || cl_demo_mousegrab.integer) && !vid_touchscreen.integer, !vid_touchscreen.integer);
 
 	VID_Finish();
 }
