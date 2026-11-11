@@ -37,6 +37,7 @@ cvar_t gl_texturecompression_lightcubemaps = {CVAR_SAVE, "gl_texturecompression_
 cvar_t gl_texturecompression_reflectmask = {CVAR_SAVE, "gl_texturecompression_reflectmask", "1", "whether to compress reflection cubemap masks (mask of which areas of the texture should reflect the generic shiny cubemap)"};
 cvar_t gl_texturecompression_sprites = {CVAR_SAVE, "gl_texturecompression_sprites", "1", "whether to compress sprites"};
 cvar_t gl_nopartialtextureupdates = {CVAR_SAVE, "gl_nopartialtextureupdates", "0", "use alternate path for dynamic lightmap updates that avoids a possibly slow code path in the driver"};
+cvar_t r_texture_astc_load = {CVAR_SAVE, "r_texture_astc_load", "1", "load ASTC versions (dds/foo.ktx) of textures when the GPU supports GL_KHR_texture_compression_astc_ldr"};
 cvar_t r_texture_dds_load_alphamode = {0, "r_texture_dds_load_alphamode", "1", "0: trust DDPF_ALPHAPIXELS flag, 1: texture format and brute force search if ambiguous, 2: texture format only"};
 cvar_t r_texture_dds_load_logfailure = {0, "r_texture_dds_load_logfailure", "0", "log missing DDS textures to ddstexturefailures.log, 0: done log, 1: log with no optional textures (_norm, glow etc.). 2: log all"};
 #ifdef __ANDROID__
@@ -85,6 +86,9 @@ typedef struct textypeinfo_s
 	int gltype;
 }
 textypeinfo_t;
+
+// glinternalformat is replaced per texture by the ASTC block size in the file
+static textypeinfo_t textype_astc                        = {"astc",                     TEXTYPE_ASTC          ,  4,  4,  1.0f, 0                                     , 0                 , 0                };
 
 #ifdef USE_GLES2
 
@@ -305,6 +309,7 @@ static textypeinfo_t *R_GetTexTypeInfo(textype_t textype, int flags)
 #ifdef __ANDROID__
 	case TEXTYPE_ETC1: return &textype_etc1;
 #endif
+	case TEXTYPE_ASTC: return &textype_astc;
 	case TEXTYPE_ALPHA: return &textype_alpha;
 	case TEXTYPE_COLORBUFFER: return &textype_colorbuffer;
 	case TEXTYPE_COLORBUFFER16F: return &textype_colorbuffer16f;
@@ -324,6 +329,7 @@ static textypeinfo_t *R_GetTexTypeInfo(textype_t textype, int flags)
 	case TEXTYPE_PALETTE: return (flags & TEXF_ALPHA) ? &textype_palette_alpha : &textype_palette;
 	case TEXTYPE_RGBA: return ((flags & TEXF_COMPRESS) && vid.support.ext_texture_compression_s3tc) ? ((flags & TEXF_ALPHA) ? &textype_rgba_alpha_compress : &textype_rgba_compress) : ((flags & TEXF_ALPHA) ? &textype_rgba_alpha : &textype_rgba);
 	case TEXTYPE_BGRA: return ((flags & TEXF_COMPRESS) && vid.support.ext_texture_compression_s3tc) ? ((flags & TEXF_ALPHA) ? &textype_bgra_alpha_compress : &textype_bgra_compress) : ((flags & TEXF_ALPHA) ? &textype_bgra_alpha : &textype_bgra);
+	case TEXTYPE_ASTC: return &textype_astc;
 	case TEXTYPE_ALPHA: return &textype_alpha;
 	case TEXTYPE_COLORBUFFER: return &textype_colorbuffer;
 	case TEXTYPE_COLORBUFFER16F: return &textype_colorbuffer16f;
@@ -1006,6 +1012,7 @@ void R_Textures_Init (void)
 	Cvar_RegisterVariable (&gl_texturecompression_sprites);
 	Cvar_RegisterVariable (&gl_nopartialtextureupdates);
 	Cvar_RegisterVariable (&r_texture_dds_load_alphamode);
+	Cvar_RegisterVariable (&r_texture_astc_load);
 	Cvar_RegisterVariable (&r_texture_dds_load_logfailure);
 	Cvar_RegisterVariable (&r_texture_dds_swdecode);
 	Cvar_RegisterVariable (&r_texture_dds_swdecode_maxsize);
@@ -2360,6 +2367,196 @@ static unsigned char *DDS_DecodeMips(const unsigned char *src, fs_offset_t srcsi
 	return out;
 }
 
+// Insanotic: ASTC textures for phones (GL_KHR_texture_compression_astc_ldr).
+// The Android pack set carries dds/<name>.ktx, a KTX 1 file with the whole
+// mip chain in one ASTC block size, instead of dds/<name>.dds; the GPU takes
+// the blocks as they are, which needs a quarter to a half of the memory
+// DXT decoded in software would. glInternalFormat tells the block size and
+// glBaseInternalFormat (GL_RGB or GL_RGBA) whether there is any alpha. An
+// optional "DPAVGCOLOR" key holds the average color (4 bytes RGBA) that the
+// DDS loader would compute from the pixels.
+#define KTX_GL_RGB 0x1907
+#define KTX_GL_ASTC_FIRST 0x93B0
+#define KTX_GL_ASTC_LAST 0x93BD
+#define KTX_GL_ASTC_SRGB_OFFSET 0x20
+#define KTX_MAXLEVELS 16
+
+static rtexture_t *R_LoadTextureASTCFile(rtexturepool_t *rtexturepool, const char *ddsfilename, qboolean srgb, int flags, qboolean *hasalphaflag, float *avgcolor, int miplevel)
+{
+	static const unsigned char ktxid[12] = {0xAB, 'K', 'T', 'X', ' ', '1', '1', 0xBB, '\r', '\n', 0x1A, '\n'};
+	char ktxname[MAX_QPATH];
+	size_t namelen = strlen(ddsfilename);
+	unsigned char *ktx, *p, *kvend;
+	const unsigned char *levels[KTX_MAXLEVELS];
+	unsigned int levelsizes[KTX_MAXLEVELS];
+	fs_offset_t ktxsize;
+	unsigned int internalformat, baseformat, width, height, numlevels, kvbytes, i;
+	qboolean npot;
+	GLint oldbindtexnum = 0;
+	gltexture_t *glt;
+	gltexturepool_t *pool = (gltexturepool_t *)rtexturepool;
+	textypeinfo_t *texinfo;
+
+	if (namelen < 5 || namelen >= sizeof(ktxname) || strcmp(ddsfilename + namelen - 4, ".dds") != 0)
+		return NULL;
+	memcpy(ktxname, ddsfilename, namelen - 4);
+	strlcpy(ktxname + namelen - 4, ".ktx", sizeof(ktxname) - (namelen - 4));
+
+	ktx = FS_LoadFile(ktxname, tempmempool, true, &ktxsize);
+	if (!ktx)
+		return NULL;
+
+	if (ktxsize < 64 || memcmp(ktx, ktxid, sizeof(ktxid)) != 0 || BuffLittleLong(ktx + 12) != 0x04030201
+	 || BuffLittleLong(ktx + 16) != 0 /* glType: compressed */
+	 || BuffLittleLong(ktx + 44) > 1 || BuffLittleLong(ktx + 48) > 1 || BuffLittleLong(ktx + 52) != 1)
+	{
+		Con_Printf("^1%s: not a 2D KTX 1 image\n", ktxname);
+		Mem_Free(ktx);
+		return NULL;
+	}
+	internalformat = BuffLittleLong(ktx + 28);
+	baseformat = BuffLittleLong(ktx + 32);
+	width = BuffLittleLong(ktx + 36);
+	height = BuffLittleLong(ktx + 40);
+	numlevels = max(BuffLittleLong(ktx + 56), 1u);
+	kvbytes = BuffLittleLong(ktx + 60);
+	if (internalformat < KTX_GL_ASTC_FIRST || internalformat > KTX_GL_ASTC_LAST || width < 1 || height < 1
+	 || numlevels > KTX_MAXLEVELS || kvbytes > (unsigned int)ktxsize - 64)
+	{
+		Con_Printf("^1%s: unsupported KTX format %x\n", ktxname, internalformat);
+		Mem_Free(ktx);
+		return NULL;
+	}
+
+	// key/value pairs: u32 size, "key\0value", padding to 4 bytes
+	if (avgcolor)
+		avgcolor[0] = avgcolor[1] = avgcolor[2] = avgcolor[3] = 0.5f;
+	p = ktx + 64;
+	kvend = p + kvbytes;
+	while (p + 4 <= kvend)
+	{
+		unsigned int size = BuffLittleLong(p);
+		if (size > (unsigned int)(kvend - p - 4))
+			break;
+		if (avgcolor && size >= 11 + 4 && memcmp(p + 4, "DPAVGCOLOR", 11) == 0)
+			for (i = 0; i < 4; i++)
+				avgcolor[i] = p[4 + 11 + i] * (1.0f / 255.0f);
+		p += 4 + ((size + 3) & ~3u);
+	}
+
+	// the levels, largest first, each preceded by its size
+	p = kvend;
+	for (i = 0; i < numlevels; i++)
+	{
+		unsigned int size;
+		if (p + 4 > ktx + ktxsize)
+			break;
+		size = BuffLittleLong(p);
+		if (size > (unsigned int)(ktx + ktxsize - p - 4))
+			break;
+		levels[i] = p + 4;
+		levelsizes[i] = size;
+		p += 4 + ((size + 3) & ~3u);
+	}
+	if (i == 0)
+	{
+		Con_Printf("^1%s: truncated KTX image\n", ktxname);
+		Mem_Free(ktx);
+		return NULL;
+	}
+	numlevels = i;
+
+	// without NPOT support (plain GLES2) the DDS loader resamples; this one
+	// gives up and lets the DDS file do it
+	npot = (width & (width - 1)) || (height & (height - 1));
+	if (npot && !vid.support.arb_texture_non_power_of_two)
+	{
+		Mem_Free(ktx);
+		return NULL;
+	}
+
+	if (baseformat == KTX_GL_RGB && r_texture_dds_load_alphamode.integer == 0)
+		flags &= ~TEXF_ALPHA;
+	if (hasalphaflag)
+		*hasalphaflag = (flags & TEXF_ALPHA) != 0;
+
+	// gl_picmip: start from a smaller level
+	for (i = 0; (int)i < miplevel && numlevels > 1; i++)
+	{
+		levels[0] = levels[1];
+		levelsizes[0] = levelsizes[1];
+		memmove(levels + 1, levels + 2, (numlevels - 2) * sizeof(levels[0]));
+		memmove(levelsizes + 1, levelsizes + 2, (numlevels - 2) * sizeof(levelsizes[0]));
+		numlevels--;
+		width = max(width >> 1, 1u);
+		height = max(height >> 1, 1u);
+	}
+
+	// no mip levels when the caller does not want any
+	if (!(flags & TEXF_MIPMAP) || numlevels < 2)
+	{
+		numlevels = 1;
+		flags &= ~TEXF_MIPMAP;
+	}
+	else
+		flags |= TEXF_MIPMAP;
+
+	if (srgb && vid.support.ext_texture_srgb)
+		internalformat += KTX_GL_ASTC_SRGB_OFFSET;
+
+	texinfo = R_GetTexTypeInfo(TEXTYPE_ASTC, flags);
+
+	glt = (gltexture_t *)Mem_ExpandableArray_AllocRecord(&texturearray);
+	strlcpy(glt->identifier, ddsfilename, sizeof(glt->identifier));
+	glt->pool = pool;
+	glt->chain = pool->gltchain;
+	pool->gltchain = glt;
+	glt->inputwidth = width;
+	glt->inputheight = height;
+	glt->inputdepth = 1;
+	glt->flags = flags;
+	glt->textype = texinfo;
+	glt->texturetype = GLTEXTURETYPE_2D;
+	glt->inputdatasize = ktxsize;
+	glt->glinternalformat = internalformat;
+	glt->glformat = texinfo->glformat;
+	glt->gltype = texinfo->gltype;
+	glt->bytesperpixel = texinfo->internalbytesperpixel;
+	glt->sides = 1;
+	glt->gltexturetypeenum = gltexturetypeenums[glt->texturetype];
+	glt->tilewidth = width;
+	glt->tileheight = height;
+	glt->tiledepth = 1;
+	glt->miplevels = numlevels;
+
+	// texture uploading can take a while, so make sure we're sending keepalives
+	CL_KeepaliveMessage(false);
+
+	CHECKGLERROR
+	GL_ActiveTexture(0);
+	oldbindtexnum = R_Mesh_TexBound(0, gltexturetypeenums[glt->texturetype]);
+	qglGenTextures(1, (GLuint *)&glt->texnum);CHECKGLERROR
+	qglBindTexture(gltexturetypeenums[glt->texturetype], glt->texnum);CHECKGLERROR
+	for (i = 0; i < numlevels; i++)
+	{
+		qglCompressedTexImage2DARB(GL_TEXTURE_2D, i, internalformat, max(width >> i, 1u), max(height >> i, 1u), 0, levelsizes[i], levels[i]);CHECKGLERROR
+	}
+#ifdef GL_TEXTURE_MAX_LEVEL
+	// the chain may stop before 1x1
+	if (numlevels > 1 && (max(width, height) >> (numlevels - 1)) > 1)
+	{
+		qglTexParameteri(gltexturetypeenums[glt->texturetype], GL_TEXTURE_MAX_LEVEL, numlevels - 1);CHECKGLERROR
+	}
+#endif
+	GL_SetupTextureParameters(glt->flags, glt->textype->textype, glt->texturetype);
+	qglBindTexture(gltexturetypeenums[glt->texturetype], oldbindtexnum);CHECKGLERROR
+
+	if (developer_loading.integer >= 2)
+		Con_Printf("loaded ASTC texture %s (%ux%u, %u levels, format %x)\n", ktxname, width, height, numlevels, internalformat);
+	Mem_Free(ktx);
+	return (rtexture_t *)glt;
+}
+
 rtexture_t *R_LoadTextureDDSFile(rtexturepool_t *rtexturepool, const char *filename, qboolean srgb, int flags, qboolean *hasalphaflag, float *avgcolor, int miplevel, qboolean optionaltexture) // DDS textures are opaque, so miplevel isn't a pointer but just seen as a hint
 {
 	int i, size, dds_format_flags, dds_miplevels, dds_width, dds_height;
@@ -2528,6 +2725,15 @@ rtexture_t *R_LoadTextureDDSFile(rtexturepool_t *rtexturepool, const char *filen
 	}
 loaddds:
 #endif // __ANDROID__
+
+	// Insanotic: an ASTC version of the texture (dds/foo.ktx) wins when the
+	// GPU takes ASTC
+	if (vid.support.khr_texture_compression_astc_ldr && r_texture_astc_load.integer && vid.renderpath != RENDERPATH_SOFT)
+	{
+		rtexture_t *astc = R_LoadTextureASTCFile(rtexturepool, filename, srgb, flags, hasalphaflag, avgcolor, miplevel);
+		if (astc)
+			return astc;
+	}
 
 	dds = FS_LoadFile(filename, tempmempool, true, &ddsfilesize);
 	ddssize = ddsfilesize;
@@ -2993,6 +3199,22 @@ loaddds:
 		flags |= TEXF_MIPMAP;
 	else
 		flags &= ~TEXF_MIPMAP;
+
+	// Insanotic: GLES takes no BGRA uploads (GL_RGBA internal format with
+	// GL_BGRA data is an error, the texture stays empty: a black world on
+	// GPUs without S3TC). Software decoded pixels are swapped to RGBA there.
+	if (force_swdecode && vid.forcetextype == TEXTYPE_RGBA)
+	{
+		unsigned char *px = (unsigned char *)mippixels_start, t;
+		size_t k, n = mipsize_total / 4;
+		for (k = 0; k < n; k++, px += 4)
+		{
+			t = px[0];
+			px[0] = px[2];
+			px[2] = t;
+		}
+		textype = TEXTYPE_RGBA;
+	}
 
 	texinfo = R_GetTexTypeInfo(textype, flags);
 

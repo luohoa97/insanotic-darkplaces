@@ -1077,6 +1077,7 @@ void VID_CheckExtensions(void)
 	vid.support.ext_stencil_two_side = GL_CheckExtension("GL_EXT_stencil_two_side", stenciltwosidefuncs, "-nostenciltwoside", false);
 	vid.support.ext_texture_3d = GL_CheckExtension("GL_EXT_texture3D", texture3dextfuncs, "-notexture3d", false);
 	vid.support.ext_texture_compression_s3tc = GL_CheckExtension("GL_EXT_texture_compression_s3tc", NULL, "-nos3tc", false);
+	vid.support.khr_texture_compression_astc_ldr = GL_CheckExtension("GL_KHR_texture_compression_astc_ldr", NULL, "-noastc", false) && vid.support.arb_texture_compression;
 	vid.support.ext_texture_edge_clamp = GL_CheckExtension("GL_EXT_texture_edge_clamp", NULL, "-noedgeclamp", false) || GL_CheckExtension("GL_SGIS_texture_edge_clamp", NULL, "-noedgeclamp", false);
 	vid.support.ext_texture_filter_anisotropic = GL_CheckExtension("GL_EXT_texture_filter_anisotropic", NULL, "-noanisotropy", false);
 	vid.support.ext_texture_srgb = GL_CheckExtension("GL_EXT_texture_sRGB", NULL, "-nosrgb", false);
@@ -1100,6 +1101,7 @@ void VID_CheckExtensions(void)
 // COMMANDLINEOPTION: GL: -nomtex disables GL_ARB_multitexture (required for faster map rendering)
 // COMMANDLINEOPTION: GL: -noocclusionquery disables GL_ARB_occlusion_query (which allows coronas to fade according to visibility, and potentially used for rendering optimizations)
 // COMMANDLINEOPTION: GL: -noquerybuffer disables GL_ARB_query_buffer_object (which allows corona fading without synchronous rendering)
+// COMMANDLINEOPTION: GL: -noastc disables GL_KHR_texture_compression_astc_ldr (ASTC textures, .ktx files in the dds/ directory)
 // COMMANDLINEOPTION: GL: -nos3tc disables GL_EXT_texture_compression_s3tc (which allows use of .dds texture caching)
 // COMMANDLINEOPTION: GL: -noseparatestencil disables use of OpenGL2.0 glStencilOpSeparate and GL_ATI_separate_stencil extensions (which accelerate shadow rendering)
 // COMMANDLINEOPTION: GL: -noshadow disables use of GL_ARB_shadow (required for hardware shadowmap filtering)

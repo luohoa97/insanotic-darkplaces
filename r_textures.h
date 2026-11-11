@@ -59,6 +59,9 @@ typedef enum textype_e
 	// default compressed type for GLES2
 	TEXTYPE_ETC1,
 
+	// ASTC (any block size) compressed color, from a .ktx file next to the .dds
+	TEXTYPE_ASTC,
+
 	// 8bit paletted in sRGB colorspace
 	TEXTYPE_SRGB_PALETTE,
 	// 32bit RGBA in sRGB colorspace

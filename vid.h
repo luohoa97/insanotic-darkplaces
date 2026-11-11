@@ -72,6 +72,7 @@ typedef struct viddef_support_s
 	qboolean ext_stencil_two_side;
 	qboolean ext_texture_3d;
 	qboolean ext_texture_compression_s3tc;
+	qboolean khr_texture_compression_astc_ldr; // ASTC with the LDR profile; the glCompressedTexImage2D entry point is loaded too
 	qboolean ext_texture_edge_clamp;
 	qboolean ext_texture_filter_anisotropic;
 	qboolean ext_texture_srgb;
