@@ -542,6 +542,25 @@ static prvm_edict_t *CL_Lua_GlobalEdict(prvm_prog_t *prog, const char *name)
 	return CL_Lua_EdictOrNull(prog, PRVM_GLOBALFIELDEDICT(g->ofs));
 }
 
+// xon.scoreboard(): true while the game shows the scoreboard (TAB, the end
+// of a match), so overlays can step aside
+static int LuaCl_scoreboard(lua_State *L)
+{
+	prvm_prog_t *prog = CLVM_prog;
+	ddef_t *g;
+	qboolean on = false;
+	if (cls.state == ca_connected && prog->loaded)
+	{
+		g = PRVM_ED_FindGlobal(prog, "scoreboard_active");
+		if (g && (g->type & ~DEF_SAVEGLOBAL) == ev_float)
+			on = PRVM_GLOBALFIELDFLOAT(g->ofs) != 0;
+	}
+	if (cl.intermission)
+		on = true;
+	lua_pushboolean(L, on);
+	return 1;
+}
+
 static qboolean CL_Lua_BindCSQC(void)
 {
 	prvm_prog_t *prog = CLVM_prog;
@@ -1185,6 +1204,7 @@ static const luaL_Reg cl_luaxon_funcs[] =
 	{"time", LuaCl_time},
 	{"realtime", LuaCl_realtime},
 	{"in_game", LuaCl_in_game},
+	{"scoreboard", LuaCl_scoreboard},
 	{"max_speed", LuaCl_max_speed},
 	{"screen_size", LuaCl_screen_size},
 	{"assist_allowed", LuaCl_assist_allowed},
