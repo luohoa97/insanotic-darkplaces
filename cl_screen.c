@@ -2657,18 +2657,25 @@ static float SCR_LoadingStage(char *stage, size_t stagesize, char *detail, size_
 	return stack;
 }
 
-// exactly what the main menu draws behind its dialogs (luma skin, which
-// aligns "c5h5": the earth cropped to fill the screen, then the logo layer
-// scaled to the screen height and centered), so the start and the wait
-// for a server turn into the menu without a visible change. A dark
-// gradient when the pictures are missing.
+// the main menu's earth background with the Xonotic logo centered (cut
+// from the menu's logo layer, which has no "Loading" text). When the menu
+// opens, it glides the logo from here to its place in the menu
+// (menu.qc, drawMenuIntroLogo: keep the numbers in step). A dark gradient
+// when the pictures are missing.
 #define LOADING_MENU_BACKGROUND "gfx/menu/luma/background"
 #define LOADING_MENU_LOGO "gfx/menu/luma/background_l2"
+// logo bounds inside the 2560x2048 logo layer
+#define LOADING_LOGO_S0 (30.0f / 2560)
+#define LOADING_LOGO_T0 (10.0f / 2048)
+#define LOADING_LOGO_S1 (1420.0f / 2560)
+#define LOADING_LOGO_T1 (470.0f / 2048)
+#define LOADING_LOGO_WIDTH 0.55f   // of the screen width
+#define LOADING_LOGO_Y 0.42f       // centre, of the screen height
 static void SCR_DrawInsanoticBackdrop(void)
 {
 	static int checked;
 	static cachepic_t *background, *logo;
-	float w = vid_conwidth.integer, h = vid_conheight.integer, f;
+	float w = vid_conwidth.integer, h = vid_conheight.integer, f, lw, lh;
 	int i, strips = 32;
 
 	if (!checked)
@@ -2696,8 +2703,13 @@ static void SCR_DrawInsanoticBackdrop(void)
 	}
 	if (logo && logo->width > 0 && logo->height > 0)
 	{
-		f = h / logo->height;
-		DrawQ_Pic((w - logo->width * f) / 2, 0, logo, logo->width * f, h, 1, 1, 1, 1, 0);
+		lw = w * LOADING_LOGO_WIDTH;
+		lh = lw * ((LOADING_LOGO_T1 - LOADING_LOGO_T0) * logo->height) / ((LOADING_LOGO_S1 - LOADING_LOGO_S0) * logo->width);
+		DrawQ_SuperPic((w - lw) / 2, h * LOADING_LOGO_Y - lh / 2, logo, lw, lh,
+			LOADING_LOGO_S0, LOADING_LOGO_T0, 1, 1, 1, 1,
+			LOADING_LOGO_S1, LOADING_LOGO_T0, 1, 1, 1, 1,
+			LOADING_LOGO_S0, LOADING_LOGO_T1, 1, 1, 1, 1,
+			LOADING_LOGO_S1, LOADING_LOGO_T1, 1, 1, 1, 1, 0);
 	}
 }
 
