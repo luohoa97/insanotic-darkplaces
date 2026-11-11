@@ -312,6 +312,15 @@ static int LuaCl_realtime(lua_State *L)
 	return 1;
 }
 
+// xon.max_speed(): the server's top running speed (movement input beyond
+// it does nothing), nil before the server has sent it
+static int LuaCl_max_speed(lua_State *L)
+{
+	if (cls.state != ca_connected || cl.movevars_maxspeed <= 0)
+		return 0;
+	lua_pushnumber(L, cl.movevars_maxspeed);
+	return 1;
+}
 static int LuaCl_in_game(lua_State *L)
 {
 	lua_pushboolean(L, CL_Lua_InGame());
@@ -1161,6 +1170,7 @@ static const luaL_Reg cl_luaxon_funcs[] =
 	{"time", LuaCl_time},
 	{"realtime", LuaCl_realtime},
 	{"in_game", LuaCl_in_game},
+	{"max_speed", LuaCl_max_speed},
 	{"screen_size", LuaCl_screen_size},
 	{"assist_allowed", LuaCl_assist_allowed},
 	{"view", LuaCl_view},
