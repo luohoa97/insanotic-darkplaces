@@ -1,0 +1,10 @@
+RmlUi 6.3 (https://github.com/mikke89/RmlUi), tag 6.3, commit
+ba95ffe8bfb6370efb2cdcca927eaad4710c5413, MIT licensed (see LICENSE.txt).
+
+Only the core library is vendored, unmodified: Include/RmlUi/{Core,Config,Core.h}
+and Source/Core. Left out: the debugger, the Lua, SVG and Lottie plugins, the
+backends, samples and tests. The engine side (render, file and system
+interfaces, input) is ../ui_rml.cpp and ../ui_rml_engine.c. The build
+definitions are in ../makefile.inc and, for Android, the CMakeLists.txt in
+packaging/android. To update, replace these two directories with the new
+release's and change the version above.
