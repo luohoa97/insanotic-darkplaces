@@ -33,7 +33,10 @@ static void SV_Download_f(void);
 static void SV_VM_Setup(void);
 extern cvar_t net_connecttimeout;
 
-cvar_t sv_allow_assist = {0, "sv_allow_assist", "0", "1 tells Insanotic clients that aim assistance mods (e.g. aim_assist) may run on this server"};
+cvar_t sv_allow_assist = {0, "sv_allow_assist", "0", "1 tells Insanotic clients that all aim assistance (aim pull, auto-fire, automatic weapon switching) may run on this server; the three sv_allow_* cvars below allow them one by one"};
+cvar_t sv_allow_aim_assist = {0, "sv_allow_aim_assist", "0", "1 tells Insanotic clients that aim assistance mods may pull the aim toward enemies here"};
+cvar_t sv_allow_autofire = {0, "sv_allow_autofire", "0", "1 tells Insanotic clients that aim assistance mods may fire on their own here"};
+cvar_t sv_allow_autoswitch = {0, "sv_allow_autoswitch", "0", "1 tells Insanotic clients that aim assistance mods may switch weapons on their own here"};
 cvar_t sv_worldmessage = {CVAR_READONLY, "sv_worldmessage", "", "title of current level"};
 cvar_t sv_worldname = {CVAR_READONLY, "sv_worldname", "", "name of current worldmodel"};
 cvar_t sv_worldnamenoextension = {CVAR_READONLY, "sv_worldnamenoextension", "", "name of current worldmodel without extension"};
@@ -441,6 +444,9 @@ void SV_Init (void)
 
 	LuaMods_Init();
 	Cvar_RegisterVariable(&sv_allow_assist);
+	Cvar_RegisterVariable(&sv_allow_aim_assist);
+	Cvar_RegisterVariable(&sv_allow_autofire);
+	Cvar_RegisterVariable(&sv_allow_autoswitch);
 
 	Cvar_RegisterVariable(&sv_worldmessage);
 	Cvar_RegisterVariable(&sv_worldname);
@@ -1003,10 +1009,29 @@ void SV_SendServerinfo (client_t *client)
 
 	// Insanotic clients run aim assistance mods only where the server allows
 	// it; stock clients ignore the unknown cvar
-	if (sv_allow_assist.integer && client->netconnection)
+	// (sv_allow_assist allows all three; older Insanotic clients know only it)
+	if (client->netconnection)
 	{
-		MSG_WriteByte (&client->netconnection->message, svc_stufftext);
-		MSG_WriteString (&client->netconnection->message, "set _cl_assist_allowed 1\n");
+		if (sv_allow_assist.integer)
+		{
+			MSG_WriteByte (&client->netconnection->message, svc_stufftext);
+			MSG_WriteString (&client->netconnection->message, "set _cl_assist_allowed 1\n");
+		}
+		if (sv_allow_aim_assist.integer)
+		{
+			MSG_WriteByte (&client->netconnection->message, svc_stufftext);
+			MSG_WriteString (&client->netconnection->message, "set _cl_aim_assist_allowed 1\n");
+		}
+		if (sv_allow_autofire.integer)
+		{
+			MSG_WriteByte (&client->netconnection->message, svc_stufftext);
+			MSG_WriteString (&client->netconnection->message, "set _cl_autofire_allowed 1\n");
+		}
+		if (sv_allow_autoswitch.integer)
+		{
+			MSG_WriteByte (&client->netconnection->message, svc_stufftext);
+			MSG_WriteString (&client->netconnection->message, "set _cl_autoswitch_allowed 1\n");
+		}
 	}
 
 	// send at this time so it's guaranteed to get executed at the right time

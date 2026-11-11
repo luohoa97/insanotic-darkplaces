@@ -290,11 +290,19 @@ void CL_Lua_DrawHUD(void)
 	DrawQ_ResetClipArea();
 }
 
+// what the server allows, set by it on connect (sv_main.c), forgotten when
+// leaving it: _cl_assist_allowed is everything, the others one feature each
+static const char *cl_lua_assist_cvars[] = { "_cl_assist_allowed", "_cl_aim_assist_allowed", "_cl_autofire_allowed", "_cl_autoswitch_allowed" };
+
 void CL_Lua_Disconnected(void)
 {
-	cvar_t *c = Cvar_FindVar("_cl_assist_allowed");
-	if (c)
-		Cvar_SetQuick(c, "0");
+	size_t i;
+	for (i = 0; i < sizeof(cl_lua_assist_cvars) / sizeof(cl_lua_assist_cvars[0]); i++)
+	{
+		cvar_t *c = Cvar_FindVar(cl_lua_assist_cvars[i]);
+		if (c)
+			Cvar_SetQuick(c, "0");
+	}
 }
 
 //============================================================================
@@ -334,11 +342,22 @@ static int LuaCl_screen_size(lua_State *L)
 	return 2;
 }
 
-// aim assistance is allowed in local games and on servers that say so
+static qboolean CL_Lua_CvarOn(const char *name)
+{
+	cvar_t *c = Cvar_FindVar(name);
+	return c && c->integer;
+}
+
+// xon.assist_allowed([kind]): aim assistance is allowed in local games and
+// on servers that say so. kind: "aim" (default), "autofire" or "autoswitch",
+// each allowed by its own server cvar or by sv_allow_assist for all
 static int LuaCl_assist_allowed(lua_State *L)
 {
-	cvar_t *c = Cvar_FindVar("_cl_assist_allowed");
-	lua_pushboolean(L, sv.active || (c && c->integer));
+	const char *kind = luaL_optstring(L, 1, "aim");
+	const char *one = !strcmp(kind, "autofire") ? "_cl_autofire_allowed"
+		: !strcmp(kind, "autoswitch") ? "_cl_autoswitch_allowed"
+		: "_cl_aim_assist_allowed";
+	lua_pushboolean(L, sv.active || CL_Lua_CvarOn("_cl_assist_allowed") || CL_Lua_CvarOn(one));
 	return 1;
 }
 
