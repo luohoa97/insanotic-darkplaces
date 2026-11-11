@@ -39,6 +39,9 @@ SDLCONFIG_MACOSXCFLAGS=-I/Library/Frameworks/SDL2.framework/Headers -I$(HOME)/Li
 SDLCONFIG_MACOSXLIBS=-F$(HOME)/Library/Frameworks/ -framework SDL2 -framework Cocoa $(SDLCONFIG_MACOSXCFLAGS)
 SDLCONFIG_MACOSXSTATICLIBS=-F$(HOME)/Library/Frameworks/ -framework SDL2 -framework Cocoa $(SDLCONFIG_MACOSXCFLAGS)
 STRIP?=strip
+# Insanotic: strip into a new file and rename it over the old one, so a
+# running game (which keeps the old inode) does not fail the build with
+# "Text file busy"
 
 
 ###### Sound and audio CD #####
@@ -495,7 +498,7 @@ bin-release :
 		DP_MAKE_TARGET=$(DP_MAKE_TARGET) DP_SOUND_API=$(DP_SOUND_API) \
 		CFLAGS='$(CFLAGS_COMMON) $(CFLAGS_FEATURES) $(CFLAGS_EXTRA) $(CFLAGS_RELEASE) $(OPTIM_RELEASE)'\
 		LDFLAGS='$(LDFLAGS_RELEASE) $(LDFLAGS_COMMON)' LEVEL=2
-	$(STRIP) $(EXE)
+	rm -f $(EXE).stripping && $(STRIP) -o $(EXE).stripping $(EXE) && if [ -f $(EXE).stripping ]; then mv -f $(EXE).stripping $(EXE); fi
 
 bin-release-profile :
 	$(CHECKLEVEL1)
@@ -506,7 +509,7 @@ bin-release-profile :
 		DP_MAKE_TARGET=$(DP_MAKE_TARGET) DP_SOUND_API=$(DP_SOUND_API) \
 		CFLAGS='$(CFLAGS_COMMON) $(CFLAGS_FEATURES) $(CFLAGS_EXTRA) $(CFLAGS_RELEASE_PROFILE) $(OPTIM_RELEASE)'\
 		LDFLAGS='$(LDFLAGS_RELEASE) $(LDFLAGS_COMMON)' LEVEL=2
-	$(STRIP) $(EXE)
+	rm -f $(EXE).stripping && $(STRIP) -o $(EXE).stripping $(EXE) && if [ -f $(EXE).stripping ]; then mv -f $(EXE).stripping $(EXE); fi
 
 prepare :
 	$(CMD_MKDIR) $(BUILD_DIR)
