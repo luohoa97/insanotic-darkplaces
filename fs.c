@@ -2267,9 +2267,21 @@ static filedesc_t FS_SysOpenFiledesc(const char *filepath, const char *mode, qbo
 		return FILEDESC_INVALID;
 
 #if USE_RWOPS
+	// Insanotic: SDL RWops cannot lock files. Refusing locked opens made the
+	// session lock fail and every start end in a Sys_Error on Android, where
+	// the system runs one game process per app anyway: open without the lock.
 	if (dolock)
-		return FILEDESC_INVALID;
-	handle = SDL_RWFromFile(filepath, mode);
+	{
+		char rwmode[8];
+		size_t i, j;
+		for (i = j = 0; mode[i] && j < sizeof(rwmode) - 1; i++)
+			if (mode[i] != 'l')
+				rwmode[j++] = mode[i];
+		rwmode[j] = 0;
+		handle = SDL_RWFromFile(filepath, rwmode);
+	}
+	else
+		handle = SDL_RWFromFile(filepath, mode);
 #else
 # ifdef WIN32
 #  if _MSC_VER >= 1400
