@@ -237,6 +237,7 @@ static void CL_Lua_PushInput(lua_State *L, int ev, void *data)
 	lua_pushinteger(L, *in->buttons); lua_setfield(L, ev, "buttons");
 	lua_pushinteger(L, *in->impulse); lua_setfield(L, ev, "impulse");
 	lua_pushnumber(L, cl.realframetime); lua_setfield(L, ev, "frametime");
+	lua_pushboolean(L, cl.onground); lua_setfield(L, ev, "onground"); // client prediction
 }
 
 static void CL_Lua_PullInput(lua_State *L, int ev, void *data)
@@ -931,6 +932,32 @@ static int LuaCl_draw_pic(lua_State *L)
 	return 1;
 }
 
+// xon.draw_subpic(path, x, y, w, h, s0, t0, s1, t1 [, r, g, b, a]): part of
+// an image (texture coordinates 0..1), e.g. for 9-slice panel borders
+static int LuaCl_draw_subpic(lua_State *L)
+{
+	const char *path = luaL_checkstring(L, 1);
+	float x = luaL_checknumber(L, 2), y = luaL_checknumber(L, 3), w = luaL_checknumber(L, 4), h = luaL_checknumber(L, 5);
+	float s0 = luaL_checknumber(L, 6), t0 = luaL_checknumber(L, 7), s1 = luaL_checknumber(L, 8), t1 = luaL_checknumber(L, 9);
+	cachepic_t *pic;
+	float c[4];
+	CL_Lua_CheckDrawing(L);
+	CL_Lua_Color(L, 10, c);
+	pic = Draw_CachePic_Flags(path, CACHEPICFLAG_NOTPERSISTENT | CACHEPICFLAG_QUIET);
+	if (!pic || !pic->tex || pic->tex == r_texture_notexture)
+	{
+		lua_pushboolean(L, false);
+		return 1;
+	}
+	DrawQ_SuperPic(x, y, pic, w, h,
+		s0, t0, c[0], c[1], c[2], c[3],
+		s1, t0, c[0], c[1], c[2], c[3],
+		s0, t1, c[0], c[1], c[2], c[3],
+		s1, t1, c[0], c[1], c[2], c[3], 0);
+	lua_pushboolean(L, true);
+	return 1;
+}
+
 static void CL_Lua_DrawRound(lua_State *L, qboolean ring)
 {
 	float x = luaL_checknumber(L, 1), y = luaL_checknumber(L, 2), r = luaL_checknumber(L, 3);
@@ -1002,6 +1029,7 @@ static const luaL_Reg cl_luaxon_funcs[] =
 	{"command", LuaCl_command},
 	{"draw_fill", LuaCl_draw_fill},
 	{"draw_pic", LuaCl_draw_pic},
+	{"draw_subpic", LuaCl_draw_subpic},
 	{"draw_circle", LuaCl_draw_circle},
 	{"draw_ring", LuaCl_draw_ring},
 	{"draw_text", LuaCl_draw_text},
