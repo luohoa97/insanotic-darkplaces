@@ -2123,9 +2123,9 @@ void VID_Init (void)
 #endif
 	if (SDL_Init(SDL_INIT_VIDEO) < 0)
 		Sys_Error ("Failed to init SDL video subsystem: %s", SDL_GetError());
-	vid_sdl_initjoysticksystem = SDL_InitSubSystem(SDL_INIT_JOYSTICK) >= 0;
-	if (vid_sdl_initjoysticksystem)
-		Con_Printf("Failed to init SDL joystick subsystem: %s\n", SDL_GetError());
+	// Insanotic: the joystick subsystem scans every input device (about
+	// 0.15 s); it starts later in VID_EnableJoystick instead of before the
+	// first frame
 	vid_isfullscreen = false;
 }
 
@@ -2137,6 +2137,21 @@ void VID_EnableJoystick(qboolean enable)
 	qboolean success = false;
 	int sharedcount = 0;
 	int sdlindex = -1;
+	static qboolean joystick_started = false;
+	static double first_call = -1;
+	if (!joystick_started)
+	{
+		// start the SDL joystick subsystem once joysticks are wanted, or a
+		// moment after startup so the menu can list detected controllers
+		if (first_call < 0)
+			first_call = realtime;
+		if (joy_enable.integer <= 0 && realtime - first_call < 2)
+			return;
+		joystick_started = true;
+		vid_sdl_initjoysticksystem = SDL_InitSubSystem(SDL_INIT_JOYSTICK) >= 0;
+		if (!vid_sdl_initjoysticksystem)
+			Con_Printf("Failed to init SDL joystick subsystem: %s\n", SDL_GetError());
+	}
 	sharedcount = VID_Shared_SetJoystick(index);
 	if (index >= 0 && index < sharedcount)
 		success = true;
