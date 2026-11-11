@@ -1082,7 +1082,9 @@ static int LuaCl_draw_pic(lua_State *L)
 	CL_Lua_CheckDrawing(L);
 	CL_Lua_Color(L, 6, c);
 	pic = Draw_CachePic_Flags(path, CACHEPICFLAG_NOTPERSISTENT | CACHEPICFLAG_QUIET);
-	if (!pic || !pic->tex || pic->tex == r_texture_notexture)
+	// Draw_GetPicTexture loads a lazily loaded image now (JPG/PNG pics only
+	// get their texture when first drawn; pic->tex was still NULL for them)
+	if (!pic || !Draw_GetPicTexture(pic) || pic->tex == r_texture_notexture)
 	{
 		lua_pushboolean(L, false);
 		return 1;
@@ -1104,7 +1106,9 @@ static int LuaCl_draw_subpic(lua_State *L)
 	CL_Lua_CheckDrawing(L);
 	CL_Lua_Color(L, 10, c);
 	pic = Draw_CachePic_Flags(path, CACHEPICFLAG_NOTPERSISTENT | CACHEPICFLAG_QUIET);
-	if (!pic || !pic->tex || pic->tex == r_texture_notexture)
+	// Draw_GetPicTexture loads a lazily loaded image now (JPG/PNG pics only
+	// get their texture when first drawn; pic->tex was still NULL for them)
+	if (!pic || !Draw_GetPicTexture(pic) || pic->tex == r_texture_notexture)
 	{
 		lua_pushboolean(L, false);
 		return 1;
