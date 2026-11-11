@@ -48,6 +48,7 @@ cvar_t scr_loadingscreen_count = {0, "scr_loadingscreen_count","1", "number of l
 cvar_t scr_loadingscreen_firstforstartup = {0, "scr_loadingscreen_firstforstartup","0", "remove loading.tga from random scr_loadingscreen_count selection and only display it on client startup, 0 = normal, 1 = firstforstartup"};
 cvar_t scr_loadingscreen_barcolor = {0, "scr_loadingscreen_barcolor", "0 0 1", "rgb color of loadingscreen progress bar"};
 cvar_t scr_loadingscreen_barheight = {0, "scr_loadingscreen_barheight", "8", "the height of the loadingscreen progress bar"};
+cvar_t scr_loadingscreen_insanotic = {CVAR_SAVE, "scr_loadingscreen_insanotic", "1", "Insanotic loading screen: the map's picture, what is being loaded and one progress bar with a percentage from connecting to being in the game (0 = classic DarkPlaces screen)"};
 cvar_t scr_loadingscreen_maxfps = {0, "scr_loadingscreen_maxfps", "10", "restrict maximal FPS for loading screen so it will not update very often (this will make lesser loading times on a maps loading large number of models)"};
 cvar_t scr_infobar_height = {0, "scr_infobar_height", "8", "the height of the infobar items"};
 cvar_t vid_conwidth = {CVAR_SAVE, "vid_conwidth", "640", "virtual width of 2D graphics system"};
@@ -1348,6 +1349,7 @@ void CL_Screen_Init(void)
 	Cvar_RegisterVariable (&scr_loadingscreen_barcolor);
 	Cvar_RegisterVariable (&scr_loadingscreen_barheight);
 	Cvar_RegisterVariable (&scr_loadingscreen_maxfps);
+	Cvar_RegisterVariable (&scr_loadingscreen_insanotic);
 	Cvar_RegisterVariable (&scr_infobar_height);
 	Cvar_RegisterVariable (&scr_showram);
 	Cvar_RegisterVariable (&scr_showturtle);
@@ -2554,6 +2556,175 @@ static void SCR_DrawLoadingScreen_SharedSetup (qboolean clear)
 	loadingscreenpic_texcoord2f[6] = 0;loadingscreenpic_texcoord2f[7] = 1;
 }
 
+//============================================================================
+// Insanotic loading screen: one screen from "connect" or "map" until the
+// game is drawn, with the map's picture, the current stage and a single
+// progress bar that only moves forward across all stages
+
+static float loading_progress;           // shown fraction, never decreases
+static char loading_levelshot_map[MAX_QPATH];
+static cachepic_t *loading_levelshot;    // NULL when the map has none
+
+// map being loaded, "" while unknown
+static const char *SCR_LoadingMapName(void)
+{
+	if (cls.connect_trying)
+		return "";
+	if (sv.active || sv.state == ss_loading)
+		if (sv.name[0])
+			return sv.name;
+	if (cls.state == ca_connected && cl.worldbasename[0])
+		return cl.worldbasename;
+	return "";
+}
+
+// stage (what the player is waiting for), detail (file being loaded) and
+// the fraction of the whole load
+static float SCR_LoadingStage(char *stage, size_t stagesize, char *detail, size_t detailsize)
+{
+	loadingscreenstack_t *s = loadingscreenstack;
+	float stack = s ? s->absolute_loading_amount_min : 0;
+	detail[0] = 0;
+	if (s && strcmp(s->msg, "world model setup"))
+	{
+		const char *slash = strrchr(s->msg, '/');
+		strlcpy(detail, slash ? slash + 1 : s->msg, detailsize);
+	}
+	if (cls.connect_trying)
+	{
+		strlcpy(stage, "Connecting", stagesize);
+		return 0.02f;
+	}
+	if (cls.state == ca_connected)
+	{
+		switch (cls.signon)
+		{
+		case 0:
+			if (sv.state == ss_loading)
+			{
+				strlcpy(stage, "Starting the server", stagesize);
+				return 0.02f + 0.18f * stack;
+			}
+			strlcpy(stage, "Receiving server info", stagesize);
+			return 0.20f;
+		case 1:
+			if (Curl_Running())
+			{
+				strlcpy(stage, "Downloading", stagesize);
+				return 0.22f;
+			}
+			if (s)
+			{
+				// the stage is the entry just above the bottom one
+				// ("Loading precaches" > "Loading precached models" > file)
+				loadingscreenstack_t *bottom = s, *above = NULL;
+				const char *msg;
+				while (bottom->prev)
+				{
+					above = bottom;
+					bottom = bottom->prev;
+				}
+				msg = above ? above->msg : bottom->msg;
+				if (!strcmp(msg, "Loading precached models"))
+					msg = "Loading models";
+				else if (!strcmp(msg, "Loading precached sounds"))
+					msg = "Loading sounds";
+				else if (!strcmp(msg, "world model setup"))
+					msg = "Preparing the map";
+				strlcpy(stage, msg, stagesize);
+			}
+			else
+				strlcpy(stage, "Loading", stagesize);
+			return 0.22f + 0.70f * stack;
+		case 2:
+			strlcpy(stage, "Joining the game", stagesize);
+			return 0.94f;
+		default:
+			strlcpy(stage, "Joining the game", stagesize);
+			return 0.97f;
+		}
+	}
+	if (sv.state == ss_loading)
+	{
+		strlcpy(stage, "Starting the server", stagesize);
+		return 0.02f + 0.18f * stack;
+	}
+	strlcpy(stage, s ? s->msg : "Loading", stagesize);
+	return stack;
+}
+
+static void SCR_DrawInsanoticLoadingScreen(void)
+{
+	float w = vid_conwidth.integer, h = vid_conheight.integer;
+	float margin = floor(h * 0.05f), title = floor(h * 0.055f), text = floor(h * 0.03f);
+	float barh = max(3, floor(h * 0.008f)), bary = h - margin - barh, f, x, y;
+	float bar[3] = { 0.2f, 0.6f, 1.0f };
+	const char *map = SCR_LoadingMapName();
+	char stage[128], detail[128], percent[16];
+	int i, strips = 24;
+
+	// the map's own picture (maps/<name>.jpg ships with every map), else
+	// the game's loading picture
+	if (strcmp(map, loading_levelshot_map))
+	{
+		char name[MAX_QPATH + 8];
+		strlcpy(loading_levelshot_map, map, sizeof(loading_levelshot_map));
+		loading_levelshot = NULL;
+		if (map[0])
+		{
+			dpsnprintf(name, sizeof(name), "maps/%s", map);
+			if (FS_FileExists(va(stage, sizeof(stage), "%s.jpg", name)) || FS_FileExists(va(stage, sizeof(stage), "%s.tga", name)) || FS_FileExists(va(stage, sizeof(stage), "%s.png", name)))
+				loading_levelshot = Draw_CachePic_Flags(name, CACHEPICFLAG_NOTPERSISTENT | CACHEPICFLAG_QUIET);
+		}
+	}
+	if (loading_levelshot && loading_levelshot->width > 0 && loading_levelshot->height > 0)
+	{
+		// cover the screen, keep the aspect
+		f = max(w / loading_levelshot->width, h / loading_levelshot->height);
+		DrawQ_Pic((w - loading_levelshot->width * f) / 2, (h - loading_levelshot->height * f) / 2, loading_levelshot, loading_levelshot->width * f, loading_levelshot->height * f, 0.75f, 0.75f, 0.75f, 1, 0);
+	}
+	else
+	{
+		R_Mesh_PrepareVertices_Generic_Arrays(4, loadingscreenpic_vertex3f, NULL, loadingscreenpic_texcoord2f);
+		R_SetupShader_Generic(Draw_GetPicTexture(loadingscreenpic), NULL, GL_MODULATE, 1, true, true, false);
+		R_Mesh_Draw(0, 4, 0, 2, polygonelement3i, NULL, 0, polygonelement3s, NULL, 0);
+	}
+
+	// darken the lower part for the text
+	for (i = 0; i < strips; i++)
+	{
+		float y0 = floor(h * 0.55f + (h * 0.45f) * i / strips);
+		float y1 = floor(h * 0.55f + (h * 0.45f) * (i + 1) / strips);
+		DrawQ_Fill(0, y0, w, y1 - y0, 0, 0, 0, 0.85f * (i + 1) / strips, 0);
+	}
+
+	f = SCR_LoadingStage(stage, sizeof(stage), detail, sizeof(detail));
+	if (f > loading_progress)
+		loading_progress = min(f, 1);
+	dpsnprintf(percent, sizeof(percent), "%d%%", (int)(loading_progress * 100));
+	sscanf(scr_loadingscreen_barcolor.string, "%f %f %f", &bar[0], &bar[1], &bar[2]);
+
+	// map name, stage and file on the left, percentage on the right
+	x = margin;
+	y = bary - margin * 0.5f - text - title;
+	if (map[0])
+	{
+		// the map's title once the server sent it, else its file name
+		const char *name = cls.state == ca_connected && cls.signon >= 1 && cl.worldmessage[0] ? cl.worldmessage : map;
+		DrawQ_String(x, y, name, 0, title, title, 1, 1, 1, 1, 0, NULL, false, FONT_INFOBAR);
+	}
+	y += title + text * 0.25f;
+	DrawQ_String(x, y, stage, 0, text, text, 0.85f, 0.85f, 0.85f, 1, 0, NULL, true, FONT_INFOBAR);
+	if (detail[0] && strcmp(detail, stage))
+		DrawQ_String(x + DrawQ_TextWidth(stage, 0, text, text, true, FONT_INFOBAR) + text, y, detail, 0, text, text, 0.55f, 0.55f, 0.55f, 1, 0, NULL, true, FONT_INFOBAR);
+	DrawQ_String(w - margin - DrawQ_TextWidth(percent, 0, title, title, true, FONT_INFOBAR), bary - margin * 0.5f - title, percent, 0, title, title, 1, 1, 1, 1, 0, NULL, true, FONT_INFOBAR);
+
+	// the bar
+	DrawQ_Fill(margin, bary, w - 2 * margin, barh, 1, 1, 1, 0.15f, 0);
+	DrawQ_Fill(margin, bary, (w - 2 * margin) * loading_progress, barh, bar[0], bar[1], bar[2], 1, 0);
+	loadingscreenheight = h;
+}
+
 static void SCR_DrawLoadingScreen (qboolean clear)
 {
 	// we only need to draw the image if it isn't already there
@@ -2568,6 +2739,11 @@ static void SCR_DrawLoadingScreen (qboolean clear)
 		R_Mesh_PrepareVertices_Generic_Arrays(4, loadingscreentexture_vertex3f, NULL, loadingscreentexture_texcoord2f);
 		R_SetupShader_Generic(loadingscreentexture, NULL, GL_MODULATE, 1, true, true, true);
 		R_Mesh_Draw(0, 4, 0, 2, polygonelement3i, NULL, 0, polygonelement3s, NULL, 0);
+	}
+	if (scr_loadingscreen_insanotic.integer)
+	{
+		SCR_DrawInsanoticLoadingScreen();
+		return;
 	}
 	R_Mesh_PrepareVertices_Generic_Arrays(4, loadingscreenpic_vertex3f, NULL, loadingscreenpic_texcoord2f);
 	R_SetupShader_Generic(Draw_GetPicTexture(loadingscreenpic), NULL, GL_MODULATE, 1, true, true, false);
@@ -2783,6 +2959,7 @@ void CL_UpdateScreen(void)
 	}
 
 	loadingscreendone = false;
+	loading_progress = 0;
 
 	if(IS_NEXUIZ_DERIVED(gamemode))
 	{
