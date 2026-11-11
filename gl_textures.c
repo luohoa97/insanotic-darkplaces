@@ -39,7 +39,7 @@ cvar_t gl_texturecompression_sprites = {CVAR_SAVE, "gl_texturecompression_sprite
 cvar_t gl_nopartialtextureupdates = {CVAR_SAVE, "gl_nopartialtextureupdates", "0", "use alternate path for dynamic lightmap updates that avoids a possibly slow code path in the driver"};
 cvar_t r_texture_dds_load_alphamode = {0, "r_texture_dds_load_alphamode", "1", "0: trust DDPF_ALPHAPIXELS flag, 1: texture format and brute force search if ambiguous, 2: texture format only"};
 cvar_t r_texture_dds_load_logfailure = {0, "r_texture_dds_load_logfailure", "0", "log missing DDS textures to ddstexturefailures.log, 0: done log, 1: log with no optional textures (_norm, glow etc.). 2: log all"};
-cvar_t r_texture_dds_swdecode = {0, "r_texture_dds_swdecode", "0", "0: don't software decode DDS, 1: software decode DDS if unsupported, 2: always software decode DDS"};
+cvar_t r_texture_dds_swdecode = {0, "r_texture_dds_swdecode", "0", "how DDS (S3TC) textures are decoded when the GPU cannot (phones): 0 = full resolution software decode, 1 = quarter resolution (faster, less memory); testing on a GPU that can: 2 = force the quarter resolution decode, 3 = force the full one"};
 
 qboolean	gl_filter_force = false;
 int		gl_filter_min = GL_LINEAR_MIPMAP_LINEAR;
@@ -2216,6 +2216,129 @@ int R_SaveTextureDDSFile(rtexture_t *rt, const char *filename, qboolean skipunco
 #include "ktx10/include/ktx.h"
 #endif
 
+// Insanotic: full software decode of S3TC (DXT1/3/5) blocks for GPUs without
+// S3TC (OpenGL ES on phones): the release data packs ship DDS textures only.
+// Writes 4x4 BGRA pixels of one block into out (rowstride in pixels),
+// clipped to w x h
+static void DDS_DecodeBlock(const unsigned char *block, int textype, unsigned char *out, int rowstride, int w, int h)
+{
+	unsigned char pal[4][4], alpha[16];
+	const unsigned char *cb = block;
+	unsigned int c0, c1, bits;
+	int i, x, y;
+	if (textype == TEXTYPE_DXT3)
+	{
+		for (i = 0; i < 16; i++)
+		{
+			int nib = (block[i >> 1] >> ((i & 1) * 4)) & 15;
+			alpha[i] = nib * 17;
+		}
+		cb = block + 8;
+	}
+	else if (textype == TEXTYPE_DXT5)
+	{
+		unsigned char a[8];
+		unsigned long long abits = 0;
+		a[0] = block[0];
+		a[1] = block[1];
+		if (a[0] > a[1])
+			for (i = 1; i < 7; i++)
+				a[i + 1] = ((7 - i) * a[0] + i * a[1]) / 7;
+		else
+		{
+			for (i = 1; i < 5; i++)
+				a[i + 1] = ((5 - i) * a[0] + i * a[1]) / 5;
+			a[6] = 0;
+			a[7] = 255;
+		}
+		for (i = 0; i < 6; i++)
+			abits |= (unsigned long long)block[2 + i] << (8 * i);
+		for (i = 0; i < 16; i++)
+			alpha[i] = a[(abits >> (3 * i)) & 7];
+		cb = block + 8;
+	}
+	else
+		for (i = 0; i < 16; i++)
+			alpha[i] = 255;
+	c0 = cb[0] | (cb[1] << 8);
+	c1 = cb[2] | (cb[3] << 8);
+	for (i = 0; i < 2; i++)
+	{
+		unsigned int c = i ? c1 : c0;
+		pal[i][2] = ((c >> 11) & 31) * 255 / 31;
+		pal[i][1] = ((c >> 5) & 63) * 255 / 63;
+		pal[i][0] = (c & 31) * 255 / 31;
+		pal[i][3] = 255;
+	}
+	if (c0 > c1 || textype != TEXTYPE_DXT1)
+	{
+		for (i = 0; i < 3; i++)
+		{
+			pal[2][i] = (2 * pal[0][i] + pal[1][i]) / 3;
+			pal[3][i] = (pal[0][i] + 2 * pal[1][i]) / 3;
+		}
+		pal[2][3] = pal[3][3] = 255;
+	}
+	else
+	{
+		for (i = 0; i < 3; i++)
+		{
+			pal[2][i] = (pal[0][i] + pal[1][i]) / 2;
+			pal[3][i] = 0;
+		}
+		pal[2][3] = 255;
+		pal[3][3] = 0; // DXT1A: transparent
+	}
+	bits = cb[4] | (cb[5] << 8) | (cb[6] << 16) | ((unsigned int)cb[7] << 24);
+	for (y = 0; y < 4 && y < h; y++)
+		for (x = 0; x < 4 && x < w; x++)
+		{
+			int k = y * 4 + x;
+			const unsigned char *c = pal[(bits >> (2 * k)) & 3];
+			unsigned char *o = out + (y * rowstride + x) * 4;
+			o[0] = c[0];
+			o[1] = c[1];
+			o[2] = c[2];
+			o[3] = (textype == TEXTYPE_DXT1) ? c[3] : alpha[k];
+		}
+}
+
+// decodes a whole mip chain of S3TC blocks; returns the BGRA pixels of all
+// levels one after another and their total size
+static unsigned char *DDS_DecodeMips(const unsigned char *src, fs_offset_t srcsize, int textype, int bytesperblock, int width, int height, int levels, int *outsize)
+{
+	int w = width, h = height, l, total = 0;
+	fs_offset_t used = 0;
+	unsigned char *out, *o;
+	for (l = 0; l < levels; l++)
+	{
+		int bsize = ((w + 3) / 4) * ((h + 3) / 4) * bytesperblock;
+		if (used + bsize > srcsize)
+			break;
+		used += bsize;
+		total += w * h * 4;
+		if (w > 1) w >>= 1;
+		if (h > 1) h >>= 1;
+	}
+	out = o = (unsigned char *)Mem_Alloc(tempmempool, max(total, 4));
+	w = width;
+	h = height;
+	for (l = 0; l < levels; l++)
+	{
+		int bx, by, bw = (w + 3) / 4, bh = (h + 3) / 4;
+		if (o + w * h * 4 > out + total)
+			break;
+		for (by = 0; by < bh; by++)
+			for (bx = 0; bx < bw; bx++, src += bytesperblock)
+				DDS_DecodeBlock(src, textype, o + (by * 4 * w + bx * 4) * 4, w, w - bx * 4, h - by * 4);
+		o += w * h * 4;
+		if (w > 1) w >>= 1;
+		if (h > 1) h >>= 1;
+	}
+	*outsize = total;
+	return out;
+}
+
 rtexture_t *R_LoadTextureDDSFile(rtexturepool_t *rtexturepool, const char *filename, qboolean srgb, int flags, qboolean *hasalphaflag, float *avgcolor, int miplevel, qboolean optionaltexture) // DDS textures are opaque, so miplevel isn't a pointer but just seen as a hint
 {
 	int i, size, dds_format_flags, dds_miplevels, dds_width, dds_height;
@@ -2235,7 +2358,7 @@ rtexture_t *R_LoadTextureDDSFile(rtexturepool_t *rtexturepool, const char *filen
 	unsigned char *dds;
 	fs_offset_t ddsfilesize;
 	unsigned int ddssize;
-	qboolean force_swdecode, npothack;
+	qboolean force_swdecode, npothack, dds_fulldecode;
 #ifdef __ANDROID__
 	// ELUAN: FIXME: separate this code
 	char vabuf[1024];
@@ -2556,6 +2679,7 @@ rtexture_t *R_LoadTextureDDSFile(rtexturepool_t *rtexturepool, const char *filen
 	}
 
 	force_swdecode = false;
+	dds_fulldecode = false;
 	npothack = 
 		(!vid.support.arb_texture_non_power_of_two &&
 			(
@@ -2569,17 +2693,19 @@ rtexture_t *R_LoadTextureDDSFile(rtexturepool_t *rtexturepool, const char *filen
 		if(vid.support.arb_texture_compression && vid.support.ext_texture_compression_s3tc && !npothack)
 		{
 			if(r_texture_dds_swdecode.integer > 1)
+			{
+				// testing: decode in software as if the GPU had no S3TC
 				force_swdecode = true;
+				dds_fulldecode = r_texture_dds_swdecode.integer > 2;
+			}
 		}
 		else
 		{
-			if(r_texture_dds_swdecode.integer < 1)
-			{
-				// unsupported
-				Mem_Free(dds);
-				return NULL;
-			}
+			// no S3TC on this GPU: decode in software at full resolution
+			// (r_texture_dds_swdecode 1 keeps the old quarter resolution
+			// decode, which is faster and smaller in memory)
 			force_swdecode = true;
+			dds_fulldecode = r_texture_dds_swdecode.integer != 1;
 		}
 	}
 
@@ -2587,8 +2713,9 @@ rtexture_t *R_LoadTextureDDSFile(rtexturepool_t *rtexturepool, const char *filen
 	if (hasalphaflag)
 		*hasalphaflag = (flags & TEXF_ALPHA) != 0;
 
-	// if we SW decode, choose 2 sizes bigger
-	if(force_swdecode)
+	// if we SW decode, choose 2 sizes bigger (only for the old quarter
+	// resolution decode, r_texture_dds_swdecode 1 or 2)
+	if(force_swdecode && !dds_fulldecode)
 	{
 		// this is quarter res, so do not scale down more than we have to
 		miplevel -= 2;
@@ -2619,8 +2746,20 @@ rtexture_t *R_LoadTextureDDSFile(rtexturepool_t *rtexturepool, const char *filen
 
 	// from here on, we do not need the ddspixels and ddssize any more (apart from the statistics entry in glt)
 
+	// Insanotic: full resolution decode when the GPU has no S3TC
+	if(force_swdecode && dds_fulldecode)
+	{
+		int newsize;
+		unsigned char *decoded = DDS_DecodeMips(mippixels_start, mipsize_total, textype, bytesperblock, mipwidth, mipheight, max(1, dds_miplevels), &newsize);
+		textype = TEXTYPE_BGRA;
+		bytesperblock = 0;
+		bytesperpixel = 4;
+		mipsize = bytesperpixel * mipwidth * mipheight;
+		mippixels_start = decoded;
+		mipsize_total = newsize;
+	}
 	// fake decode S3TC if needed
-	if(force_swdecode)
+	else if(force_swdecode)
 	{
 		int mipsize_new = mipsize_total / bytesperblock * 4;
 		unsigned char *mipnewpixels = (unsigned char *) Mem_Alloc(tempmempool, mipsize_new);
