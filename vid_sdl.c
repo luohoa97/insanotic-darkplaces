@@ -992,7 +992,10 @@ void IN_Move( void )
 	oldkeydest = keydest;
 	oldshowkeyboard = !!vid_touchscreen_showkeyboard.integer;
 
-	if (vid_touchscreen.integer && !cl_lua_touch_captured)
+	// Insanotic: the old Quake touch areas only in the game. In the menu and
+	// the console they sent clicks of their own at the wrong place next to
+	// SDL's finger-as-mouse clicks; there SDL's pointer follows the finger.
+	if (vid_touchscreen.integer && !cl_lua_touch_captured && keydest == key_game)
 	{
 		switch(gamemode)
 		{
