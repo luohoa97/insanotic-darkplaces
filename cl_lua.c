@@ -859,6 +859,70 @@ static int LuaCl_command(lua_State *L)
 }
 
 //============================================================================
+// predicted sounds
+
+cvar_t cl_lua_predict_window = {CVAR_SAVE, "cl_lua_predict_window", "0.6", "seconds within which a sound a mod played ahead of the server cancels the same sound arriving from the game"};
+
+#define CL_LUA_MAXPREDICTED 32
+static struct { sfx_t *sfx; double time; } cl_lua_predicted[CL_LUA_MAXPREDICTED];
+static qboolean cl_lua_playing_predicted;
+
+qboolean CL_Lua_ConsumePredictedSound(sfx_t *sfx, int entnum)
+{
+	int i;
+	if (cl_lua_playing_predicted)
+		return false; // our own early copy
+	// only sounds on our own player, the world (no entity) or from the client
+	// game code: other players firing the same weapon must still be heard
+	if (entnum > 0 && entnum != cl.playerentity && entnum < MAX_EDICTS)
+		return false;
+	for (i = 0; i < CL_LUA_MAXPREDICTED; i++)
+	{
+		if (cl_lua_predicted[i].sfx == sfx && realtime - cl_lua_predicted[i].time <= cl_lua_predict_window.value)
+		{
+			cl_lua_predicted[i].sfx = NULL;
+			return true;
+		}
+	}
+	return false;
+}
+
+// xon.play_sound(path [, volume [, predicted]]): plays a sound for you now.
+// With predicted, the same sound arriving from the game shortly after is
+// dropped, so a sound can be played before the server confirms it.
+static int LuaCl_play_sound(lua_State *L)
+{
+	const char *path = luaL_checkstring(L, 1);
+	float volume = (float)luaL_optnumber(L, 2, 1);
+	qboolean predicted = lua_toboolean(L, 3);
+	sfx_t *sfx;
+	vec3_t org;
+	int i, oldest = 0;
+	if (cls.state == ca_dedicated)
+		return 0;
+	sfx = S_PrecacheSound(path, false, false);
+	if (!sfx)
+	{
+		lua_pushboolean(L, false);
+		return 1;
+	}
+	Matrix4x4_OriginFromMatrix(&r_refdef.view.matrix, org);
+	cl_lua_playing_predicted = true;
+	S_StartSound(cl.playerentity, 0, sfx, org, bound(0, volume, 1), 0);
+	cl_lua_playing_predicted = false;
+	if (predicted)
+	{
+		for (i = 1; i < CL_LUA_MAXPREDICTED; i++)
+			if (cl_lua_predicted[i].time < cl_lua_predicted[oldest].time)
+				oldest = i;
+		cl_lua_predicted[oldest].sfx = sfx;
+		cl_lua_predicted[oldest].time = realtime;
+	}
+	lua_pushboolean(L, true);
+	return 1;
+}
+
+//============================================================================
 // drawing (inside the HUD hook only)
 
 static cachepic_t *cl_lua_disc, *cl_lua_ring;
@@ -1027,6 +1091,7 @@ static const luaL_Reg cl_luaxon_funcs[] =
 	{"input_mode", LuaCl_input_mode},
 	{"has_touch", LuaCl_has_touch},
 	{"command", LuaCl_command},
+	{"play_sound", LuaCl_play_sound},
 	{"draw_fill", LuaCl_draw_fill},
 	{"draw_pic", LuaCl_draw_pic},
 	{"draw_subpic", LuaCl_draw_subpic},
@@ -1079,6 +1144,7 @@ void CL_Lua_Init(void)
 	Cvar_RegisterVariable(&cl_lua_memory_limit);
 	Cvar_RegisterVariable(&cl_lua_touch_mouse);
 	Cvar_RegisterVariable(&cl_lua_disabled);
+	Cvar_RegisterVariable(&cl_lua_predict_window);
 	Cmd_AddCommand("lua_mods", CL_Lua_Mods_f, "list client Lua mods and their status");
 	Cmd_AddCommand("lua_reload", CL_Lua_Reload_f, "reload every client Lua mod");
 }

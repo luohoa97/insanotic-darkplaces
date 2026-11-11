@@ -21,6 +21,10 @@ void CL_Lua_Input(int *buttons, int *impulse);
 void CL_Lua_DrawHUD(void);
 // connection closed: forget per-server permissions
 void CL_Lua_Disconnected(void);
+// a sound a mod played ahead of time (xon.play_sound predicted) arrives for
+// real: returns true once per prediction so the duplicate is skipped
+struct sfx_s;
+qboolean CL_Lua_ConsumePredictedSound(struct sfx_s *sfx, int entnum);
 
 // touch input reported by the video backend: fingers in normalized screen
 // coordinates; returns the number written (vid_sdl.c, 0 elsewhere)

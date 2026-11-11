@@ -20,6 +20,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // snd_main.c -- main control for any streaming sound output device
 
 #include "quakedef.h"
+#include "cl_lua.h"
 #include "loadtimes.h"
 
 #include "snd_main.h"
@@ -1689,6 +1690,11 @@ int S_StartSound_StartPosition_Flags (int entnum, int entchannel, sfx_t *sfx, ve
 	int		ch_idx, startpos, i;
 
 	if (snd_renderbuffer == NULL || sfx == NULL || nosound.integer)
+		return -1;
+
+	// Insanotic: a client mod already played this sound ahead of the server
+	// (predicted fire sound, hit sound): drop the late duplicate
+	if (CL_Lua_ConsumePredictedSound(sfx, entnum))
 		return -1;
 
 	if(sfx == &changevolume_sfx)
