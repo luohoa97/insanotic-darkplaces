@@ -116,6 +116,12 @@ static textypeinfo_t textype_bgra_alpha                  = {"bgra_alpha",       
 #ifdef __ANDROID__
 static textypeinfo_t textype_etc1                        = {"etc1",                     TEXTYPE_ETC1          ,  1,  3,  0.5f, GL_ETC1_RGB8_OES                         , 0                 , 0                };
 #endif
+// Insanotic: S3TC for GPUs with GL_EXT_texture_compression_s3tc (DDS files
+// upload as they are; see the GLES2 setup in vid_sdl.c)
+static textypeinfo_t textype_dxt1                        = {"dxt1",                     TEXTYPE_DXT1          ,  4,  0,  0.5f, GL_COMPRESSED_RGB_S3TC_DXT1_EXT       , 0                 , 0                };
+static textypeinfo_t textype_dxt1a                       = {"dxt1a",                    TEXTYPE_DXT1A         ,  4,  0,  0.5f, GL_COMPRESSED_RGBA_S3TC_DXT1_EXT      , 0                 , 0                };
+static textypeinfo_t textype_dxt3                        = {"dxt3",                     TEXTYPE_DXT3          ,  4,  0,  1.0f, GL_COMPRESSED_RGBA_S3TC_DXT3_EXT      , 0                 , 0                };
+static textypeinfo_t textype_dxt5                        = {"dxt5",                     TEXTYPE_DXT5          ,  4,  0,  1.0f, GL_COMPRESSED_RGBA_S3TC_DXT5_EXT      , 0                 , 0                };
 #else
 // framebuffer texture formats
 static textypeinfo_t textype_shadowmap16_comp            = {"shadowmap16_comp",         TEXTYPE_SHADOWMAP16_COMP     ,  2,  2,  2.0f, GL_DEPTH_COMPONENT16_ARB          , GL_DEPTH_COMPONENT, GL_UNSIGNED_SHORT};
@@ -285,6 +291,14 @@ static textypeinfo_t *R_GetTexTypeInfo(textype_t textype, int flags)
 	switch(textype)
 	{
 #ifdef USE_GLES2
+	case TEXTYPE_DXT1: return &textype_dxt1;
+	case TEXTYPE_DXT1A: return &textype_dxt1a;
+	case TEXTYPE_DXT3: return &textype_dxt3;
+	case TEXTYPE_DXT5: return &textype_dxt5;
+	case TEXTYPE_SRGB_DXT1: return &textype_dxt1;
+	case TEXTYPE_SRGB_DXT1A: return &textype_dxt1a;
+	case TEXTYPE_SRGB_DXT3: return &textype_dxt3;
+	case TEXTYPE_SRGB_DXT5: return &textype_dxt5;
 	case TEXTYPE_PALETTE: return (flags & TEXF_ALPHA) ? &textype_palette_alpha : &textype_palette;
 	case TEXTYPE_RGBA: return ((flags & TEXF_ALPHA) ? &textype_rgba_alpha : &textype_rgba);
 	case TEXTYPE_BGRA: return ((flags & TEXF_ALPHA) ? &textype_bgra_alpha : &textype_bgra);
