@@ -188,8 +188,10 @@ void listdirectory(stringlist_t *list, const char *basepath, const char *path)
 	dpsnprintf(fullpath, sizeof(fullpath), "%s%s", basepath, path);
 #ifdef __ANDROID__
 	// SDL currently does not support listing assets, so we have to emulate
-	// it. We're using relative paths for assets, so that will do.
-	if (basepath[0] != '/')
+	// it. We're using relative paths for assets, so that will do. The test is
+	// on the full path: basepath is "" for the game directories, whose path
+	// is absolute.
+	if (fullpath[0] != '/')
 	{
 		char listpath[MAX_OSPATH];
 		qfile_t *listfile;
