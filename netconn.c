@@ -79,6 +79,10 @@ cvar_t net_test = {0, "net_test", "0", "internal development use only, leave it 
 cvar_t net_usesizelimit = {0, "net_usesizelimit", "2", "use packet size limiting (0: never, 1: in non-CSQC mode, 2: always)"};
 cvar_t net_burstreserve = {0, "net_burstreserve", "0.3", "how much of the burst time to reserve for packet size spikes"};
 cvar_t net_messagetimeout = {0, "net_messagetimeout","300", "drops players who have not sent any packets for this many seconds"};
+// Insanotic: windowed reliable messages (joining sends ~25 KB, which took one
+// round trip per KB)
+cvar_t net_reliable_window = {0, "net_reliable_window", "16", "how many reliable fragments of 1 KB the server keeps in flight to clients that support it (1 = one per round trip, like stock DarkPlaces)"};
+cvar_t net_reliable_resendtime = {0, "net_reliable_resendtime", "0.5", "seconds without an acknowledgement before windowed reliable fragments are sent again"};
 cvar_t net_connecttimeout = {0, "net_connecttimeout","15", "after requesting a connection, the client must reply within this many seconds or be dropped (cuts down on connect floods). Must be above 10 seconds."};
 cvar_t net_connectfloodblockingtimeout = {0, "net_connectfloodblockingtimeout", "5", "when a connection packet is received, it will block all future connect packets from that IP address for this many seconds (cuts down on connect floods). Note that this does not include retries from the same IP; these are handled earlier and let in."};
 cvar_t net_challengefloodblockingtimeout = {0, "net_challengefloodblockingtimeout", "0.5", "when a challenge packet is received, it will block all future challenge packets from that IP address for this many seconds (cuts down on challenge floods). DarkPlaces clients retry once per second, so this should be <= 1. Failure here may lead to connect attempts failing."};
@@ -815,6 +819,61 @@ static int NetConn_AddCryptoFlag(crypto_t *crypto)
 	return flag;
 }
 
+// Insanotic: windowed reliable messages. Fragment i of the unacknowledged
+// part of conn->sendMessage has sequence ackSequence + i; returns the bytes
+// put on the wire
+static int NetConn_SendReliableFragment(netconn_t *conn, unsigned int index)
+{
+	unsigned char sendbuffer[NET_HEADERSIZE+MAX_PACKETFRAGMENT];
+	unsigned char cryptosendbuffer[NET_HEADERSIZE+MAX_PACKETFRAGMENT+CRYPTO_HEADERSIZE];
+	int offset = (int)index * MAX_PACKETFRAGMENT;
+	unsigned int dataLen, packetLen, eom;
+	const void *sendme;
+	size_t sendmelen;
+
+	if (offset >= conn->sendMessageLength)
+		return 0;
+	dataLen = min(conn->sendMessageLength - offset, MAX_PACKETFRAGMENT);
+	eom = offset + (int)dataLen == conn->sendMessageLength ? NETFLAG_EOM : 0;
+	packetLen = NET_HEADERSIZE + dataLen;
+	StoreBigLong(sendbuffer, packetLen | (NETFLAG_DATA | eom | NetConn_AddCryptoFlag(&conn->crypto)));
+	StoreBigLong(sendbuffer + 4, conn->nq.ackSequence + index);
+	memcpy(sendbuffer + NET_HEADERSIZE, conn->sendMessage + offset, dataLen);
+	conn->outgoing_netgraph[conn->outgoing_packetcounter].reliablebytes += packetLen + 28;
+	sendme = Crypto_EncryptPacket(&conn->crypto, &sendbuffer, packetLen, &cryptosendbuffer, &sendmelen, sizeof(cryptosendbuffer));
+	if (!sendme)
+		return 0;
+	NetConn_Write(conn->mysocket, sendme, (int)sendmelen, &conn->peeraddress);
+	conn->packetsSent++;
+	return (int)sendmelen + 28;
+}
+
+// sends fragments not yet sent until the window is full
+static int NetConn_FillReliableWindow(netconn_t *conn)
+{
+	int total = 0;
+	unsigned int inflight;
+	while ((inflight = conn->nq.sendSequence - conn->nq.ackSequence) < conn->nq.window
+		&& (int)inflight * MAX_PACKETFRAGMENT < conn->sendMessageLength)
+	{
+		total += NetConn_SendReliableFragment(conn, inflight);
+		conn->nq.sendSequence++;
+	}
+	return total;
+}
+
+// "accept", plus the reliable window for clients that offered one (stock
+// clients only take a bare "accept", and never offer a window)
+static void NetConn_SendAccept(lhnetsocket_t *mysocket, lhnetaddress_t *peeraddress, netconn_t *conn)
+{
+	char reply[64];
+	if (conn && conn->nq.window > 1)
+		dpsnprintf(reply, sizeof(reply), "\377\377\377\377accept\\rwin\\%u", conn->nq.window);
+	else
+		strlcpy(reply, "\377\377\377\377accept", sizeof(reply));
+	NetConn_WriteString(mysocket, reply, peeraddress);
+}
+
 int NetConn_SendUnreliableMessage(netconn_t *conn, sizebuf_t *data, protocolversion_t protocol, int rate, int burstsize, qboolean quakesignon_suppressreliables)
 {
 	int totallen = 0;
@@ -904,8 +963,37 @@ int NetConn_SendUnreliableMessage(netconn_t *conn, sizebuf_t *data, protocolvers
 		const void *sendme;
 		size_t sendmelen;
 
+		if (conn->nq.window > 1)
+		{
+			// Insanotic: windowed reliable messages (several fragments in
+			// flight instead of one per round trip); on a timeout go back
+			// to the first unacknowledged fragment and send the window again
+			if (conn->sendMessageLength && (realtime - conn->lastSendTime) > net_reliable_resendtime.value)
+			{
+				unsigned int i, inflight = conn->nq.sendSequence - conn->nq.ackSequence;
+				for (i = 0;i < inflight;i++)
+					totallen += NetConn_SendReliableFragment(conn, i);
+				conn->packetsReSent += inflight;
+				conn->lastSendTime = realtime;
+			}
+			if (!conn->sendMessageLength && conn->message.cursize && !quakesignon_suppressreliables)
+			{
+				if (conn->message.cursize > (int)sizeof(conn->sendMessage))
+				{
+					Con_Printf("NetConn_SendUnreliableMessage: reliable message too big (%u > %u)\n", conn->message.cursize, (int)sizeof(conn->sendMessage));
+					conn->message.overflowed = true;
+					return -1;
+				}
+				memcpy(conn->sendMessage, conn->message.data, conn->message.cursize);
+				conn->sendMessageLength = conn->message.cursize;
+				SZ_Clear(&conn->message);
+				conn->lastSendTime = realtime;
+				conn->reliableMessagesSent++;
+				totallen += NetConn_FillReliableWindow(conn);
+			}
+		}
 		// if a reliable message fragment has been lost, send it again
-		if (conn->sendMessageLength && (realtime - conn->lastSendTime) > 1.0)
+		else if (conn->sendMessageLength && (realtime - conn->lastSendTime) > 1.0)
 		{
 			if (conn->sendMessageLength <= MAX_PACKETFRAGMENT)
 			{
@@ -937,7 +1025,7 @@ int NetConn_SendUnreliableMessage(netconn_t *conn, sizebuf_t *data, protocolvers
 		}
 
 		// if we have a new reliable message to send, do so
-		if (!conn->sendMessageLength && conn->message.cursize && !quakesignon_suppressreliables)
+		if (conn->nq.window <= 1 && !conn->sendMessageLength && conn->message.cursize && !quakesignon_suppressreliables)
 		{
 			if (conn->message.cursize > (int)sizeof(conn->sendMessage))
 			{
@@ -1485,6 +1573,27 @@ static int NetConn_ReceivedMessage(netconn_t *conn, const unsigned char *data, s
 				conn->incoming_netgraph[conn->incoming_packetcounter].ackbytes += originallength + 28;
 				NetConn_UpdateCleartime(&conn->incoming_cleartime, cl_rate.integer, cl_rate_burstsize.integer, originallength + 28);
 
+				if (conn->nq.window > 1)
+				{
+					// cumulative ack of a windowed reliable message
+					unsigned int inflight = conn->nq.sendSequence - conn->nq.ackSequence;
+					unsigned int acked = sequence - conn->nq.ackSequence + 1;
+					if (conn->sendMessageLength && acked >= 1 && acked <= inflight)
+					{
+						int drop = (int)acked * MAX_PACKETFRAGMENT;
+						if (drop > conn->sendMessageLength)
+							drop = conn->sendMessageLength;
+						conn->sendMessageLength -= drop;
+						memmove(conn->sendMessage, conn->sendMessage + drop, conn->sendMessageLength);
+						conn->nq.ackSequence += acked;
+						conn->lastMessageTime = realtime;
+						conn->timeout = realtime + newtimeout;
+						conn->lastSendTime = realtime;
+						NetConn_FillReliableWindow(conn);
+					}
+					return 1;
+				}
+
 				if (sequence == (conn->nq.sendSequence - 1))
 				{
 					if (sequence == conn->nq.ackSequence)
@@ -1548,7 +1657,14 @@ static int NetConn_ReceivedMessage(netconn_t *conn, const unsigned char *data, s
 				conn->outgoing_netgraph[conn->outgoing_packetcounter].ackbytes        += 8 + 28;
 
 				StoreBigLong(temppacket, 8 | NETFLAG_ACK | NetConn_AddCryptoFlag(&conn->crypto));
-				StoreBigLong(temppacket + 4, sequence);
+				// Insanotic: a fragment that arrives ahead of a lost one is
+				// dropped below, so acknowledge only what arrived in order
+				// (cumulative ack; a windowed sender resends from the gap,
+				// a stop-and-wait sender never gets ahead)
+				if ((int)(sequence - conn->nq.receiveSequence) > 0)
+					StoreBigLong(temppacket + 4, conn->nq.receiveSequence - 1);
+				else
+					StoreBigLong(temppacket + 4, sequence);
 				sendme = Crypto_EncryptPacket(&conn->crypto, temppacket, 8, &cryptosendbuffer, &sendmelen, sizeof(cryptosendbuffer));
 				if(sendme)
 					NetConn_Write(conn->mysocket, sendme, (int)sendmelen, &conn->peeraddress);
@@ -2013,12 +2129,16 @@ static int NetConn_ClientParsePacket(lhnetsocket_t *mysocket, unsigned char *dat
 			InfoString_SetValue(cls.userinfo, sizeof(cls.userinfo), "*ip", addressstring2);
 			// TODO: add userinfo stuff here instead of using NQ commands?
 			memcpy(senddata, "\377\377\377\377", 4);
-			dpsnprintf(senddata+4, sizeof(senddata)-4, "connect\\protocol\\darkplaces 3\\protocols\\%s%s\\challenge\\%s", protocolnames, cls.connect_userinfo, string + 10);
+			dpsnprintf(senddata+4, sizeof(senddata)-4, "connect\\protocol\\darkplaces 3\\protocols\\%s%s\\challenge\\%s\\rwin\\%d", protocolnames, cls.connect_userinfo, string + 10, NET_MAXRELIABLEWINDOW);
 			NetConn_WriteString(mysocket, senddata, peeraddress);
 			return true;
 		}
-		if (length == 6 && !memcmp(string, "accept", 6) && cls.connect_trying)
+		// Insanotic: an Insanotic server answers "accept\\rwin\\N" to clients
+		// that offered windowed reliable messages
+		if (length >= 6 && !memcmp(string, "accept", 6) && (length == 6 || string[6] == '\\') && cls.connect_trying)
 		{
+			unsigned int window = 0;
+			char rwin[16];
 			// darkplaces or quake3
 			if (net_sourceaddresscheck.integer && LHNETADDRESS_Compare(peeraddress, &cls.connect_address)) {
 				Con_DPrintf("accept message from wrong server %s\n", addressstring2);
@@ -2027,7 +2147,12 @@ static int NetConn_ClientParsePacket(lhnetsocket_t *mysocket, unsigned char *dat
 #ifdef CONFIG_MENU
 			M_Update_Return_Reason("Accepted");
 #endif
+			if (length > 6 && InfoString_GetValue(string + 6, "rwin", rwin, sizeof(rwin)))
+				window = (unsigned int)bound(1, atoi(rwin), NET_MAXRELIABLEWINDOW);
 			NetConn_ConnectionEstablished(mysocket, peeraddress, PROTOCOL_DARKPLACES3);
+			if (cls.netcon)
+				cls.netcon->nq.window = window;
+			Con_DPrintf("connection accepted, reliable window %u\n", window);
 			return true;
 		}
 		if (length > 7 && !memcmp(string, "reject ", 7) && cls.connect_trying)
@@ -3260,7 +3385,7 @@ static int NetConn_ServerParsePacket(lhnetsocket_t *mysocket, unsigned char *dat
 						// keep their stuff intact
 						if (developer_extra.integer)
 							Con_Printf("Datagram_ParseConnectionless: sending \"accept\" to %s.\n", addressstring2);
-						NetConn_WriteString(mysocket, "\377\377\377\377accept", peeraddress);
+						NetConn_SendAccept(mysocket, peeraddress, client->netconnection);
 						if(crypto && crypto->authenticated)
 							Crypto_FinishInstance(&client->netconnection->crypto, crypto);
 						SV_SendServerinfo(client);
@@ -3273,7 +3398,7 @@ static int NetConn_ServerParsePacket(lhnetsocket_t *mysocket, unsigned char *dat
 							Con_Printf("Datagram_ParseConnectionless: sending duplicate accept to %s.\n", addressstring2);
 						if(crypto && crypto->authenticated)
 							Crypto_FinishInstance(&client->netconnection->crypto, crypto);
-						NetConn_WriteString(mysocket, "\377\377\377\377accept", peeraddress);
+						NetConn_SendAccept(mysocket, peeraddress, client->netconnection);
 					}
 					return true;
 				}
@@ -3291,7 +3416,11 @@ static int NetConn_ServerParsePacket(lhnetsocket_t *mysocket, unsigned char *dat
 					// allocated connection
 					if (developer_extra.integer)
 						Con_Printf("Datagram_ParseConnectionless: sending \"accept\" to %s.\n", conn->address);
-					NetConn_WriteString(mysocket, "\377\377\377\377accept", peeraddress);
+					// Insanotic: windowed reliable messages (both ways) when
+					// the client says it acknowledges cumulatively
+					if ((s = InfoString_GetValue(string, "rwin", infostringvalue, sizeof(infostringvalue))))
+						conn->nq.window = (unsigned int)bound(1, min(atoi(s), net_reliable_window.integer), NET_MAXRELIABLEWINDOW);
+					NetConn_SendAccept(mysocket, peeraddress, conn);
 					// now set up the client
 					if(crypto && crypto->authenticated)
 						Crypto_FinishInstance(&conn->crypto, crypto);
@@ -4009,6 +4138,8 @@ void NetConn_Init(void)
 		Cvar_RegisterVariable(&net_tos_dscp);
 	Cvar_RegisterVariable(&net_messagetimeout);
 	Cvar_RegisterVariable(&net_connecttimeout);
+	Cvar_RegisterVariable(&net_reliable_window);
+	Cvar_RegisterVariable(&net_reliable_resendtime);
 	Cvar_RegisterVariable(&net_connectfloodblockingtimeout);
 	Cvar_RegisterVariable(&net_challengefloodblockingtimeout);
 	Cvar_RegisterVariable(&net_getstatusfloodblockingtimeout);

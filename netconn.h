@@ -25,6 +25,8 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "lhnet.h"
 
 #define NET_HEADERSIZE		(2 * sizeof(unsigned int))
+/// Insanotic: most reliable fragments a connection keeps in flight
+#define NET_MAXRELIABLEWINDOW 32
 
 // NetHeader flags
 #define NETFLAG_LENGTH_MASK 0x0000ffff
@@ -177,6 +179,9 @@ typedef struct netconn_s
 
 		unsigned int receiveSequence;
 		unsigned int unreliableReceiveSequence;
+		/// Insanotic: reliable fragments allowed in flight (0 or 1: stock
+		/// stop-and-wait); only set when the peer acknowledges cumulatively
+		unsigned int window;
 	}
 	nq;
 	struct netconn_qw_s
