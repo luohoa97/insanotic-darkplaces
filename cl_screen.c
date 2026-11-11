@@ -2676,6 +2676,10 @@ static void SCR_DrawInsanoticBackdrop(void)
 	static int checked;
 	static cachepic_t *background, *logo;
 	float w = vid_conwidth.integer, h = vid_conheight.integer, f, lw, lh;
+	// console units are not always square pixels (the UI size need not have
+	// the window's shape): px is how many units wide one unit high is on
+	// screen, so pictures keep their proportions
+	float px = (vid.width > 0 && vid.height > 0) ? ((float)vid.height / vid.width) * (w / h) : 1;
 	int i, strips = 32;
 
 	if (!checked)
@@ -2688,8 +2692,9 @@ static void SCR_DrawInsanoticBackdrop(void)
 	}
 	if (background && background->width > 0 && background->height > 0)
 	{
-		f = max(w / background->width, h / background->height);
-		DrawQ_Pic((w - background->width * f) / 2, (h - background->height * f) / 2, background, background->width * f, background->height * f, 1, 1, 1, 1, 0);
+		float bw = background->width * px, bh = background->height;
+		f = max(w / bw, h / bh);
+		DrawQ_Pic((w - bw * f) / 2, (h - bh * f) / 2, background, bw * f, bh * f, 1, 1, 1, 1, 0);
 	}
 	else
 	{
@@ -2704,7 +2709,10 @@ static void SCR_DrawInsanoticBackdrop(void)
 	if (logo && logo->width > 0 && logo->height > 0)
 	{
 		lw = w * LOADING_LOGO_WIDTH;
-		lh = lw * ((LOADING_LOGO_T1 - LOADING_LOGO_T0) * logo->height) / ((LOADING_LOGO_S1 - LOADING_LOGO_S0) * logo->width);
+		// the layer is a 2560x2048 picture; use its real proportions (the
+		// texture may be stored at another size) so the logo keeps the
+		// shape the menu draws it with
+		lh = lw / px * ((LOADING_LOGO_T1 - LOADING_LOGO_T0) * 2048.0f) / ((LOADING_LOGO_S1 - LOADING_LOGO_S0) * 2560.0f);
 		DrawQ_SuperPic((w - lw) / 2, h * LOADING_LOGO_Y - lh / 2, logo, lw, lh,
 			LOADING_LOGO_S0, LOADING_LOGO_T0, 1, 1, 1, 1,
 			LOADING_LOGO_S1, LOADING_LOGO_T0, 1, 1, 1, 1,
