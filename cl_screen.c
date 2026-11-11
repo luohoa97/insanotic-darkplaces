@@ -1,5 +1,6 @@
 
 #include "quakedef.h"
+#include "cl_lua.h"
 #include "cl_video.h"
 #include "image.h"
 #include "jpeg.h"
@@ -2251,6 +2252,7 @@ static void SCR_DrawScreen (void)
 		SHOWLMP_drawall();
 		SCR_CheckDrawCenterString();
 	}
+	CL_Lua_DrawHUD();
 	SCR_DrawNetGraph ();
 #ifdef CONFIG_MENU
 	MR_Draw();
@@ -2264,7 +2266,8 @@ static void SCR_DrawScreen (void)
 
 	SCR_DrawInfobar();
 
-	SCR_DrawTouchscreenOverlay();
+	if (!cl_lua_touch_captured)
+		SCR_DrawTouchscreenOverlay();
 
 	if (r_timereport_active)
 		R_TimeReport("2d");

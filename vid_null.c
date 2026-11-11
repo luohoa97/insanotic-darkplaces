@@ -18,6 +18,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 */
 
 #include "quakedef.h"
+#include "cl_lua.h"
 
 #include <signal.h>
 
@@ -92,6 +93,21 @@ vid_mode_t *VID_GetDesktopMode(void)
 }
 
 size_t VID_ListModes(vid_mode_t *modes, size_t maxcount)
+{
+	return 0;
+}
+
+int VID_GetTouches(vid_touch_t *out, int max)
+{
+	return 0;
+}
+
+int VID_InputIsTouch(void)
+{
+	return 0;
+}
+
+int VID_HasTouch(void)
 {
 	return 0;
 }

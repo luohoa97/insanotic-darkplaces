@@ -20,6 +20,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // host.c -- coordinates spawning and killing of local servers
 
 #include "quakedef.h"
+#include "cl_lua.h"
 
 #include <time.h>
 #include "libcurl.h"
@@ -995,6 +996,9 @@ void Host_Main(void)
 			if (host_speeds.integer)
 				time1 = Sys_DirtyTime();
 			R_TimeReport("pre-input");
+
+			// client Lua mods (loads them on the first frame)
+			CL_Lua_Frame();
 
 			// Collect input into cmd
 			CL_Input();

@@ -20,6 +20,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // cl_main.c  -- client main loop
 
 #include "quakedef.h"
+#include "cl_lua.h"
 #include "cl_collision.h"
 #include "cl_video.h"
 #include "image.h"
@@ -335,6 +336,8 @@ This is also called on Host_Error, so it shouldn't cause any errors
 */
 void CL_Disconnect(void)
 {
+	CL_Lua_Disconnected();
+
 	if (cls.state == ca_dedicated)
 		return;
 
@@ -2673,6 +2676,7 @@ CL_Shutdown
 */
 void CL_Shutdown (void)
 {
+	CL_Lua_Shutdown();
 	CL_Screen_Shutdown();
 	CL_Particles_Shutdown();
 	CL_Parse_Shutdown();
@@ -2799,4 +2803,6 @@ void CL_Init (void)
 	CL_MeshEntities_Init();
 
 	CL_Video_Init();
+
+	CL_Lua_Init();
 }

@@ -32,6 +32,7 @@ static void SV_Download_f(void);
 static void SV_VM_Setup(void);
 extern cvar_t net_connecttimeout;
 
+cvar_t sv_allow_assist = {0, "sv_allow_assist", "0", "1 tells Insanotic clients that aim assistance mods (e.g. touch_assist) may run on this server"};
 cvar_t sv_worldmessage = {CVAR_READONLY, "sv_worldmessage", "", "title of current level"};
 cvar_t sv_worldname = {CVAR_READONLY, "sv_worldname", "", "name of current worldmodel"};
 cvar_t sv_worldnamenoextension = {CVAR_READONLY, "sv_worldnamenoextension", "", "name of current worldmodel without extension"};
@@ -438,6 +439,7 @@ void SV_Init (void)
 	extern cvar_t csqc_usedemoprogs;
 
 	LuaMods_Init();
+	Cvar_RegisterVariable(&sv_allow_assist);
 
 	Cvar_RegisterVariable(&sv_worldmessage);
 	Cvar_RegisterVariable(&sv_worldname);
@@ -996,6 +998,14 @@ void SV_SendServerinfo (client_t *client)
 	{
 		MSG_WriteByte (&client->netconnection->message, svc_stufftext);
 		MSG_WriteString (&client->netconnection->message, "cl_serverextension_download 2\n");
+	}
+
+	// Insanotic clients run aim assistance mods only where the server allows
+	// it; stock clients ignore the unknown cvar
+	if (sv_allow_assist.integer && client->netconnection)
+	{
+		MSG_WriteByte (&client->netconnection->message, svc_stufftext);
+		MSG_WriteString (&client->netconnection->message, "set _cl_assist_allowed 1\n");
 	}
 
 	// send at this time so it's guaranteed to get executed at the right time

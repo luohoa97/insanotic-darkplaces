@@ -21,6 +21,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include <stdio.h>
 
 #include "quakedef.h"
+#include "cl_lua.h"
 #include "image.h"
 #include "dpsoftrast.h"
 #include "utf8lib.h"
@@ -491,6 +492,9 @@ void VID_SetMouse(qboolean fullscreengrab, qboolean relative, qboolean hidecurso
 // X and Y coordinates are 0-1.
 #define MAXFINGERS 11
 float multitouch[MAXFINGERS][3];
+// last input came from a finger (true) or from keyboard / mouse (false)
+static qboolean vid_input_touch;
+static int vid_touchmouse_hint = -1;
 
 // this one stores how many areas this finger has touched
 int multitouchs[MAXFINGERS];
@@ -988,7 +992,7 @@ void IN_Move( void )
 	oldkeydest = keydest;
 	oldshowkeyboard = !!vid_touchscreen_showkeyboard.integer;
 
-	if (vid_touchscreen.integer)
+	if (vid_touchscreen.integer && !cl_lua_touch_captured)
 	{
 		switch(gamemode)
 		{
@@ -1043,6 +1047,9 @@ void IN_Move( void )
 		SDL_GetMouseState(&x, &y);
 		in_windowmouse_x = x;
 		in_windowmouse_y = y;
+		// touch controls own the view while they are up
+		if (cl_lua_touch_captured)
+			in_mouse_x = in_mouse_y = 0;
 	}
 
 	VID_BuildJoyState(&joystate);
@@ -1224,6 +1231,14 @@ void Sys_SendKeyEvents( void )
 
 	VID_EnableJoystick(true);
 
+	// while a Lua mod drives touch input, fingers must not also move or click
+	// as a mouse; in menus they still do
+	if (vid_touchmouse_hint != (int)cl_lua_touch_captured)
+	{
+		vid_touchmouse_hint = cl_lua_touch_captured;
+		SDL_SetHint(SDL_HINT_TOUCH_MOUSE_EVENTS, cl_lua_touch_captured ? "0" : "1");
+	}
+
 	while( SDL_PollEvent( &event ) )
 		loop_start:
 		switch( event.type ) {
@@ -1277,6 +1292,9 @@ void Sys_SendKeyEvents( void )
 					Con_DPrintf("SDL_Event: SDL_MOUSEBUTTONUP\n");
 #endif
 				if (!vid_touchscreen.integer)
+				if (event.type == SDL_MOUSEBUTTONDOWN && event.button.which != SDL_TOUCH_MOUSEID && !cl_lua_touch_mouse.integer)
+					vid_input_touch = false;
+				if (!(cl_lua_touch_captured && (event.button.which == SDL_TOUCH_MOUSEID || (cl_lua_touch_mouse.integer && event.button.button == SDL_BUTTON_LEFT))))
 				if (event.button.button > 0 && event.button.button <= ARRAY_SIZE(buttonremap))
 					Key_Event( buttonremap[event.button.button - 1], 0, event.button.state == SDL_PRESSED );
 				break;
@@ -1391,6 +1409,7 @@ void Sys_SendKeyEvents( void )
 			case SDL_MOUSEMOTION:
 				break;
 			case SDL_FINGERDOWN:
+				vid_input_touch = true;
 #ifdef DEBUGSDLEVENTS
 				Con_DPrintf("SDL_FINGERDOWN for finger %i\n", (int)event.tfinger.fingerId);
 #endif
@@ -3020,4 +3039,42 @@ size_t VID_ListModes(vid_mode_t *modes, size_t maxcount)
 	}
 #endif
 	return k;
+}
+
+// fingers currently on the screen, for client Lua mods; with
+// cl_lua_touch_mouse the left mouse button is reported as finger 1000
+int VID_GetTouches(vid_touch_t *out, int max)
+{
+	int i, n = 0;
+	for (i = 0; i < MAXFINGERS - 1 && n < max; i++)
+	{
+		if (!multitouch[i][0])
+			continue;
+		out[n].id = (int)multitouch[i][0];
+		out[n].x = multitouch[i][1];
+		out[n].y = multitouch[i][2];
+		n++;
+	}
+	if (cl_lua_touch_mouse.integer && n < max && vid.width > 0 && vid.height > 0)
+	{
+		int x, y;
+		if (SDL_GetMouseState(&x, &y) & SDL_BUTTON(SDL_BUTTON_LEFT))
+		{
+			out[n].id = 1000;
+			out[n].x = (float)x / vid.width;
+			out[n].y = (float)y / vid.height;
+			n++;
+		}
+	}
+	return n;
+}
+
+int VID_InputIsTouch(void)
+{
+	return vid_input_touch || (cl_lua_touch_mouse.integer != 0);
+}
+
+int VID_HasTouch(void)
+{
+	return SDL_GetNumTouchDevices() > 0 || cl_lua_touch_mouse.integer != 0;
 }

@@ -23,6 +23,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // rights reserved.
 
 #include "quakedef.h"
+#include "cl_lua.h"
 #include "csprogs.h"
 #include "thread.h"
 
@@ -1801,6 +1802,7 @@ void CL_SendMove(void)
 	int i, j, packetloss;
 	int checksumindex;
 	int bits;
+	int impulse;
 	int maxusercmds;
 	usercmd_t *cmd;
 	sizebuf_t buf;
@@ -1855,9 +1857,12 @@ void CL_SendMove(void)
 		if (cl.cmd.cursor_screen[1] >=  1) bits |= 64;
 	}
 
-	// set buttons and impulse
+	// set buttons and impulse; client Lua mods may adjust angles, movement,
+	// buttons and impulse first
+	impulse = in_impulse;
+	CL_Lua_Input(&bits, &impulse);
 	cl.cmd.buttons = bits;
-	cl.cmd.impulse = in_impulse;
+	cl.cmd.impulse = impulse;
 
 	// set viewangles
 	VectorCopy(cl.viewangles, cl.cmd.viewangles);

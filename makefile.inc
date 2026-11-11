@@ -182,6 +182,7 @@ OBJ_COMMON= \
 	sv_demo.o \
 	sv_lua.o \
 	lua_sandbox.o \
+	cl_lua.o \
 	sv_main.o \
 	sv_move.o \
 	sv_phys.o \
