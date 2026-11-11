@@ -821,6 +821,21 @@ dp_font_t *FindFont(const char *title, qboolean allocate_new)
 	return NULL;
 }
 
+// Insanotic: text drawn at a size the font has nothing close to gets that
+// size rendered (r_font_dynamicsizes) instead of a stretched smaller one
+static void Font_EnsureSize(const dp_font_t *fnt, float h)
+{
+	int index, ch;
+	ft2_font_map_t *map;
+	if (!fnt->ft2 || h <= 0 || vid_conheight.value <= 0)
+		return;
+	index = Font_AddSize(fnt->ft2, h * vid.height / vid_conheight.value);
+	if (index < 0 || !(map = Font_MapForIndexNoLoad(fnt->ft2, index)))
+		return;
+	for (ch = 0; ch < 256; ++ch)
+		map->width_of[ch] = Font_SnapTo(fnt->width_of[ch], 1 / map->size);
+}
+
 static float snap_to_pixel_x(float x, float roundUpAt)
 {
 	float pixelpos = x * vid.width / vid_conwidth.value;
@@ -1350,6 +1365,7 @@ float DrawQ_TextWidth_UntilWidth_TrackColors_Scale(const char *text, size_t *max
 	// find the most fitting size:
 	if (ft2 != NULL)
 	{
+		Font_EnsureSize(fnt, h);
 		if (snap)
 			map_index = Font_IndexForSize(ft2, h, &w, &h);
 		else
@@ -1547,6 +1563,7 @@ float DrawQ_String_Scale(float startx, float starty, const char *text, size_t ma
 
 	if (ft2 != NULL)
 	{
+		Font_EnsureSize(fnt, h);
 		if (snap)
 			map_index = Font_IndexForSize(ft2, h, &w, &h);
 		else

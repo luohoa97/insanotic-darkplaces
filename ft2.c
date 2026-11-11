@@ -38,6 +38,7 @@ cvar_t r_font_use_alpha_textures = {CVAR_SAVE, "r_font_use_alpha_textures", "0",
 cvar_t r_font_size_snapping = {CVAR_SAVE, "r_font_size_snapping", "1", "stick to good looking font sizes whenever possible - bad when the mod doesn't support it!"};
 #define FONT_KERNING_UNKNOWN 1e30f // kerning pair not looked up yet
 
+cvar_t r_font_dynamicsizes = {CVAR_SAVE, "r_font_dynamicsizes", "1", "render a font at the size text is actually drawn at when the font was not loaded at a close enough size, instead of stretching a smaller one (Insanotic: big menu and HUD text stays sharp)"};
 cvar_t r_font_lazysizes = {CVAR_SAVE, "r_font_lazysizes", "1", "render each font size the first time it is drawn instead of all sizes when the font loads (Insanotic)"};
 cvar_t r_font_kerning = {CVAR_SAVE, "r_font_kerning", "1", "Use kerning if available"};
 cvar_t r_font_diskcache = {CVAR_SAVE, "r_font_diskcache", "0", "save font textures to disk for future loading rather than generating them every time"};
@@ -431,6 +432,7 @@ void Font_Init(void)
 	Cvar_RegisterVariable(&r_font_size_snapping);
 	Cvar_RegisterVariable(&r_font_kerning);
 	Cvar_RegisterVariable(&r_font_lazysizes);
+	Cvar_RegisterVariable(&r_font_dynamicsizes);
 	Cvar_RegisterVariable(&r_font_diskcache);
 	Cvar_RegisterVariable(&r_font_compress);
 	Cvar_RegisterVariable(&developer_font);
@@ -1041,6 +1043,43 @@ int Font_IndexForSize(ft2_font_t *font, float _fsize, float *outw, float *outh)
 		if (outw) *outw = maps[match]->size * vid_conwidth.value / vid.width;
 	}
 	return match;
+}
+
+// Insanotic: adds a size (in real pixels) to a loaded font and its
+// fallbacks when no loaded size is close to it; returns the map index of the
+// new size, -1 when nothing was added (close size exists, no free slot)
+int Font_AddSize(ft2_font_t *font, float realsize)
+{
+	int m, free_slot = -1;
+	float best = 1000000, q;
+	ft2_font_t *fb;
+	if (!r_font_dynamicsizes.integer || !font || font->image_font || realsize < 4 || realsize > 256)
+		return -1;
+	for (m = 0; m < MAX_FONT_SIZES; ++m)
+	{
+		if (!font->font_maps[m])
+		{
+			if (free_slot < 0)
+				free_slot = m;
+			continue;
+		}
+		best = min(best, fabs(font->font_maps[m]->size - realsize));
+	}
+	// close enough: within 10% (or 2 pixels), which the eye does not see
+	if (best <= max(2, realsize * 0.1f) || free_slot < 0)
+		return -1;
+	// round so that nearby sizes share one map
+	q = floor(realsize + 0.5f);
+	if (q > 32)
+		q = floor(q / 4 + 0.5f) * 4;
+	for (fb = font->next; fb; fb = fb->next)
+		Font_LoadSize(fb, q, true);
+	if (!Font_LoadSize(font, q, false))
+		return -1;
+	for (m = 0; m < MAX_FONT_SIZES; ++m)
+		if (font->font_maps[m] && font->font_maps[m]->size == q)
+			return m;
+	return -1;
 }
 
 // renders a size registered by Font_LoadSize with r_font_lazysizes
