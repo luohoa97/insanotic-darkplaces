@@ -493,6 +493,7 @@ static struct
 	int numweapons;
 	int stat_weapons;
 	int viewmodels_ofs;
+	int f_clip_load, f_clip_load_type, f_clip_size, f_clip_size_type; // on viewmodels[0]
 	int f_id, f_activeweapon, f_switchweapon, f_draw;
 	int f_id_type;
 	int fn_projectile_draw;
@@ -554,6 +555,8 @@ static qboolean CL_Lua_BindCSQC(void)
 	cl_lua_csqc.f_activeweapon = CL_Lua_FieldOfs(prog, "activeweapon", NULL);
 	cl_lua_csqc.f_switchweapon = CL_Lua_FieldOfs(prog, "switchweapon", NULL);
 	cl_lua_csqc.f_draw = CL_Lua_FieldOfs(prog, "draw", NULL);
+	cl_lua_csqc.f_clip_load = CL_Lua_FieldOfs(prog, "clip_load", &cl_lua_csqc.f_clip_load_type);
+	cl_lua_csqc.f_clip_size = CL_Lua_FieldOfs(prog, "clip_size", &cl_lua_csqc.f_clip_size_type);
 	fn = PRVM_ED_FindFunction(prog, "Projectile_Draw");
 	cl_lua_csqc.fn_projectile_draw = fn ? (int)(fn - prog->functions) : -1;
 	fn = PRVM_ED_FindFunction(prog, "entcs_GetTeam");
@@ -774,12 +777,21 @@ static int LuaCl_me(lua_State *L)
 		lua_pushinteger(L, cl.scores[cl.playerentity - 1].colors & 15);
 	else
 		lua_pushnil(L);
-	// third: your team as the game reports it (nil when unknown)
+	// third: your team as the game reports it, fourth and fifth: dead and
+	// spectating (all nil when unknown)
 	if (cl.playerentity >= 1 && cl.playerentity <= cl.maxclients && CL_Lua_PlayerInfo(cl.playerentity, &team, &dead, &spectator))
+	{
 		lua_pushinteger(L, team);
+		lua_pushboolean(L, dead);
+		lua_pushboolean(L, spectator);
+	}
 	else
+	{
 		lua_pushnil(L);
-	return 3;
+		lua_pushnil(L);
+		lua_pushnil(L);
+	}
+	return 5;
 }
 
 static int LuaCl_touches(lua_State *L)
@@ -858,13 +870,62 @@ static int LuaCl_command(lua_State *L)
 	return 0;
 }
 
+// xon.stat(name): a game stat by its Xonotic name ("GAMESTARTTIME" for
+// STAT_GAMESTARTTIME), as integer and as float (the game decides which one
+// is meaningful); nothing when the game has no such stat
+static int LuaCl_stat(lua_State *L)
+{
+	prvm_prog_t *prog = CLVM_prog;
+	char name[128];
+	prvm_edict_t *ed;
+	int id;
+	dpsnprintf(name, sizeof(name), "STAT_%s", luaL_checkstring(L, 1));
+	if (cls.state != ca_connected || !CL_Lua_BindCSQC() || cl_lua_csqc.f_id < 0 || !(ed = CL_Lua_GlobalEdict(prog, name)))
+		return 0;
+	id = CL_Lua_FieldInt(prog, ed, cl_lua_csqc.f_id, cl_lua_csqc.f_id_type);
+	if (id < 0 || id >= MAX_CL_STATS)
+		return 0;
+	lua_pushinteger(L, cl.stats[id]);
+	lua_pushnumber(L, cl.statsf[id]);
+	return 2;
+}
+
+// xon.weapon_state(): { switching = bool, clip_load, clip_size } for the
+// weapon in hand (clip_size 0: the weapon does not reload); nil when unknown
+static int LuaCl_weapon_state(lua_State *L)
+{
+	prvm_prog_t *prog = CLVM_prog;
+	prvm_edict_t *ve;
+	int held, target;
+	if (cls.state != ca_connected || !CL_Lua_BindCSQC() || cl_lua_csqc.viewmodels_ofs < 0)
+		return 0;
+	ve = CL_Lua_EdictOrNull(prog, PRVM_GLOBALFIELDEDICT(cl_lua_csqc.viewmodels_ofs));
+	if (!ve)
+		return 0;
+	held = CL_Lua_HeldWeaponId(false);
+	target = CL_Lua_HeldWeaponId(true);
+	lua_createtable(L, 0, 3);
+	lua_pushboolean(L, target && target != held); lua_setfield(L, -2, "switching");
+	if (cl_lua_csqc.f_clip_load >= 0 && cl_lua_csqc.f_clip_size >= 0)
+	{
+		lua_pushinteger(L, CL_Lua_FieldInt(prog, ve, cl_lua_csqc.f_clip_load, cl_lua_csqc.f_clip_load_type));
+		lua_setfield(L, -2, "clip_load");
+		lua_pushinteger(L, CL_Lua_FieldInt(prog, ve, cl_lua_csqc.f_clip_size, cl_lua_csqc.f_clip_size_type));
+		lua_setfield(L, -2, "clip_size");
+	}
+	return 1;
+}
+
 //============================================================================
 // predicted sounds
 
 cvar_t cl_lua_predict_window = {CVAR_SAVE, "cl_lua_predict_window", "0.6", "seconds within which a sound a mod played ahead of the server cancels the same sound arriving from the game"};
 
-#define CL_LUA_MAXPREDICTED 32
-static struct { sfx_t *sfx; double time; } cl_lua_predicted[CL_LUA_MAXPREDICTED];
+#define CL_LUA_MAXPREDICTED 64
+// state: 0 waiting for the game's copy, 1 confirmed (the game played it
+// too), 2 never confirmed (the window ran out: the prediction was wrong)
+static struct { sfx_t *sfx; double time; int ticket; int state; } cl_lua_predicted[CL_LUA_MAXPREDICTED];
+static int cl_lua_predicted_ticket;
 static qboolean cl_lua_playing_predicted;
 
 qboolean CL_Lua_ConsumePredictedSound(sfx_t *sfx, int entnum)
@@ -878,9 +939,9 @@ qboolean CL_Lua_ConsumePredictedSound(sfx_t *sfx, int entnum)
 		return false;
 	for (i = 0; i < CL_LUA_MAXPREDICTED; i++)
 	{
-		if (cl_lua_predicted[i].sfx == sfx && realtime - cl_lua_predicted[i].time <= cl_lua_predict_window.value)
+		if (cl_lua_predicted[i].sfx == sfx && cl_lua_predicted[i].state == 0 && realtime - cl_lua_predicted[i].time <= cl_lua_predict_window.value)
 		{
-			cl_lua_predicted[i].sfx = NULL;
+			cl_lua_predicted[i].state = 1;
 			return true;
 		}
 	}
@@ -917,9 +978,35 @@ static int LuaCl_play_sound(lua_State *L)
 				oldest = i;
 		cl_lua_predicted[oldest].sfx = sfx;
 		cl_lua_predicted[oldest].time = realtime;
+		cl_lua_predicted[oldest].ticket = ++cl_lua_predicted_ticket;
+		cl_lua_predicted[oldest].state = 0;
+		lua_pushinteger(L, cl_lua_predicted_ticket);
+		return 1;
 	}
 	lua_pushboolean(L, true);
 	return 1;
+}
+
+// xon.sound_confirmed(ticket): for a ticket from xon.play_sound(..., true):
+// true once the game played the same sound (the prediction was right),
+// false when it did not within cl_lua_predict_window (wrong), nil while
+// still waiting or when the ticket is too old to know
+static int LuaCl_sound_confirmed(lua_State *L)
+{
+	lua_Integer ticket = luaL_checkinteger(L, 1);
+	int i;
+	for (i = 0; i < CL_LUA_MAXPREDICTED; i++)
+	{
+		if (cl_lua_predicted[i].ticket != ticket || !cl_lua_predicted[i].sfx)
+			continue;
+		if (cl_lua_predicted[i].state == 0 && realtime - cl_lua_predicted[i].time > cl_lua_predict_window.value)
+			cl_lua_predicted[i].state = 2;
+		if (cl_lua_predicted[i].state == 0)
+			return 0;
+		lua_pushboolean(L, cl_lua_predicted[i].state == 1);
+		return 1;
+	}
+	return 0;
 }
 
 //============================================================================
@@ -1092,6 +1179,9 @@ static const luaL_Reg cl_luaxon_funcs[] =
 	{"has_touch", LuaCl_has_touch},
 	{"command", LuaCl_command},
 	{"play_sound", LuaCl_play_sound},
+	{"sound_confirmed", LuaCl_sound_confirmed},
+	{"stat", LuaCl_stat},
+	{"weapon_state", LuaCl_weapon_state},
 	{"draw_fill", LuaCl_draw_fill},
 	{"draw_pic", LuaCl_draw_pic},
 	{"draw_subpic", LuaCl_draw_subpic},
