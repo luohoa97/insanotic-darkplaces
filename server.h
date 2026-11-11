@@ -248,6 +248,11 @@ typedef struct client_s
 	char playermodel[MAX_QPATH], old_model[MAX_QPATH];
 	char playerskin[MAX_QPATH], old_skin[MAX_QPATH];
 
+	/// keys the client sent with "setinfo <key> <value>" (Lua mods read these
+	/// with ent:userinfo(key)); NQ-protocol clients do not send setinfo on
+	/// their own, players or modified clients send it with "cmd setinfo"
+	char userinfo[MAX_USERINFO_STRING];
+
 	/// netaddress support
 	char netaddress[MAX_QPATH];
 

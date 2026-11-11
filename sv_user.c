@@ -797,6 +797,29 @@ static void SV_FrameAck(int framenum)
 SV_ReadClientMessage
 ===================
 */
+/*
+===================
+SV_ClientSetInfo
+
+stores "setinfo <key> <value>" sent by host_client in its server-side
+userinfo string (read by Lua mods); the command never reaches the progs
+===================
+*/
+static void SV_ClientSetInfo(const char *args)
+{
+	char key[MAX_INPUTLINE], value[MAX_INPUTLINE];
+	const char *p = args;
+	if (!COM_ParseToken_Simple(&p, false, false, true))
+		return;
+	strlcpy(key, com_token, sizeof(key));
+	if (!COM_ParseToken_Simple(&p, false, false, true))
+		return;
+	strlcpy(value, com_token, sizeof(value));
+	if (!key[0] || key[0] == '*' || strchr(key, '\\') || strchr(value, '\\'))
+		return;
+	InfoString_SetValue(host_client->userinfo, sizeof(host_client->userinfo), key, value);
+}
+
 void SV_ReadClientMessage(void)
 {
 	prvm_prog_t *prog = SVVM_prog;
@@ -870,6 +893,8 @@ void SV_ReadClientMessage(void)
 			 || strncasecmp(s, "begin", 5) == 0
 			 || strncasecmp(s, "prespawn", 8) == 0)
 				Cmd_ExecuteString (s, src_client, true);
+			else if (strncasecmp(s, "setinfo ", 8) == 0)
+				SV_ClientSetInfo(s + 8);
 			else if (PRVM_serverfunction(SV_ParseClientCommand))
 			{
 				int restorevm_tempstringsbuf_cursize;
