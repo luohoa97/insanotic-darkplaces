@@ -305,6 +305,7 @@ void PRVM_ED_Free(prvm_prog_t *prog, prvm_edict_t *ed)
 
 	ed->priv.required->free = true;
 	ed->priv.required->freetime = realtime;
+	ed->priv.required->serial++;
 	if(ed->priv.required->allocation_origin)
 	{
 		Mem_Free((char *)ed->priv.required->allocation_origin);

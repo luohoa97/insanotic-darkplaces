@@ -75,6 +75,10 @@ typedef struct prvm_edict_private_s
 #define PRVM_EDICT_MARK_WAIT_FOR_SETORIGIN -1
 #define PRVM_EDICT_MARK_SETORIGIN_CAUGHT -2
 	const char *allocation_origin;
+	// incremented every time the edict is freed; lets external handles
+	// (e.g. Lua entity references) detect that the slot was recycled.
+	// must stay at the same offset as in edict_engineprivate_t (progs.h)
+	unsigned int serial;
 } prvm_edict_private_t;
 
 typedef struct prvm_edict_s
