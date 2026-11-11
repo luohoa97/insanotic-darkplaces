@@ -2,6 +2,11 @@
 #include "fs.h"
 #include "libcurl.h"
 #include "thread.h"
+#ifdef __ANDROID__
+#include <SDL.h>
+#include <jni.h>
+#include <stdarg.h>
+#endif
 
 #include "image.h"
 #include "jpeg.h"
@@ -145,6 +150,8 @@ typedef struct
 }
 CURLMsg;
 
+#ifndef __ANDROID__
+
 static void (*qcurl_global_init) (long flags);
 static void (*qcurl_global_cleanup) (void);
 
@@ -184,6 +191,392 @@ static dllfunction_t curlfuncs[] =
 	{"curl_slist_free_all",		(void **) &qcurl_slist_free_all},
 	{NULL, NULL}
 };
+
+#else // __ANDROID__
+
+/*
+=================================================================
+
+  Android has no libcurl. The same calls are answered here with Java's
+  HttpURLConnection (org.insanotic.android.HttpFetch, called through JNI),
+  which does HTTPS with the system's certificate authorities. Only what
+  this file uses of curl is there: easy handles that are added to a multi
+  handle, which is polled once per frame; a transfer runs on a Java thread
+  and the data is handed to the write function from curl_multi_perform.
+
+=================================================================
+*/
+
+struct curl_slist
+{
+	char *data;
+	struct curl_slist *next;
+};
+
+struct CURL_s
+{
+	char *url, *referer, *useragent;
+	long resume;
+	curl_slist *headers;
+	const void *postfields;
+	long postsize;
+	int post;
+	size_t (*write)(void *data, size_t size, size_t nmemb, void *userdata);
+	void *writedata;
+	void *priv;
+	jobject fetch;
+	int state; // 0 not started, 1 running, 2 finished
+	int queued; // the finished message was handed out
+	CURLcode result;
+	long code;
+	double downloaded;
+	double length;
+	char *ctype;
+	struct CURL_s *next;
+};
+
+struct CURLM_s
+{
+	struct CURL_s *list;
+};
+
+#define CURLE_WRITE_ERROR_ 23
+#define CURLE_RANGE_ERROR_ 33
+#define CURLE_RECV_ERROR_ 56
+#define CURLE_COULDNT_CONNECT_ 7
+
+static jclass fetch_class;
+static jmethodID fetch_new, fetch_start, fetch_cancel, fetch_read, fetch_code, fetch_length, fetch_ctype, fetch_error;
+static jbyteArray fetch_buffer;
+#define FETCH_BUFFERSIZE 65536
+
+// the class belongs to the app, which a native thread cannot find by name:
+// ask the activity's class loader
+static qboolean Fetch_Init(JNIEnv *env)
+{
+	jobject activity;
+	jclass activityclass, loaderclass, found;
+	jobject loader;
+	jmethodID getloader, loadclass;
+	jstring name;
+
+	if (fetch_class)
+		return true;
+	activity = SDL_AndroidGetActivity();
+	if (!activity)
+		return false;
+	activityclass = (*env)->GetObjectClass(env, activity);
+	getloader = (*env)->GetMethodID(env, activityclass, "getClassLoader", "()Ljava/lang/ClassLoader;");
+	loader = (*env)->CallObjectMethod(env, activity, getloader);
+	loaderclass = (*env)->GetObjectClass(env, loader);
+	loadclass = (*env)->GetMethodID(env, loaderclass, "loadClass", "(Ljava/lang/String;)Ljava/lang/Class;");
+	name = (*env)->NewStringUTF(env, "org.insanotic.android.HttpFetch");
+	found = (jclass)(*env)->CallObjectMethod(env, loader, loadclass, name);
+	if ((*env)->ExceptionCheck(env) || !found)
+	{
+		(*env)->ExceptionClear(env);
+		return false;
+	}
+	fetch_class = (jclass)(*env)->NewGlobalRef(env, found);
+	fetch_new = (*env)->GetMethodID(env, fetch_class, "<init>", "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;J[Ljava/lang/String;[B)V");
+	fetch_start = (*env)->GetMethodID(env, fetch_class, "start", "()V");
+	fetch_cancel = (*env)->GetMethodID(env, fetch_class, "cancel", "()V");
+	fetch_read = (*env)->GetMethodID(env, fetch_class, "read", "([B)I");
+	fetch_code = (*env)->GetMethodID(env, fetch_class, "getResponseCode", "()I");
+	fetch_length = (*env)->GetMethodID(env, fetch_class, "getContentLength", "()J");
+	fetch_ctype = (*env)->GetMethodID(env, fetch_class, "getContentType", "()Ljava/lang/String;");
+	fetch_error = (*env)->GetMethodID(env, fetch_class, "getError", "()Ljava/lang/String;");
+	fetch_buffer = (jbyteArray)(*env)->NewGlobalRef(env, (*env)->NewByteArray(env, FETCH_BUFFERSIZE));
+	if ((*env)->ExceptionCheck(env) || !fetch_new || !fetch_start || !fetch_cancel || !fetch_read || !fetch_code
+	 || !fetch_length || !fetch_ctype || !fetch_error || !fetch_buffer)
+	{
+		(*env)->ExceptionClear(env);
+		fetch_class = NULL;
+		return false;
+	}
+	return true;
+}
+
+static jstring Fetch_String(JNIEnv *env, const char *s)
+{
+	return s ? (*env)->NewStringUTF(env, s) : NULL;
+}
+
+static qboolean Fetch_Start(JNIEnv *env, CURL *e)
+{
+	jclass stringclass = (*env)->FindClass(env, "java/lang/String");
+	jobjectArray headers;
+	jbyteArray post = NULL;
+	jobject fetch;
+	curl_slist *h;
+	int n = 0, i = 0;
+
+	for (h = e->headers; h; h = h->next)
+		n++;
+	headers = (*env)->NewObjectArray(env, n, stringclass, NULL);
+	for (h = e->headers; h; h = h->next)
+		(*env)->SetObjectArrayElement(env, headers, i++, (*env)->NewStringUTF(env, h->data));
+	if (e->post && e->postfields)
+	{
+		post = (*env)->NewByteArray(env, (jsize)e->postsize);
+		(*env)->SetByteArrayRegion(env, post, 0, (jsize)e->postsize, (const jbyte *)e->postfields);
+	}
+	fetch = (*env)->NewObject(env, fetch_class, fetch_new, Fetch_String(env, e->url), Fetch_String(env, e->referer),
+		Fetch_String(env, e->useragent), (jlong)e->resume, headers, post);
+	if ((*env)->ExceptionCheck(env) || !fetch)
+	{
+		(*env)->ExceptionClear(env);
+		return false;
+	}
+	e->fetch = (*env)->NewGlobalRef(env, fetch);
+	(*env)->CallVoidMethod(env, e->fetch, fetch_start);
+	return true;
+}
+
+static void Fetch_Finish(JNIEnv *env, CURL *e, CURLcode result)
+{
+	jstring ct;
+	e->state = 2;
+	e->result = result;
+	e->code = (*env)->CallIntMethod(env, e->fetch, fetch_code);
+	e->length = (double)(*env)->CallLongMethod(env, e->fetch, fetch_length);
+	ct = (jstring)(*env)->CallObjectMethod(env, e->fetch, fetch_ctype);
+	if (ct)
+	{
+		const char *s = (*env)->GetStringUTFChars(env, ct, NULL);
+		free(e->ctype);
+		e->ctype = strdup(s);
+		(*env)->ReleaseStringUTFChars(env, ct, s);
+	}
+}
+
+static void qcurl_global_init(long flags) {}
+static void qcurl_global_cleanup(void) {}
+
+static CURL *qcurl_easy_init(void)
+{
+	return (CURL *)calloc(1, sizeof(struct CURL_s));
+}
+
+static void qcurl_easy_cleanup(CURL *e)
+{
+	JNIEnv *env = (JNIEnv *)SDL_AndroidGetJNIEnv();
+	if (e->fetch)
+	{
+		if (e->state == 1)
+			(*env)->CallVoidMethod(env, e->fetch, fetch_cancel);
+		(*env)->DeleteGlobalRef(env, e->fetch);
+	}
+	free(e->url);
+	free(e->referer);
+	free(e->useragent);
+	free(e->ctype);
+	free(e);
+}
+
+static CURLcode qcurl_easy_setopt(CURL *e, CURLoption option, ...)
+{
+	va_list ap;
+	va_start(ap, option);
+	switch (option)
+	{
+	case CURLOPT_URL:           free(e->url); e->url = strdup(va_arg(ap, const char *)); break;
+	case CURLOPT_REFERER:       free(e->referer); e->referer = strdup(va_arg(ap, const char *)); break;
+	case CURLOPT_USERAGENT:     free(e->useragent); e->useragent = strdup(va_arg(ap, const char *)); break;
+	case CURLOPT_RESUME_FROM:   e->resume = va_arg(ap, long); break;
+	case CURLOPT_HTTPHEADER:    e->headers = va_arg(ap, curl_slist *); break;
+	case CURLOPT_POST:          e->post = (int)va_arg(ap, long); break;
+	case CURLOPT_POSTFIELDS:    e->postfields = va_arg(ap, const void *); break;
+	case CURLOPT_POSTFIELDSIZE: e->postsize = va_arg(ap, long); break;
+	case CURLOPT_WRITEFUNCTION: e->write = va_arg(ap, size_t (*)(void *, size_t, size_t, void *)); break;
+	case CURLOPT_WRITEDATA:     e->writedata = va_arg(ap, void *); break;
+	case CURLOPT_PRIVATE:       e->priv = va_arg(ap, void *); break;
+	default: break; // redirects are always followed, timeouts are Java's
+	}
+	va_end(ap);
+	return CURLE_OK;
+}
+
+static CURLcode qcurl_easy_getinfo(CURL *e, CURLINFO info, ...)
+{
+	va_list ap;
+	va_start(ap, info);
+	switch (info)
+	{
+	case CURLINFO_RESPONSE_CODE:            *va_arg(ap, long *) = e->code; break;
+	case CURLINFO_SIZE_DOWNLOAD:            *va_arg(ap, double *) = e->downloaded; break;
+	case CURLINFO_SIZE_UPLOAD:              *va_arg(ap, double *) = 0; break;
+	case CURLINFO_SPEED_DOWNLOAD:           *va_arg(ap, double *) = 0; break;
+	case CURLINFO_CONTENT_LENGTH_DOWNLOAD:  *va_arg(ap, double *) = e->length; break;
+	case CURLINFO_CONTENT_TYPE:             *va_arg(ap, const char **) = e->ctype; break;
+	case CURLINFO_PRIVATE:                  *va_arg(ap, void **) = e->priv; break;
+	default: break;
+	}
+	va_end(ap);
+	return CURLE_OK;
+}
+
+static const char *qcurl_easy_strerror(CURLcode code)
+{
+	return "HTTP download failed";
+}
+
+static CURLM *qcurl_multi_init(void)
+{
+	return (CURLM *)calloc(1, sizeof(struct CURLM_s));
+}
+
+static CURLMcode qcurl_multi_add_handle(CURLM *m, CURL *e)
+{
+	e->next = m->list;
+	m->list = e;
+	return CURLM_OK;
+}
+
+static CURLMcode qcurl_multi_remove_handle(CURLM *m, CURL *e)
+{
+	CURL **p;
+	for (p = &m->list; *p; p = &(*p)->next)
+		if (*p == e)
+		{
+			*p = e->next;
+			break;
+		}
+	if (e->state == 1)
+	{
+		JNIEnv *env = (JNIEnv *)SDL_AndroidGetJNIEnv();
+		(*env)->CallVoidMethod(env, e->fetch, fetch_cancel);
+		e->state = 2;
+	}
+	return CURLM_OK;
+}
+
+static CURLMcode qcurl_multi_perform(CURLM *m, int *running)
+{
+	JNIEnv *env = (JNIEnv *)SDL_AndroidGetJNIEnv();
+	static unsigned char chunk[FETCH_BUFFERSIZE];
+	CURL *e;
+
+	*running = 0;
+	if (!env || !Fetch_Init(env))
+	{
+		for (e = m->list; e; e = e->next)
+			if (e->state != 2)
+			{
+				e->state = 2;
+				e->result = (CURLcode)CURLE_COULDNT_CONNECT_;
+			}
+		return CURLM_OK;
+	}
+	for (e = m->list; e; e = e->next)
+	{
+		int rounds;
+		if (e->state == 0)
+		{
+			if (!Fetch_Start(env, e))
+			{
+				e->state = 2;
+				e->result = (CURLcode)CURLE_COULDNT_CONNECT_;
+				continue;
+			}
+			e->state = 1;
+		}
+		// a few chunks per frame at most, so a fast link cannot stall the game
+		for (rounds = 0; e->state == 1 && rounds < 32; rounds++)
+		{
+			int n = (*env)->CallIntMethod(env, e->fetch, fetch_read, fetch_buffer);
+			if (n > 0)
+			{
+				(*env)->GetByteArrayRegion(env, fetch_buffer, 0, n, (jbyte *)chunk);
+				if (e->write(chunk, 1, n, e->writedata) != (size_t)n)
+				{
+					(*env)->CallVoidMethod(env, e->fetch, fetch_cancel);
+					Fetch_Finish(env, e, (CURLcode)CURLE_WRITE_ERROR_);
+					break;
+				}
+				e->downloaded += n;
+			}
+			else if (n == 0)
+				break;
+			else if (n == -1)
+				Fetch_Finish(env, e, CURLE_OK);
+			else
+			{
+				jstring msg = (jstring)(*env)->CallObjectMethod(env, e->fetch, fetch_error);
+				const char *s = msg ? (*env)->GetStringUTFChars(env, msg, NULL) : "";
+				Con_Printf("HTTP download of %s failed: %s\n", e->url, s);
+				Fetch_Finish(env, e, (CURLcode)(e->resume > 0 && strstr(s, "range") ? CURLE_RANGE_ERROR_ : CURLE_RECV_ERROR_));
+				if (msg)
+					(*env)->ReleaseStringUTFChars(env, msg, s);
+			}
+		}
+		if (e->state == 1)
+		{
+			e->code = (*env)->CallIntMethod(env, e->fetch, fetch_code);
+			(*running)++;
+		}
+	}
+	return CURLM_OK;
+}
+
+static CURLMsg *qcurl_multi_info_read(CURLM *m, int *msgs_in_queue)
+{
+	static CURLMsg msg;
+	CURL *e, *found = NULL;
+	int left = 0;
+	for (e = m->list; e; e = e->next)
+		if (e->state == 2 && !e->queued)
+		{
+			if (!found)
+				found = e;
+			else
+				left++;
+		}
+	*msgs_in_queue = left;
+	if (!found)
+		return NULL;
+	found->queued = 1;
+	msg.msg = CURLMSG_DONE;
+	msg.easy_handle = found;
+	msg.data.result = found->result;
+	return &msg;
+}
+
+static void qcurl_multi_cleanup(CURLM *m)
+{
+	free(m);
+}
+
+static const char *qcurl_multi_strerror(CURLcode code)
+{
+	return "HTTP download failed";
+}
+
+static curl_slist *qcurl_slist_append(curl_slist *list, const char *string)
+{
+	curl_slist *item = (curl_slist *)malloc(sizeof(*item)), *tail;
+	item->data = strdup(string);
+	item->next = NULL;
+	if (!list)
+		return item;
+	for (tail = list; tail->next; tail = tail->next)
+		;
+	tail->next = item;
+	return list;
+}
+
+static void qcurl_slist_free_all(curl_slist *list)
+{
+	while (list)
+	{
+		curl_slist *next = list->next;
+		free(list->data);
+		free(list);
+		list = next;
+	}
+}
+
+#endif // __ANDROID__
 
 // Handle for CURL DLL
 static dllhandle_t curl_dll = NULL;
@@ -376,8 +769,16 @@ static qboolean CURL_OpenLibrary (void)
 	if (curl_dll)
 		return true;
 
+#ifdef __ANDROID__
+	// nothing to load: the downloads are Java's (see above); curl_dll only
+	// says that they are available
+	(void)dllnames;
+	curl_dll = (dllhandle_t)&curl_dll;
+	return true;
+#else
 	// Load the DLL
 	return Sys_LoadLibrary (dllnames, &curl_dll, curlfuncs);
+#endif
 }
 
 
@@ -390,7 +791,9 @@ Unload the cURL DLL
 */
 static void CURL_CloseLibrary (void)
 {
+#ifndef __ANDROID__
 	Sys_UnloadLibrary (&curl_dll);
+#endif
 }
 
 
