@@ -108,8 +108,6 @@ public:
 			level = 1;
 			break;
 		case Rml::Log::LT_INFO:
-			level = 0;
-			break;
 		default:
 			level = 2;
 			break;
@@ -291,6 +289,11 @@ struct State {
 	Rml::Vector2f press_pos, last_pos;
 	Rml::Element* scroll_target = nullptr;
 	Rml::Vector2f velocity; // pixels per second, for the fling after a drag
+	// Where the content would be if scrolling were not stopped at the ends.
+	// The part beyond the ends is drawn as the rubber band and springs back.
+	Rml::Vector2f pos;
+	Rml::Vector2f shown_offset; // the rubber band offset set on the children now
+	bool swallow = false; // this press only stopped a moving list: it is not a click
 	double last_move_time = 0;
 	double last_frame_time = 0;
 	float dpratio = 1.0f;
@@ -315,12 +318,50 @@ Rml::Element* FindScrollable(Rml::Element* e)
 	return nullptr;
 }
 
-void ScrollBy(Rml::Element* e, Rml::Vector2f delta)
+Rml::Vector2f ScrollMax(Rml::Element* e)
 {
-	if (!e)
+	return Rml::Vector2f(std::max(0.0f, e->GetScrollWidth() - e->GetClientWidth()),
+	                     std::max(0.0f, e->GetScrollHeight() - e->GetClientHeight()));
+}
+
+// The farther a list is pulled past its end, the less it follows the finger,
+// like a stretched rubber band. It never exceeds the size of the list.
+float Rubber(float excess, float size)
+{
+	size = std::max(size, 1.0f);
+	float a = std::fabs(excess);
+	float r = (1.0f - 1.0f / (a * 0.55f / size + 1.0f)) * size;
+	return excess < 0 ? -r : r;
+}
+
+// Shows g->pos: the part inside the list scrolls it, the part beyond the
+// ends moves the content (RmlUi cannot scroll past the ends, so the children
+// are shifted instead; the scroll bars stay where they are).
+void ApplyScroll(Rml::Element* e)
+{
+	Rml::Vector2f max = ScrollMax(e);
+	Rml::Vector2f in(std::min(std::max(g->pos.x, 0.0f), max.x), std::min(std::max(g->pos.y, 0.0f), max.y));
+	e->SetScrollLeft(in.x);
+	e->SetScrollTop(in.y);
+	Rml::Vector2f off(-Rubber(g->pos.x - in.x, e->GetClientWidth()), -Rubber(g->pos.y - in.y, e->GetClientHeight()));
+	if (off.x == g->shown_offset.x && off.y == g->shown_offset.y)
 		return;
-	e->SetScrollTop(e->GetScrollTop() + delta.y);
-	e->SetScrollLeft(e->GetScrollLeft() + delta.x);
+	g->shown_offset = off;
+	for (int i = 0; i < e->GetNumChildren(); i++) {
+		Rml::Element* c = e->GetChild(i);
+		if (off.x == 0 && off.y == 0)
+			c->RemoveProperty("transform");
+		else
+			c->SetProperty("transform", "translate(" + std::to_string(off.x) + "px, " + std::to_string(off.y) + "px)");
+	}
+}
+
+void EndScroll()
+{
+	g->scroll_target = nullptr;
+	g->velocity = Rml::Vector2f(0, 0);
+	g->shown_offset = Rml::Vector2f(0, 0);
+	g->swallow = false;
 }
 
 void PrepareDocument(Document& d)
@@ -410,6 +451,8 @@ int UIRml_Create(int width, int height, float dpratio)
 	}
 	g->context->SetDensityIndependentPixelRatio(dpratio);
 	g->dpratio = dpratio;
+	// the wheel glides to its target instead of jumping
+	g->context->SetDefaultScrollBehavior(Rml::ScrollBehavior::Smooth, 1.0f);
 
 	// Xolonium is what the rest of the menu is set in. The names it answers
 	// to in RCSS (font-family) come from the font files.
@@ -576,8 +619,12 @@ void UIRml_MouseMove(float x, float y)
 			float slop = 10.0f * g->dpratio;
 			Rml::Vector2f d = now - g->press_pos;
 			if (d.x * d.x + d.y * d.y > slop * slop) {
-				g->scroll_target = FindScrollable(g->context->GetHoverElement());
+				// a list that is still moving from the last flick keeps being the one dragged
+				if (!(g->swallow && g->scroll_target))
+					g->scroll_target = FindScrollable(g->context->GetHoverElement());
 				if (g->scroll_target) {
+					if (!g->swallow)
+						g->pos = Rml::Vector2f(g->scroll_target->GetScrollLeft(), g->scroll_target->GetScrollTop());
 					g->scrolling = true;
 					// take the press back: the element under the finger must not click
 					g->context->ProcessMouseLeave();
@@ -588,7 +635,8 @@ void UIRml_MouseMove(float x, float y)
 		if (g->scrolling) {
 			double t = UIE_Time();
 			Rml::Vector2f delta = g->last_pos - now;
-			ScrollBy(g->scroll_target, delta);
+			g->pos += delta;
+			ApplyScroll(g->scroll_target);
 			double dt = t - g->last_move_time;
 			if (dt > 0.0005) {
 				Rml::Vector2f v = delta * (float)(1.0 / dt);
@@ -612,14 +660,25 @@ int UIRml_MouseButton(int button, int down, int modifiers, int touch)
 			g->pressed = true;
 			g->touch = touch != 0;
 			g->scrolling = false;
-			g->scroll_target = nullptr;
+			// a touch on a list that is still flying or springing back stops
+			// it, and is not a click on what is under the finger
+			Rml::Vector2f v = g->velocity;
+			g->swallow = g->touch && g->scroll_target && (std::fabs(v.x) > 20.0f || std::fabs(v.y) > 20.0f || g->shown_offset.x != 0 || g->shown_offset.y != 0);
+			if (!g->swallow)
+				g->scroll_target = nullptr;
 			g->velocity = Rml::Vector2f(0, 0);
 			g->last_move_time = UIE_Time();
 			g->press_pos = g->last_pos; // UIRml_MouseMove went first
+			if (g->swallow)
+				return 1;
 		} else {
 			bool was_scrolling = g->scrolling;
 			g->pressed = false;
 			g->scrolling = false;
+			if (g->swallow && !was_scrolling) {
+				g->swallow = false;
+				return 1; // the tap that stopped the list ends here
+			}
 			if (was_scrolling) {
 				if (g->scroll_target) {
 					char line[96];
@@ -737,12 +796,39 @@ void UIRml_Frame(void)
 	double now = UIE_Time();
 	double dt = now - g->last_frame_time;
 	g->last_frame_time = now;
-	// the fling after a drag: keep scrolling, slow down by friction
-	if (g->scroll_target && !g->pressed && (std::fabs(g->velocity.x) > 20.0f || std::fabs(g->velocity.y) > 20.0f)) {
-		ScrollBy(g->scroll_target, g->velocity * (float)dt);
-		g->velocity = g->velocity * (float)std::pow(0.04, dt); // about 0.3 s to a stop
-	} else if (!g->pressed) {
-		g->scroll_target = nullptr;
+	// The fling after a drag: keep scrolling and slow down by friction. Past
+	// an end a spring pulls the content back instead, without overshooting.
+	if (g->scroll_target && !g->pressed) {
+		if (dt > 0.05)
+			dt = 0.05;
+		Rml::Element* e = g->scroll_target;
+		Rml::Vector2f max = ScrollMax(e);
+		float* p[2] = {&g->pos.x, &g->pos.y};
+		float* v[2] = {&g->velocity.x, &g->velocity.y};
+		float hi[2] = {max.x, max.y};
+		bool settled = true;
+		for (int i = 0; i < 2; i++) {
+			float clamped = std::min(std::max(*p[i], 0.0f), hi[i]);
+			float excess = *p[i] - clamped;
+			if (excess != 0.0f) {
+				*v[i] += (-120.0f * excess - 22.0f * *v[i]) * (float)dt;
+			} else {
+				*v[i] *= (float)std::pow(0.04, dt); // about 0.3 s to a stop
+			}
+			*p[i] += *v[i] * (float)dt;
+			float now_excess = *p[i] - std::min(std::max(*p[i], 0.0f), hi[i]);
+			if (std::fabs(*v[i]) > 20.0f || std::fabs(now_excess) > 0.5f)
+				settled = false;
+		}
+		if (settled) {
+			g->velocity = Rml::Vector2f(0, 0);
+			g->pos.x = std::min(std::max(g->pos.x, 0.0f), max.x);
+			g->pos.y = std::min(std::max(g->pos.y, 0.0f), max.y);
+			ApplyScroll(e);
+			EndScroll();
+		} else {
+			ApplyScroll(e);
+		}
 	}
 	UpdateBindings();
 	g->context->Update();
