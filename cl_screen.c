@@ -2657,22 +2657,18 @@ static float SCR_LoadingStage(char *stage, size_t stagesize, char *detail, size_
 	return stack;
 }
 
-// the main menu's look without the menu: its earth background and the
-// Xonotic logo (cut from the logo layer, which has no "Loading" text);
-// a dark gradient when the pictures are missing. Returns the bottom of the
-// logo.
+// exactly what the main menu draws behind its dialogs (luma skin, which
+// aligns "c5h5": the earth cropped to fill the screen, then the logo layer
+// scaled to the screen height and centered), so the start and the wait
+// for a server turn into the menu without a visible change. A dark
+// gradient when the pictures are missing.
 #define LOADING_MENU_BACKGROUND "gfx/menu/luma/background"
 #define LOADING_MENU_LOGO "gfx/menu/luma/background_l2"
-// logo bounds in the 2560x2048 logo layer
-#define LOADING_LOGO_S0 (30.0f / 2560)
-#define LOADING_LOGO_T0 (10.0f / 2048)
-#define LOADING_LOGO_S1 (1420.0f / 2560)
-#define LOADING_LOGO_T1 (470.0f / 2048)
-static float SCR_DrawInsanoticBackdrop(float logocenter, float logowidth)
+static void SCR_DrawInsanoticBackdrop(void)
 {
 	static int checked;
 	static cachepic_t *background, *logo;
-	float w = vid_conwidth.integer, h = vid_conheight.integer, f, lw, lh;
+	float w = vid_conwidth.integer, h = vid_conheight.integer, f;
 	int i, strips = 32;
 
 	if (!checked)
@@ -2686,7 +2682,7 @@ static float SCR_DrawInsanoticBackdrop(float logocenter, float logowidth)
 	if (background && background->width > 0 && background->height > 0)
 	{
 		f = max(w / background->width, h / background->height);
-		DrawQ_Pic((w - background->width * f) / 2, (h - background->height * f) / 2, background, background->width * f, background->height * f, 0.6f, 0.6f, 0.6f, 1, 0);
+		DrawQ_Pic((w - background->width * f) / 2, (h - background->height * f) / 2, background, background->width * f, background->height * f, 1, 1, 1, 1, 0);
 	}
 	else
 	{
@@ -2698,27 +2694,22 @@ static float SCR_DrawInsanoticBackdrop(float logocenter, float logowidth)
 			DrawQ_Fill(0, y0, w, y1 - y0, 0.02f + 0.04f * glow, 0.03f + 0.06f * glow, 0.06f + 0.12f * glow, 1, 0);
 		}
 	}
-	if (!logo || logo->width <= 0)
-		return logocenter;
-	lw = min(logowidth, w * 0.9f);
-	lh = lw * ((LOADING_LOGO_T1 - LOADING_LOGO_T0) * logo->height) / ((LOADING_LOGO_S1 - LOADING_LOGO_S0) * logo->width);
-	DrawQ_SuperPic((w - lw) / 2, logocenter - lh / 2, logo, lw, lh,
-		LOADING_LOGO_S0, LOADING_LOGO_T0, 1, 1, 1, 1,
-		LOADING_LOGO_S1, LOADING_LOGO_T0, 1, 1, 1, 1,
-		LOADING_LOGO_S0, LOADING_LOGO_T1, 1, 1, 1, 1,
-		LOADING_LOGO_S1, LOADING_LOGO_T1, 1, 1, 1, 1, 0);
-	return logocenter + lh / 2;
+	if (logo && logo->width > 0 && logo->height > 0)
+	{
+		f = h / logo->height;
+		DrawQ_Pic((w - logo->width * f) / 2, 0, logo, logo->width * f, h, 1, 1, 1, 1, 0);
+	}
 }
 
-// game start: the menu's background and logo with a bar that follows the
-// time the last start took
+// game start: the menu's background with a thin bar near the bottom that
+// follows the time the last start took
 static void SCR_DrawInsanoticStartupScreen(void)
 {
 	float w = vid_conwidth.integer, h = vid_conheight.integer;
 	float barw = floor(w * 0.3f), barh = max(2, floor(h * 0.005f)), x, y, f;
 	float bar[3] = { 0.2f, 0.6f, 1.0f };
 
-	y = SCR_DrawInsanoticBackdrop(floor(h * 0.42f), w * 0.55f);
+	SCR_DrawInsanoticBackdrop();
 	sscanf(scr_loadingscreen_barcolor.string, "%f %f %f", &bar[0], &bar[1], &bar[2]);
 
 	f = (float)((Sys_DirtyTime() - loading_starttime) / max(0.2f, scr_loadingscreen_startuptime.value));
@@ -2726,9 +2717,9 @@ static void SCR_DrawInsanoticStartupScreen(void)
 	if (f > loading_progress)
 		loading_progress = f;
 
-	y = floor(y + h * 0.06f);
+	y = floor(h * 0.9f);
 	x = (w - barw) / 2;
-	DrawQ_Fill(x, y, barw, barh, 1, 1, 1, 0.12f, 0);
+	DrawQ_Fill(x, y, barw, barh, 0, 0, 0, 0.4f, 0);
 	DrawQ_Fill(x, y, barw * loading_progress, barh, bar[0], bar[1], bar[2], 1, 0);
 	loadingscreenheight = h;
 }
@@ -2770,7 +2761,7 @@ static void SCR_DrawInsanoticLoadingScreen(void)
 		DrawQ_Pic((w - loading_levelshot->width * f) / 2, (h - loading_levelshot->height * f) / 2, loading_levelshot, loading_levelshot->width * f, loading_levelshot->height * f, 0.75f, 0.75f, 0.75f, 1, 0);
 	}
 	else
-		SCR_DrawInsanoticBackdrop(floor(h * 0.36f), w * 0.5f);
+		SCR_DrawInsanoticBackdrop();
 
 	// darken the lower part for the text
 	for (i = 0; i < strips; i++)
