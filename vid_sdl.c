@@ -2208,6 +2208,10 @@ void VID_EnableJoystick(qboolean enable)
 		if (joy_enable.integer <= 0 && realtime - first_call < 2)
 			return;
 		joystick_started = true;
+		// Insanotic: on Android SDL lists the motion sensor as the first
+		// joystick; "use joystick input" would then steer by tilting the
+		// device instead of using a real gamepad
+		SDL_SetHint(SDL_HINT_ACCELEROMETER_AS_JOYSTICK, "0");
 		vid_sdl_initjoysticksystem = SDL_InitSubSystem(SDL_INIT_JOYSTICK) >= 0;
 		if (!vid_sdl_initjoysticksystem)
 			Con_Printf("Failed to init SDL joystick subsystem: %s\n", SDL_GetError());
