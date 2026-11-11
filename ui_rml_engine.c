@@ -205,10 +205,11 @@ static float UI_RML_DPRatio(void)
 {
 	if (rml_scale.value > 0)
 		return rml_scale.value;
-	// 720 dp of height on a monitor; touch screens are held close and used
+	// 720 dp on the short side on a monitor; touch screens are held close and used
 	// with a finger, so they get fewer, bigger dps (a phone in landscape
-	// ends up about 450 dp high)
-	return (float)vid.height / (vid_touchscreen.integer ? 450.0f : 720.0f);
+	// ends up about 450 dp high). The short side counts, so a phone held
+	// upright is about 450 dp wide instead of 210.
+	return (float)(vid.height < vid.width ? vid.height : vid.width) / (vid_touchscreen.integer ? 450.0f : 720.0f);
 }
 
 static void UI_RML_Create(void)
