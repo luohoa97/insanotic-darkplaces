@@ -1046,14 +1046,18 @@ int Font_IndexForSize(ft2_font_t *font, float _fsize, float *outw, float *outh)
 }
 
 // Insanotic: adds a size (in real pixels) to a loaded font and its
-// fallbacks when no loaded size is close to it; returns the map index of the
-// new size, -1 when nothing was added (close size exists, no free slot)
+// fallbacks when text is drawn bigger than every loaded size; returns the
+// map index of the new size, -1 when nothing was added
 int Font_AddSize(ft2_font_t *font, float realsize)
 {
-	int m, free_slot = -1;
-	float best = 1000000, q;
+	// sizes text can be rendered at; text between two of them uses the
+	// nearer one (scaled a little), so animations that change text size
+	// continuously do not render a new size every frame
+	static const float ladder[] = { 16, 20, 24, 28, 32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 256 };
+	int m, i, free_slot = -1;
+	float largest = 0, q = 0;
 	ft2_font_t *fb;
-	if (!r_font_dynamicsizes.integer || !font || font->image_font || realsize < 4 || realsize > 256)
+	if (!r_font_dynamicsizes.integer || !font || font->image_font || realsize > 256)
 		return -1;
 	for (m = 0; m < MAX_FONT_SIZES; ++m)
 	{
@@ -1063,15 +1067,20 @@ int Font_AddSize(ft2_font_t *font, float realsize)
 				free_slot = m;
 			continue;
 		}
-		best = min(best, fabs(font->font_maps[m]->size - realsize));
+		largest = max(largest, font->font_maps[m]->size);
 	}
-	// close enough: within 10% (or 2 pixels), which the eye does not see
-	if (best <= max(2, realsize * 0.1f) || free_slot < 0)
+	// only text bigger than every loaded size looks bad (stretched up);
+	// smaller text is scaled down from a bigger size and stays sharp
+	if (free_slot < 0 || realsize <= largest * 1.15f)
 		return -1;
-	// round so that nearby sizes share one map
-	q = floor(realsize + 0.5f);
-	if (q > 32)
-		q = floor(q / 4 + 0.5f) * 4;
+	for (i = 0; i < (int)(sizeof(ladder) / sizeof(ladder[0])); ++i)
+		if (ladder[i] >= realsize * 0.92f)
+		{
+			q = ladder[i];
+			break;
+		}
+	if (q <= largest)
+		return -1;
 	for (fb = font->next; fb; fb = fb->next)
 		Font_LoadSize(fb, q, true);
 	if (!Font_LoadSize(font, q, false))
