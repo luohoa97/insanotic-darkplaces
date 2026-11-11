@@ -763,7 +763,7 @@ void LoadFont(qboolean override, const char *name, dp_font_t *fnt, float scale, 
 	{
 		for (i = 0; i < MAX_FONT_SIZES; ++i)
 		{
-			ft2_font_map_t *map = Font_MapForIndex(fnt->ft2, i);
+			ft2_font_map_t *map = Font_MapForIndexNoLoad(fnt->ft2, i);
 			if (!map)
 				break;
 			for(ch = 0; ch < 256; ++ch)

@@ -46,6 +46,10 @@ struct ft2_font_map_s
 
 	// the width_of for the image-font, pixel-snapped for this size
 	float           width_of[256];
+
+	// Insanotic: a size registered but not rendered yet (r_font_lazysizes);
+	// Font_EnsureMap renders it on first use
+	qboolean        pending;
 };
 
 struct ft2_attachment_s

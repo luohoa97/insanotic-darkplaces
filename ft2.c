@@ -38,6 +38,7 @@ cvar_t r_font_use_alpha_textures = {CVAR_SAVE, "r_font_use_alpha_textures", "0",
 cvar_t r_font_size_snapping = {CVAR_SAVE, "r_font_size_snapping", "1", "stick to good looking font sizes whenever possible - bad when the mod doesn't support it!"};
 #define FONT_KERNING_UNKNOWN 1e30f // kerning pair not looked up yet
 
+cvar_t r_font_lazysizes = {CVAR_SAVE, "r_font_lazysizes", "1", "render each font size the first time it is drawn instead of all sizes when the font loads (Insanotic)"};
 cvar_t r_font_kerning = {CVAR_SAVE, "r_font_kerning", "1", "Use kerning if available"};
 cvar_t r_font_diskcache = {CVAR_SAVE, "r_font_diskcache", "0", "save font textures to disk for future loading rather than generating them every time"};
 cvar_t r_font_compress = {CVAR_SAVE, "r_font_compress", "0", "use texture compression on font textures to save video memory"};
@@ -429,6 +430,7 @@ void Font_Init(void)
 	Cvar_RegisterVariable(&r_font_use_alpha_textures);
 	Cvar_RegisterVariable(&r_font_size_snapping);
 	Cvar_RegisterVariable(&r_font_kerning);
+	Cvar_RegisterVariable(&r_font_lazysizes);
 	Cvar_RegisterVariable(&r_font_diskcache);
 	Cvar_RegisterVariable(&r_font_compress);
 	Cvar_RegisterVariable(&developer_font);
@@ -935,6 +937,16 @@ static qboolean Font_LoadSize(ft2_font_t *font, float size, qboolean check_only)
 	temp.sfx = (1.0/64.0)/(double)size;
 	temp.sfy = (1.0/64.0)/(double)size;
 	temp.intSize = -1; // negative value: LoadMap must search now :)
+	if (r_font_lazysizes.integer)
+	{
+		// register the size now, render it on first use (Font_EnsureMap)
+		fmap = (ft2_font_map_t *)Mem_Alloc(font_mempool, sizeof(ft2_font_map_t));
+		*fmap = temp;
+		fmap->next = NULL;
+		fmap->pending = true;
+		font->font_maps[map_index] = fmap;
+		return true;
+	}
 	if (!Font_LoadMap(font, &temp, 0, &fmap))
 	{
 		Con_Printf("ERROR: can't load the first character map for %s\n"
@@ -1031,11 +1043,49 @@ int Font_IndexForSize(ft2_font_t *font, float _fsize, float *outw, float *outh)
 	return match;
 }
 
-ft2_font_map_t *Font_MapForIndex(ft2_font_t *font, int index)
+// renders a size registered by Font_LoadSize with r_font_lazysizes
+static ft2_font_map_t *Font_EnsureMap(ft2_font_t *font, int index)
+{
+	ft2_font_map_t *pending = font->font_maps[index], temp, *fmap;
+	if (!pending || !pending->pending)
+		return pending;
+	temp = *pending;
+	temp.pending = false;
+	temp.next = NULL;
+	if (!Font_LoadMap(font, &temp, 0, &fmap))
+	{
+		Con_Printf("ERROR: can't load the first character map for %s at size %g\n", font->name, temp.size);
+		return NULL;
+	}
+	font->font_maps[index] = temp.next;
+	fmap->sfx = temp.sfx;
+	fmap->sfy = temp.sfy;
+	memcpy(fmap->width_of, pending->width_of, sizeof(fmap->width_of)); // set by LoadFont meanwhile
+	if (font->has_kerning)
+	{
+		Uchar l, r;
+		for (l = 0; l < 256; ++l)
+			for (r = 0; r < 256; ++r)
+				fmap->kerning.kerning[l][r][0] = FONT_KERNING_UNKNOWN;
+	}
+	Mem_Free(pending);
+	return fmap;
+}
+
+// the map for a size without rendering a pending one (for bookkeeping that
+// only touches size and width_of)
+ft2_font_map_t *Font_MapForIndexNoLoad(ft2_font_t *font, int index)
 {
 	if (index < 0 || index >= MAX_FONT_SIZES)
 		return NULL;
 	return font->font_maps[index];
+}
+
+ft2_font_map_t *Font_MapForIndex(ft2_font_t *font, int index)
+{
+	if (index < 0 || index >= MAX_FONT_SIZES)
+		return NULL;
+	return Font_EnsureMap(font, index);
 }
 
 static qboolean Font_SetSize(ft2_font_t *font, float w, float h)
@@ -1071,7 +1121,7 @@ qboolean Font_GetKerningForMap(ft2_font_t *font, int map_index, float w, float h
 		return false;
 	if (map_index < 0 || map_index >= MAX_FONT_SIZES)
 		return false;
-	fmap = font->font_maps[map_index];
+	fmap = Font_EnsureMap(font, map_index);
 	if (!fmap)
 		return false;
 	if (left < 256 && right < 256)
@@ -1684,7 +1734,7 @@ qboolean Font_LoadMapForIndex(ft2_font_t *font, int map_index, Uchar _ch, ft2_fo
 	if (map_index < 0 || map_index >= MAX_FONT_SIZES)
 		return false;
 	// the first map must have been loaded already
-	if (!font->font_maps[map_index])
+	if (!Font_EnsureMap(font, map_index))
 		return false;
 	return Font_LoadMap(font, font->font_maps[map_index], _ch, outmap);
 }

@@ -75,6 +75,7 @@ void            Font_UnloadFont(ft2_font_t *font);
 // in such a case, *outw and *outh are set to 12, which is often a good alternative size
 int             Font_IndexForSize(ft2_font_t *font, float size, float *outw, float *outh);
 ft2_font_map_t *Font_MapForIndex(ft2_font_t *font, int index);
+ft2_font_map_t *Font_MapForIndexNoLoad(ft2_font_t *font, int index);
 qboolean        Font_LoadFont(const char *name, dp_font_t *dpfnt);
 qboolean        Font_GetKerningForSize(ft2_font_t *font, float w, float h, Uchar left, Uchar right, float *outx, float *outy);
 qboolean        Font_GetKerningForMap(ft2_font_t *font, int map_index, float w, float h, Uchar left, Uchar right, float *outx, float *outy);
