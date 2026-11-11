@@ -2106,6 +2106,17 @@ void VID_Init (void)
 	R_RegisterModule("SDL", sdl_start, sdl_shutdown, sdl_newmap, NULL, NULL);
 #endif
 
+#if SDL_MAJOR_VERSION >= 2
+	// on Wayland, draw window decorations with libdecor (its GTK plugin gives
+	// the desktop's own header bar look instead of SDL's fallback frame), and
+	// let the compositor know which app this is
+#ifdef SDL_HINT_VIDEO_WAYLAND_PREFER_LIBDECOR
+	SDL_SetHint(SDL_HINT_VIDEO_WAYLAND_PREFER_LIBDECOR, "1");
+#endif
+#ifdef SDL_HINT_APP_NAME
+	SDL_SetHint(SDL_HINT_APP_NAME, "Insanotic");
+#endif
+#endif
 	if (SDL_Init(SDL_INIT_VIDEO) < 0)
 		Sys_Error ("Failed to init SDL video subsystem: %s", SDL_GetError());
 	vid_sdl_initjoysticksystem = SDL_InitSubSystem(SDL_INIT_JOYSTICK) >= 0;
@@ -2678,7 +2689,7 @@ static qboolean VID_InitModeGL(viddef_mode_t *mode)
 	mode->height = video_screen->h;
 #else
 	window_flags = windowflags;
-	window = SDL_CreateWindow(gamename, xPos, yPos, mode->width, mode->height, windowflags);
+	window = SDL_CreateWindow("Insanotic", xPos, yPos, mode->width, mode->height, windowflags);
 	if (window == NULL)
 	{
 		Con_Printf("Failed to set video mode to %ix%i: %s\n", mode->width, mode->height, SDL_GetError());
@@ -2790,7 +2801,7 @@ static qboolean VID_InitModeSoft(viddef_mode_t *mode)
 	mode->height = video_screen->h;
 #else
 	window_flags = windowflags;
-	window = SDL_CreateWindow(gamename, SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, mode->width, mode->height, windowflags);
+	window = SDL_CreateWindow("Insanotic", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, mode->width, mode->height, windowflags);
 	if (window == NULL)
 	{
 		Con_Printf("Failed to set video mode to %ix%i: %s\n", mode->width, mode->height, SDL_GetError());

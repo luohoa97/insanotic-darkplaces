@@ -32,7 +32,7 @@ static void SV_Download_f(void);
 static void SV_VM_Setup(void);
 extern cvar_t net_connecttimeout;
 
-cvar_t sv_allow_assist = {0, "sv_allow_assist", "0", "1 tells Insanotic clients that aim assistance mods (e.g. touch_assist) may run on this server"};
+cvar_t sv_allow_assist = {0, "sv_allow_assist", "0", "1 tells Insanotic clients that aim assistance mods (e.g. aim_assist) may run on this server"};
 cvar_t sv_worldmessage = {CVAR_READONLY, "sv_worldmessage", "", "title of current level"};
 cvar_t sv_worldname = {CVAR_READONLY, "sv_worldname", "", "name of current worldmodel"};
 cvar_t sv_worldnamenoextension = {CVAR_READONLY, "sv_worldnamenoextension", "", "name of current worldmodel without extension"};
