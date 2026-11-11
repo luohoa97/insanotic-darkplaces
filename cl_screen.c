@@ -2923,6 +2923,10 @@ void SCR_UpdateLoadingScreen (qboolean clear, qboolean startup)
 #endif
 	SCR_DrawLoadingScreen_SharedFinish(clear);
 
+	// the load is waiting anyway: get font sizes ready for the menus
+	if (!loading_isstartup) // the start itself must stay fast
+		Font_WarmUp(0.02);
+
 	// this goes into the event loop, and should prevent unresponsive cursor on vista
 	old_key_dest = key_dest;
 	old_key_consoleactive = key_consoleactive;
@@ -3051,6 +3055,11 @@ void CL_UpdateScreen(void)
 	loading_isstartup = false;
 	loadingscreendone = false;
 	loading_progress = 0;
+
+	// idle at the menu (not in a game): render waiting font sizes a few
+	// milliseconds per frame
+	if (key_dest == key_menu && cls.state != ca_connected)
+		Font_WarmUp(0.003);
 
 	if(IS_NEXUIZ_DERIVED(gamemode))
 	{

@@ -1129,6 +1129,22 @@ ft2_font_map_t *Font_MapForIndexNoLoad(ft2_font_t *font, int index)
 	return font->font_maps[index];
 }
 
+// Insanotic: renders the first size of this font still waiting for its
+// first use (r_font_lazysizes); returns false when there is none
+qboolean Font_RenderPending(ft2_font_t *font)
+{
+	int m;
+	if (!font)
+		return false;
+	for (m = 0; m < MAX_FONT_SIZES; ++m)
+		if (font->font_maps[m] && font->font_maps[m]->pending)
+		{
+			Font_EnsureMap(font, m);
+			return true;
+		}
+	return false;
+}
+
 ft2_font_map_t *Font_MapForIndex(ft2_font_t *font, int index)
 {
 	if (index < 0 || index >= MAX_FONT_SIZES)

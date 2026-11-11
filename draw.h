@@ -160,6 +160,8 @@ extern dp_fonts_t dp_fonts;
 // all of these functions will set r_defdef.draw2dstage if not in 2D rendering mode (and of course prepare for 2D rendering in that case)
 
 // draw an image (or a filled rectangle if pic == NULL)
+// Insanotic: render font sizes still waiting for first use, for up to seconds
+void Font_WarmUp(double seconds);
 void DrawQ_Pic(float x, float y, cachepic_t *pic, float width, float height, float red, float green, float blue, float alpha, int flags);
 // draw a rotated image
 void DrawQ_RotPic(float x, float y, cachepic_t *pic, float width, float height, float org_x, float org_y, float angle, float red, float green, float blue, float alpha, int flags);

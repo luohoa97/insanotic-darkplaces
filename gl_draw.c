@@ -821,6 +821,20 @@ dp_font_t *FindFont(const char *title, qboolean allocate_new)
 	return NULL;
 }
 
+// Insanotic: font sizes are rendered on first use (r_font_lazysizes) to
+// start fast; this renders waiting ones for up to the given time, from idle
+// moments (loading screens, the main menu), so opening a menu later does
+// not stall on them
+void Font_WarmUp(double seconds)
+{
+	int i;
+	double start = Sys_DirtyTime();
+	for (i = 0; i < dp_fonts.maxsize; ++i)
+		while (dp_fonts.f[i].ft2 && Font_RenderPending(dp_fonts.f[i].ft2))
+			if (Sys_DirtyTime() - start > seconds)
+				return;
+}
+
 // Insanotic: text drawn at a size the font has nothing close to gets that
 // size rendered (r_font_dynamicsizes) instead of a stretched smaller one
 static void Font_EnsureSize(const dp_font_t *fnt, float h)
