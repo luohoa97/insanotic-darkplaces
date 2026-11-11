@@ -145,6 +145,9 @@ CONSTANTS
 #define ZIP_CDIR_CHUNK_BASE_SIZE	46
 #define ZIP_LOCAL_CHUNK_BASE_SIZE	30
 
+// zstd decoder, vendored in zstd/ (decompression only)
+#include "zstd/zstd.h"
+
 #ifdef LINK_TO_ZLIB
 #include <zlib.h>
 
@@ -223,21 +226,27 @@ typedef struct
 
 /// inside a package (PAK or PK3)
 #define QFILE_FLAG_PACKED (1 << 0)
-/// file is compressed using the deflate algorithm (PK3 only)
+/// file is compressed (PK3 only): with deflate, or with zstd when QFILE_FLAG_ZSTD is also set
 #define QFILE_FLAG_DEFLATED (1 << 1)
 /// file is actually already loaded data
 #define QFILE_FLAG_DATA (1 << 2)
 /// real file will be removed on close
 #define QFILE_FLAG_REMOVE (1 << 3)
+/// the compressed data is a zstd frame (zip method 93) instead of deflate
+#define QFILE_FLAG_ZSTD (1 << 4)
 
 #define FILE_BUFF_SIZE 2048
+// compressed input is read in bigger pieces than the plain read buffer: zstd
+// decodes a whole block at a time and gets slow when fed 2 KB slices
+#define ZTK_INPUT_SIZE 32768
 typedef struct
 {
 	z_stream	zstream;
+	ZSTD_DCtx	*zstd;					///< decoder state when the entry is zstd, else NULL
 	size_t		comp_length;			///< length of the compressed file
 	size_t		in_ind, in_len;			///< input buffer current index and length
 	size_t		in_position;			///< position in the compressed file
-	unsigned char		input [FILE_BUFF_SIZE];
+	unsigned char		input [ZTK_INPUT_SIZE];
 } ztoolkit_t;
 
 struct qfile_s
@@ -303,6 +312,8 @@ typedef struct dpackheader_s
 #define PACKFILE_FLAG_DEFLATED (1 << 1)
 /// file is a symbolic link
 #define PACKFILE_FLAG_SYMLINK (1 << 2)
+/// file compressed using zstd (zip method 93)
+#define PACKFILE_FLAG_ZSTD (1 << 3)
 
 typedef struct packfile_s
 {
@@ -719,10 +730,20 @@ static int PK3_BuildFileList (pack_t *pack, const pk3_endOfCentralDir_t *eocd)
 				memcpy (filename, &ptr[ZIP_CDIR_CHUNK_BASE_SIZE], namesize);
 				filename[namesize] = '\0';
 
-				if (BuffLittleShort (&ptr[10]))
-					flags = PACKFILE_FLAG_DEFLATED;
-				else
-					flags = 0;
+				// zip compression method: 0 stored, 93 zstd, anything else
+				// is treated as deflate like it always was
+				switch ((unsigned short)BuffLittleShort (&ptr[10]))
+				{
+					case 0:
+						flags = 0;
+						break;
+					case 93:
+						flags = PACKFILE_FLAG_ZSTD;
+						break;
+					default:
+						flags = PACKFILE_FLAG_DEFLATED;
+						break;
+				}
 				offset = (unsigned int)(BuffLittleLong (&ptr[42]) + eocd->prepended_garbage);
 				packsize = (unsigned int)BuffLittleLong (&ptr[20]);
 				realsize = (unsigned int)BuffLittleLong (&ptr[24]);
@@ -2409,7 +2430,7 @@ static qfile_t *FS_OpenPackedFile (pack_t* pack, int pack_ind)
 	file->position = 0;
 	file->ungetc = EOF;
 
-	if (pfile->flags & PACKFILE_FLAG_DEFLATED)
+	if (pfile->flags & (PACKFILE_FLAG_DEFLATED | PACKFILE_FLAG_ZSTD))
 	{
 		ztoolkit_t *ztk;
 
@@ -2419,6 +2440,22 @@ static qfile_t *FS_OpenPackedFile (pack_t* pack, int pack_ind)
 		ztk = (ztoolkit_t *)Mem_Alloc (fs_mempool, sizeof (*ztk));
 
 		ztk->comp_length = pfile->packsize;
+
+		if (pfile->flags & PACKFILE_FLAG_ZSTD)
+		{
+			file->flags |= QFILE_FLAG_ZSTD;
+			ztk->zstd = ZSTD_createDCtx ();
+			if (!ztk->zstd)
+			{
+				Con_Printf ("FS_OpenPackedFile: zstd init error (file: %s)\n", pfile->name);
+				FILEDESC_CLOSE(dup_handle);
+				Mem_Free(ztk);
+				Mem_Free(file);
+				return NULL;
+			}
+			file->ztk = ztk;
+			return file;
+		}
 
 		// Initialize zlib stream
 		ztk->zstream.next_in = ztk->input;
@@ -2437,6 +2474,7 @@ static qfile_t *FS_OpenPackedFile (pack_t* pack, int pack_ind)
 		{
 			Con_Printf ("FS_OpenPackedFile: inflate init error (file: %s)\n", pfile->name);
 			FILEDESC_CLOSE(dup_handle);
+			Mem_Free(ztk);
 			Mem_Free(file);
 			return NULL;
 		}
@@ -2907,7 +2945,10 @@ int FS_Close (qfile_t* file)
 
 	if (file->ztk)
 	{
-		qz_inflateEnd (&file->ztk->zstream);
+		if (file->flags & QFILE_FLAG_ZSTD)
+			ZSTD_freeDCtx (file->ztk->zstd);
+		else
+			qz_inflateEnd (&file->ztk->zstream);
 		Mem_Free (file->ztk);
 	}
 
@@ -2966,6 +3007,56 @@ fs_offset_t FS_Write (qfile_t* file, const void* data, size_t datasize)
 	return written;
 }
 
+
+/*
+====================
+FS_DecompressChunk
+
+Decompress what is in the input buffer of a compressed packed file into
+"out" (up to "outsize" bytes), advance the input position and report how
+many bytes came out. Works for both deflate and zstd entries.
+Returns false on a corrupt stream, or when the decoder made no progress at
+all (so a damaged pack can't spin the caller forever).
+====================
+*/
+static qboolean FS_DecompressChunk (qfile_t *file, unsigned char *out, size_t outsize, size_t *produced)
+{
+	ztoolkit_t *ztk = file->ztk;
+	size_t consumed;
+
+	if (file->flags & QFILE_FLAG_ZSTD)
+	{
+		ZSTD_inBuffer in;
+		ZSTD_outBuffer o;
+
+		in.src = &ztk->input[ztk->in_ind];
+		in.size = ztk->in_len - ztk->in_ind;
+		in.pos = 0;
+		o.dst = out;
+		o.size = outsize;
+		o.pos = 0;
+		if (ZSTD_isError (ZSTD_decompressStream (ztk->zstd, &o, &in)))
+			return false;
+		consumed = in.pos;
+		*produced = o.pos;
+	}
+	else
+	{
+		int error;
+
+		ztk->zstream.next_in = &ztk->input[ztk->in_ind];
+		ztk->zstream.avail_in = (unsigned int)(ztk->in_len - ztk->in_ind);
+		ztk->zstream.next_out = out;
+		ztk->zstream.avail_out = (unsigned int)outsize;
+		error = qz_inflate (&ztk->zstream, Z_SYNC_FLUSH);
+		if (error != Z_OK && error != Z_STREAM_END)
+			return false;
+		consumed = (ztk->in_len - ztk->in_ind) - ztk->zstream.avail_in;
+		*produced = outsize - ztk->zstream.avail_out;
+	}
+	ztk->in_ind += consumed;
+	return consumed > 0 || *produced > 0;
+}
 
 /*
 ====================
@@ -3114,17 +3205,14 @@ fs_offset_t FS_Read (qfile_t* file, void* buffer, size_t buffersize)
 		// Inflate the data in "file->buff"
 		if (buffersize < sizeof (file->buff) / 2)
 		{
-			ztk->zstream.next_out = file->buff;
-			ztk->zstream.avail_out = sizeof (file->buff);
-			error = qz_inflate (&ztk->zstream, Z_SYNC_FLUSH);
-			if (error != Z_OK && error != Z_STREAM_END)
+			size_t produced;
+			if (!FS_DecompressChunk (file, file->buff, sizeof (file->buff), &produced))
 			{
 				Con_Printf ("FS_Read: Can't inflate file\n");
 				break;
 			}
-			ztk->in_ind = ztk->in_len - ztk->zstream.avail_in;
 
-			file->buff_len = (fs_offset_t)sizeof (file->buff) - ztk->zstream.avail_out;
+			file->buff_len = (fs_offset_t)produced;
 			file->position += file->buff_len;
 
 			// Copy the requested data in "buffer" (as much as we can)
@@ -3136,18 +3224,15 @@ fs_offset_t FS_Read (qfile_t* file, void* buffer, size_t buffersize)
 		// Else, we inflate directly in "buffer"
 		else
 		{
-			ztk->zstream.next_out = &((unsigned char*)buffer)[done];
-			ztk->zstream.avail_out = (unsigned int)buffersize;
-			error = qz_inflate (&ztk->zstream, Z_SYNC_FLUSH);
-			if (error != Z_OK && error != Z_STREAM_END)
+			size_t produced;
+			if (!FS_DecompressChunk (file, &((unsigned char*)buffer)[done], buffersize, &produced))
 			{
 				Con_Printf ("FS_Read: Can't inflate file\n");
 				break;
 			}
-			ztk->in_ind = ztk->in_len - ztk->zstream.avail_in;
 
 			// How much data did it inflate?
-			count = (fs_offset_t)(buffersize - ztk->zstream.avail_out);
+			count = (fs_offset_t)produced;
 			file->position += count;
 
 			// Purge cached data
@@ -3332,10 +3417,15 @@ int FS_Seek (qfile_t* file, fs_offset_t offset, int whence)
 		if (FILEDESC_SEEK (file->handle, file->offset, SEEK_SET) == -1)
 			Con_Printf("IMPOSSIBLE: couldn't seek in already opened pk3 file.\n");
 
-		// Reset the Zlib stream
-		ztk->zstream.next_in = ztk->input;
-		ztk->zstream.avail_in = 0;
-		qz_inflateReset (&ztk->zstream);
+		// Reset the decoder
+		if (file->flags & QFILE_FLAG_ZSTD)
+			ZSTD_DCtx_reset (ztk->zstd, ZSTD_reset_session_only);
+		else
+		{
+			ztk->zstream.next_in = ztk->input;
+			ztk->zstream.avail_in = 0;
+			qz_inflateReset (&ztk->zstream);
+		}
 	}
 
 	// We need a big buffer to force inflating into it directly

@@ -116,6 +116,7 @@ OBJ_LUA= \
 
 OBJ_COMMON= \
 	$(OBJ_LUA) \
+	zstd_zstddeclib.o \
 	bih.o \
 	crypto.o \
 	cl_collision.o \
@@ -584,6 +585,12 @@ rml_%.o: %.cpp
 # Lua sources live in lua/; prefix the objects so lua/lutf8lib.c and the
 # engine's utf8lib.c (and any future clash) never collide in the build dir
 lua_%.o: lua/%.c
+	$(CHECKLEVEL2)
+	$(DO_CC)
+
+# zstd (decompression only, vendored in zstd/): the pk3 reader uses it for
+# entries stored with zip method 93
+zstd_%.o: zstd/%.c
 	$(CHECKLEVEL2)
 	$(DO_CC)
 
