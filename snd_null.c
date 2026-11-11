@@ -167,3 +167,7 @@ float S_GetEntChannelPosition(int entnum, int entchannel)
 void SndSys_SendKeyEvents(void)
 {
 }
+
+void S_LoadPending(double budget_seconds)
+{
+}

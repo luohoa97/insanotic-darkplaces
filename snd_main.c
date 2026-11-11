@@ -147,6 +147,46 @@ mempool_t *snd_mempool;
 // Linked list of known sfx
 static sfx_t *known_sfx = NULL;
 
+// Insanotic: level sounds are registered at precache and decoded the first
+// time they play (or in the background after spawn, S_LoadPending); this
+// keeps map loads fast without decoding sounds live every frame
+cvar_t snd_lazyload = {CVAR_SAVE, "snd_lazyload", "1", "decode level sounds on first use or in the background after the map started instead of all at precache (Insanotic)"};
+cvar_t snd_lazyload_budget = {CVAR_SAVE, "snd_lazyload_budget", "2", "milliseconds per frame spent decoding not yet used sounds in the background"};
+
+static cvar_t nosound; // defined below
+
+// makes sure a registered sound is decoded; false when it cannot be
+static qboolean S_EnsureLoaded(sfx_t *sfx)
+{
+	if (sfx->fetcher)
+		return true;
+	if (sfx->flags & SFXFLAG_FILEMISSING)
+		return false;
+	if (!(sfx->flags & (SFXFLAG_LEVELSOUND | SFXFLAG_MENUSOUND)))
+		return false;
+	S_LoadSound(sfx, false);
+	return sfx->fetcher != NULL;
+}
+
+void S_LoadPending(double budget_seconds)
+{
+	sfx_t *sfx;
+	double start = Sys_DirtyTime();
+	if (!snd_initialized.integer || nosound.integer)
+		return;
+	if (budget_seconds <= 0)
+		budget_seconds = snd_lazyload_budget.value * 0.001;
+	for (sfx = known_sfx; sfx; sfx = sfx->next)
+	{
+		if (!sfx->fetcher && !(sfx->flags & SFXFLAG_FILEMISSING) && (sfx->flags & SFXFLAG_LEVELSOUND))
+		{
+			S_LoadSound(sfx, false);
+			if (Sys_DirtyTime() - start >= budget_seconds)
+				return;
+		}
+	}
+}
+
 static qboolean sound_spatialized = false;
 
 qboolean simsound = false;
@@ -900,6 +940,8 @@ void S_Init(void)
 	Cvar_RegisterVariable(&snd_precache);
 	Cvar_RegisterVariable(&snd_initialized);
 	Cvar_RegisterVariable(&snd_streaming);
+	Cvar_RegisterVariable(&snd_lazyload);
+	Cvar_RegisterVariable(&snd_lazyload_budget);
 	Cvar_RegisterVariable(&snd_streaming_length);
 	Cvar_RegisterVariable(&ambient_level);
 	Cvar_RegisterVariable(&ambient_fade);
@@ -1165,7 +1207,7 @@ static sfx_t *S_PrecacheSound_Inner (const char *name, qboolean complain, qboole
 	else
 		sfx->flags |= SFXFLAG_MENUSOUND;
 
-	if (!nosound.integer && snd_precache.integer)
+	if (!nosound.integer && snd_precache.integer && !(snd_lazyload.integer && levelsound))
 		S_LoadSound(sfx, complain);
 
 	return sfx;
@@ -1189,6 +1231,7 @@ float S_SoundLength(const char *name)
 	sfx = S_FindName(name);
 	if (sfx == NULL)
 		return -1;
+	S_EnsureLoaded(sfx);
 	return sfx->total_length / (float) S_GetSoundRate();
 }
 
@@ -1199,7 +1242,7 @@ S_IsSoundPrecached
 */
 qboolean S_IsSoundPrecached (const sfx_t *sfx)
 {
-	return (sfx != NULL && sfx->fetcher != NULL) || (sfx == &changevolume_sfx);
+	return (sfx != NULL && (sfx->fetcher != NULL || (snd_lazyload.integer && (sfx->flags & (SFXFLAG_LEVELSOUND | SFXFLAG_MENUSOUND)) && !(sfx->flags & SFXFLAG_FILEMISSING)))) || (sfx == &changevolume_sfx);
 }
 
 /*
@@ -1719,7 +1762,7 @@ int S_StartSound_StartPosition_Flags (int entnum, int entchannel, sfx_t *sfx, ve
 		return -1;
 	}
 
-	if (sfx->fetcher == NULL)
+	if (sfx->fetcher == NULL && !S_EnsureLoaded(sfx))
 		return -1;
 
 	// Pick a channel to play on
@@ -1929,7 +1972,7 @@ void S_StaticSound (sfx_t *sfx, vec3_t origin, float fvol, float attenuation)
 
 	if (snd_renderbuffer == NULL || sfx == NULL || nosound.integer)
 		return;
-	if (!sfx->fetcher)
+	if (!sfx->fetcher && !S_EnsureLoaded(sfx))
 	{
 		Con_Printf ("S_StaticSound: \"%s\" hasn't been precached\n", sfx->name);
 		return;

@@ -1092,6 +1092,8 @@ void Host_Main(void)
 				Host_PreloadStart();
 			if (mod_lazyload.integer && (cls.signon == SIGNONS || cls.state != ca_connected))
 				Mod_LoadPending(0);
+			if (cls.signon == SIGNONS)
+				S_LoadPending(0);
 			if (preload_ready_time > 0 && cls.signon == SIGNONS && realtime - preload_ready_time > 20)
 			{
 				FS_RecordStop(PRELOAD_LIST);
