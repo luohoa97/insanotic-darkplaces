@@ -2603,10 +2603,44 @@ static float SCR_LoadingStage(char *stage, size_t stagesize, char *detail, size_
 	}
 	if (cls.state == ca_connected)
 	{
+		// downloads first, at any signon stage: the game connection's own
+		// download (the only one where libcurl is missing, as on Android)
+		// and HTTP downloads through libcurl
+		if (cls.qw_downloadname[0])
+		{
+			const char *slash = strrchr(cls.qw_downloadname, '/');
+			strlcpy(stage, "Downloading", stagesize);
+			dpsnprintf(detail, detailsize, "%s  %i%%", slash ? slash + 1 : cls.qw_downloadname, cls.qw_downloadpercent);
+			return 0.02f + 0.18f * bound(0, cls.qw_downloadpercent, 100) / 100.0f;
+		}
+		if (Curl_Running())
+		{
+			int n = 0;
+			Curl_downloadinfo_t *info = Curl_GetDownloadInfo(&n, NULL, NULL, 0);
+			strlcpy(stage, "Downloading", stagesize);
+			if (info)
+			{
+				int i;
+				for (i = 0; i < n; i++)
+					if (!info[i].queued)
+					{
+						const char *slash = strrchr(info[i].filename, '/');
+						if (info[i].progress > 0)
+							dpsnprintf(detail, detailsize, "%s  %i%%", slash ? slash + 1 : info[i].filename, (int)(100 * info[i].progress));
+						else
+							strlcpy(detail, slash ? slash + 1 : info[i].filename, detailsize);
+						break;
+					}
+				Z_Free(info);
+			}
+			return 0.02f;
+		}
 		switch (cls.signon)
 		{
 		case 0:
-			if (sv.state == ss_loading)
+			// only our own listen server is "starting"; sv.state can be left
+			// over from an earlier local game while joining someone else's
+			if (sv.active && sv.state == ss_loading)
 			{
 				strlcpy(stage, "Starting the server", stagesize);
 				return 0.02f + 0.18f * stack;
@@ -2614,11 +2648,6 @@ static float SCR_LoadingStage(char *stage, size_t stagesize, char *detail, size_
 			strlcpy(stage, "Receiving server info", stagesize);
 			return 0.20f;
 		case 1:
-			if (Curl_Running())
-			{
-				strlcpy(stage, "Downloading", stagesize);
-				return 0.22f;
-			}
 			if (s)
 			{
 				// the stage is the entry just above the bottom one
@@ -2650,7 +2679,7 @@ static float SCR_LoadingStage(char *stage, size_t stagesize, char *detail, size_
 			return 0.97f;
 		}
 	}
-	if (sv.state == ss_loading)
+	if (sv.active && sv.state == ss_loading)
 	{
 		strlcpy(stage, "Starting the server", stagesize);
 		return 0.02f + 0.18f * stack;
