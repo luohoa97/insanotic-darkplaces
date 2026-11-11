@@ -20,6 +20,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // cl_main.c  -- client main loop
 
 #include "quakedef.h"
+#include "loadtimes.h"
 #include "cl_lua.h"
 #include "cl_collision.h"
 #include "cl_video.h"
@@ -450,6 +451,8 @@ void CL_EstablishConnection(const char *host, int firstarg)
 	{
 		cls.connect_trying = true;
 		cls.connect_remainingtries = 3;
+		if (loadtimes.map_start <= 0)
+			loadtimes.map_start = Sys_DirtyTime();
 		cls.connect_nextsendtime = 0;
 
 		// only NOW, set connect_userinfo

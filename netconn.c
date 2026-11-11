@@ -1554,6 +1554,11 @@ static int NetConn_ReceivedMessage(netconn_t *conn, const unsigned char *data, s
 					NetConn_Write(conn->mysocket, sendme, (int)sendmelen, &conn->peeraddress);
 				if (sequence == conn->nq.receiveSequence)
 				{
+					if (conn == cls.netcon && cls.signon < SIGNONS)
+					{
+						loadtimes.reliable_bytes += (int)length;
+						loadtimes.reliable_packets++;
+					}
 					conn->lastMessageTime = realtime;
 					conn->timeout = realtime + newtimeout;
 					conn->nq.receiveSequence++;

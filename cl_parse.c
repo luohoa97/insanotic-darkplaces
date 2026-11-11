@@ -1632,8 +1632,8 @@ static void CL_SignonReply (void)
 {
 	Con_DPrintf("CL_SignonReply: %i\n", cls.signon);
 	if (developer_loadtimes.integer && loadtimes.map_start > 0)
-		Con_Printf("load times: signon %i at %.0f ms (models so far %.0f ms / %d, csqc %.0f, world %.0f)\n", cls.signon, (Sys_DirtyTime() - loadtimes.map_start) * 1000,
-			loadtimes.models * 1000, loadtimes.models_count, loadtimes.csqc_init * 1000, loadtimes.world_setup * 1000);
+		Con_Printf("load times: signon %i at %.0f ms (models so far %.0f ms / %d, csqc %.0f, world %.0f; reliable %d bytes in %d packets)\n", cls.signon, (Sys_DirtyTime() - loadtimes.map_start) * 1000,
+			loadtimes.models * 1000, loadtimes.models_count, loadtimes.csqc_init * 1000, loadtimes.world_setup * 1000, loadtimes.reliable_bytes, loadtimes.reliable_packets);
 
 	switch (cls.signon)
 	{

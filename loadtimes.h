@@ -16,6 +16,8 @@ typedef struct loadtimes_s
 	double csqc_init;      // CL_VM_Init
 	double world_setup;    // CL_SetupWorldModel
 	double video;          // Host_StartVideo
+	int reliable_bytes;    // reliable data the client received while joining
+	int reliable_packets;  // and in how many fragments (one round trip each)
 } loadtimes_t;
 
 extern loadtimes_t loadtimes;
