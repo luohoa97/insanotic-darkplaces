@@ -49,6 +49,7 @@ typedef struct luahost_s
 	const char *survivor;      // "server" / "game" (log messages)
 	cvar_t *instruction_limit;
 	cvar_t *memory_limit;
+	int cvar_flags;            // flags for cvars scripts create (client: CVAR_SAVE)
 	// adds host specific functions to the xon table on top of the stack
 	void (*register_api)(lua_State *L);
 	luasandbox_t *items[LUASANDBOX_MAX];

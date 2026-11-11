@@ -32,7 +32,7 @@ static void SV_Lua_RegisterAPI(lua_State *L);
 static luahost_t sv_luahost =
 {
 	"plugin", "plugins", "plugin.json", "server",
-	&sv_lua_instruction_limit, &sv_lua_memory_limit,
+	&sv_lua_instruction_limit, &sv_lua_memory_limit, 0,
 	SV_Lua_RegisterAPI,
 	{NULL}, 0, NULL
 };

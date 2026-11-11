@@ -1359,8 +1359,12 @@ void Sys_SendKeyEvents( void )
 							}
 #ifdef SDL_R_RESTART
 							// better not call R_Modules_Restart from here directly, as this may wreak havoc...
-							// so, let's better queue it for next frame
-							if(!sdl_needs_restart)
+							// so, let's better queue it for next frame.
+							// Insanotic: only the software renderer needs it; the GL
+							// renderer resizes its buffers on the next frame by itself,
+							// and a full restart on every resize step made dragging the
+							// window edge stutter
+							if(vid_softsurface && !sdl_needs_restart)
 							{
 								Cbuf_AddText("\nr_restart\n");
 								sdl_needs_restart = true;

@@ -375,7 +375,7 @@ static int LuaXon_cvar_register(lua_State *L)
 		desc = descbuf;
 	}
 	if (!c)
-		c = Cvar_Get(name, def, 0, desc);
+		c = Cvar_Get(name, def, m->host->cvar_flags, desc);
 	if (!c || (c->flags & CVAR_PRIVATE))
 		return luaL_error(L, "cannot register cvar '%s'", name);
 	lua_pushnumber(L, c->value);

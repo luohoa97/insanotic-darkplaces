@@ -41,7 +41,7 @@ static void CL_Lua_RegisterAPI(lua_State *L);
 static luahost_t cl_luahost =
 {
 	"mod", "mods", "mod.json", "game",
-	&cl_lua_instruction_limit, &cl_lua_memory_limit,
+	&cl_lua_instruction_limit, &cl_lua_memory_limit, CVAR_SAVE, // mod settings persist in config.cfg
 	CL_Lua_RegisterAPI,
 	{NULL}, 0, NULL
 };
@@ -326,7 +326,9 @@ static int LuaCl_traceline(lua_State *L)
 	LuaSandbox_CheckVec(L, 2, v2);
 	if (!cl.worldmodel)
 		return luaL_error(L, "not in a game");
-	trace = CL_TraceLine(v1, v2, MOVE_NOMONSTERS, NULL, SUPERCONTENTS_SOLID, 0, MATERIALFLAGMASK_TRANSLUCENT, 0, true, false, NULL, false, false);
+	// world geometry only: networked brush entities include see-through
+	// forcefields and doors players walk through, which shots pass too
+	trace = CL_TraceLine(v1, v2, MOVE_NOMONSTERS, NULL, SUPERCONTENTS_SOLID, 0, MATERIALFLAGMASK_TRANSLUCENT, 0, false, false, NULL, false, false);
 	lua_createtable(L, 0, 5);
 	lua_pushnumber(L, trace.fraction); lua_setfield(L, -2, "fraction");
 	VectorCopy(trace.endpos, endpos);
@@ -361,9 +363,15 @@ static int LuaCl_teamplay(lua_State *L)
 	return 1;
 }
 
+static qboolean CL_Lua_PlayerInfo(int entnum, int *team, qboolean *dead, qboolean *spectator);
+
 static void CL_Lua_PushPlayer(lua_State *L, int entnum, const vec3_t origin, const vec3_t mins, const vec3_t maxs, const vec3_t velocity, qboolean alive)
 {
 	int colors = cl.scores ? cl.scores[entnum - 1].colors : 0;
+	int team;
+	qboolean dead, spectator, known = CL_Lua_PlayerInfo(entnum, &team, &dead, &spectator);
+	if (known)
+		alive = !dead && !spectator;
 	lua_createtable(L, 0, 9);
 	lua_pushinteger(L, entnum); lua_setfield(L, -2, "num");
 	lua_pushstring(L, cl.scores ? cl.scores[entnum - 1].name : ""); lua_setfield(L, -2, "name");
@@ -373,6 +381,13 @@ static void CL_Lua_PushPlayer(lua_State *L, int entnum, const vec3_t origin, con
 	LuaSandbox_PushVec(L, velocity); lua_setfield(L, -2, "velocity");
 	lua_pushinteger(L, colors & 15); lua_setfield(L, -2, "team_color");
 	lua_pushboolean(L, alive); lua_setfield(L, -2, "alive");
+	if (known)
+	{
+		// the game's own view: team number, death and spectating
+		lua_pushinteger(L, team); lua_setfield(L, -2, "team");
+		lua_pushboolean(L, dead); lua_setfield(L, -2, "dead");
+		lua_pushboolean(L, spectator); lua_setfield(L, -2, "spectator");
+	}
 	lua_pushboolean(L, entnum == cl.playerentity); lua_setfield(L, -2, "is_me");
 }
 
@@ -406,6 +421,12 @@ static int LuaCl_players(lua_State *L)
 				prog->fieldoffsets.mins >= 0 ? PRVM_clientedictvector(ed, mins) : vec3_origin,
 				prog->fieldoffsets.maxs >= 0 ? PRVM_clientedictvector(ed, maxs) : vec3_origin,
 				vel, solid != SOLID_CORPSE && solid != SOLID_NOT);
+			if (prog->fieldoffsets.angles >= 0)
+			{
+				// where the model faces (yaw; model pitch is a third of the view's)
+				LuaSandbox_PushVec(L, PRVM_clientedictvector(ed, angles));
+				lua_setfield(L, -2, "angles");
+			}
 			lua_rawseti(L, -2, ++n);
 		}
 		if (n)
@@ -451,6 +472,9 @@ static struct
 	int f_id, f_activeweapon, f_switchweapon, f_draw;
 	int f_id_type;
 	int fn_projectile_draw;
+	// Xonotic's own per-player state (common/ent_cs.qh), -1 when missing
+	int fn_team, fn_dead, fn_spec;
+	int stat_damage_dealt; // STAT_HITSOUND_DAMAGE_DEALT_TOTAL, -1 when missing
 } cl_lua_csqc;
 
 static int CL_Lua_FieldOfs(prvm_prog_t *prog, const char *name, int *type)
@@ -508,6 +532,12 @@ static qboolean CL_Lua_BindCSQC(void)
 	cl_lua_csqc.f_draw = CL_Lua_FieldOfs(prog, "draw", NULL);
 	fn = PRVM_ED_FindFunction(prog, "Projectile_Draw");
 	cl_lua_csqc.fn_projectile_draw = fn ? (int)(fn - prog->functions) : -1;
+	fn = PRVM_ED_FindFunction(prog, "entcs_GetTeam");
+	cl_lua_csqc.fn_team = fn ? (int)(fn - prog->functions) : -1;
+	fn = PRVM_ED_FindFunction(prog, "entcs_IsDead");
+	cl_lua_csqc.fn_dead = fn ? (int)(fn - prog->functions) : -1;
+	fn = PRVM_ED_FindFunction(prog, "entcs_GetSpecState");
+	cl_lua_csqc.fn_spec = fn ? (int)(fn - prog->functions) : -1;
 	f_impulse = CL_Lua_FieldOfs(prog, "impulse", NULL);
 	f_next = CL_Lua_FieldOfs(prog, "enemy", NULL);
 	f_name = CL_Lua_FieldOfs(prog, "netname", &f_nametype);
@@ -519,6 +549,13 @@ static qboolean CL_Lua_BindCSQC(void)
 		cl_lua_csqc.stat_weapons = CL_Lua_FieldInt(prog, ed, cl_lua_csqc.f_id, cl_lua_csqc.f_id_type);
 		if (cl_lua_csqc.stat_weapons < 0 || cl_lua_csqc.stat_weapons + 2 >= MAX_CL_STATS)
 			cl_lua_csqc.stat_weapons = -1;
+	}
+	cl_lua_csqc.stat_damage_dealt = -1;
+	if ((ed = CL_Lua_GlobalEdict(prog, "STAT_HITSOUND_DAMAGE_DEALT_TOTAL")))
+	{
+		cl_lua_csqc.stat_damage_dealt = CL_Lua_FieldInt(prog, ed, cl_lua_csqc.f_id, cl_lua_csqc.f_id_type);
+		if (cl_lua_csqc.stat_damage_dealt < 0 || cl_lua_csqc.stat_damage_dealt >= MAX_CL_STATS)
+			cl_lua_csqc.stat_damage_dealt = -1;
 	}
 	if ((ed = CL_Lua_GlobalEdict(prog, "STAT_FUEL")))
 		stat_fuel = CL_Lua_FieldInt(prog, ed, cl_lua_csqc.f_id, cl_lua_csqc.f_id_type);
@@ -560,6 +597,28 @@ static qboolean CL_Lua_BindCSQC(void)
 		ed = CL_Lua_EdictOrNull(prog, PRVM_EDICTFIELDEDICT(ed, f_next));
 	}
 	(void)type;
+	return true;
+}
+
+// calls a CSQC function taking one number and returning one
+static float CL_Lua_CallCSQC1(int fnum, float arg)
+{
+	prvm_prog_t *prog = CLVM_prog;
+	PRVM_G_FLOAT(OFS_PARM0) = arg;
+	prog->ExecuteProgram(prog, fnum, "Insanotic: CSQC function missing");
+	return PRVM_G_FLOAT(OFS_RETURN);
+}
+
+// what the game itself says about a player (entnum 1..maxclients): team
+// (Xonotic's team number, 0 = none, NUM_SPECTATOR for spectators), dead,
+// spectator. Returns false when the loaded CSQC does not offer it.
+static qboolean CL_Lua_PlayerInfo(int entnum, int *team, qboolean *dead, qboolean *spectator)
+{
+	if (!CL_Lua_BindCSQC() || cl_lua_csqc.fn_team < 0)
+		return false;
+	*team = (int)CL_Lua_CallCSQC1(cl_lua_csqc.fn_team, entnum - 1);
+	*dead = cl_lua_csqc.fn_dead >= 0 && CL_Lua_CallCSQC1(cl_lua_csqc.fn_dead, entnum - 1) != 0;
+	*spectator = cl_lua_csqc.fn_spec >= 0 && (int)CL_Lua_CallCSQC1(cl_lua_csqc.fn_spec, entnum - 1) == 1; // ENTCS_SPEC_PURE
 	return true;
 }
 
@@ -647,6 +706,12 @@ static int LuaCl_stats(lua_State *L)
 	lua_pushinteger(L, cl.stats[STAT_NAILS]); lua_setfield(L, -2, "bullets");
 	lua_pushinteger(L, cl.stats[STAT_ROCKETS]); lua_setfield(L, -2, "rockets");
 	lua_pushinteger(L, cl.stats[STAT_CELLS]); lua_setfield(L, -2, "cells");
+	// total damage you have dealt (Xonotic's hit-sound counter), when known
+	if (cls.state == ca_connected && CL_Lua_BindCSQC() && cl_lua_csqc.stat_damage_dealt >= 0)
+	{
+		lua_pushinteger(L, cl.stats[cl_lua_csqc.stat_damage_dealt]);
+		lua_setfield(L, -2, "damage_dealt");
+	}
 	return 1;
 }
 
@@ -678,12 +743,19 @@ static int LuaCl_projectiles(lua_State *L)
 // xon.me(): your entity number and team colour (scoreboard pants colour)
 static int LuaCl_me(lua_State *L)
 {
+	int team;
+	qboolean dead, spectator;
 	lua_pushinteger(L, cl.playerentity);
 	if (cl.scores && cl.playerentity >= 1 && cl.playerentity <= cl.maxclients)
 		lua_pushinteger(L, cl.scores[cl.playerentity - 1].colors & 15);
 	else
 		lua_pushnil(L);
-	return 2;
+	// third: your team as the game reports it (nil when unknown)
+	if (cl.playerentity >= 1 && cl.playerentity <= cl.maxclients && CL_Lua_PlayerInfo(cl.playerentity, &team, &dead, &spectator))
+		lua_pushinteger(L, team);
+	else
+		lua_pushnil(L);
+	return 3;
 }
 
 static int LuaCl_touches(lua_State *L)
