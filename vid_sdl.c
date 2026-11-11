@@ -999,6 +999,13 @@ void IN_Move( void )
 
 	scr_numtouchscreenareas = 0;
 
+	// Insanotic: back in the game (console and chat closed, menu gone) the
+	// on-screen keyboard always closes, and the menu's "a text field wants
+	// it" flag is reset: closing a dialog or the menu does not always tell
+	// the text field it lost the focus, which left the keyboard up
+	if (keydest == key_game && vid_touchscreen_showkeyboard.integer)
+		Cvar_SetValueQuick(&vid_touchscreen_showkeyboard, 0);
+
 	// Only apply the new keyboard state if the input changes.
 	if (keydest != oldkeydest || !!vid_touchscreen_showkeyboard.integer != oldshowkeyboard)
 	{
@@ -1006,6 +1013,7 @@ void IN_Move( void )
 		{
 			case key_console: VID_ShowKeyboard(true);break;
 			case key_message: VID_ShowKeyboard(true);break;
+			case key_game: VID_ShowKeyboard(false);break;
 			default: VID_ShowKeyboard(!!vid_touchscreen_showkeyboard.integer); break;
 		}
 	}
