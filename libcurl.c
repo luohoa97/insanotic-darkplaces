@@ -248,7 +248,8 @@ struct CURLM_s
 static jclass fetch_class;
 static jmethodID fetch_new, fetch_start, fetch_cancel, fetch_read, fetch_code, fetch_length, fetch_ctype, fetch_error;
 static jbyteArray fetch_buffer;
-#define FETCH_BUFFERSIZE 65536
+// one read hands the engine up to 1 MiB (Java queues bigger reads)
+#define FETCH_BUFFERSIZE (1024 * 1024)
 
 // the class belongs to the app, which a native thread cannot find by name:
 // ask the activity's class loader
@@ -456,6 +457,10 @@ static CURLMcode qcurl_multi_perform(CURLM *m, int *running)
 	JNIEnv *env = (JNIEnv *)SDL_AndroidGetJNIEnv();
 	static unsigned char chunk[FETCH_BUFFERSIZE];
 	CURL *e;
+	// draining is done by time, not by count: up to 8 ms of every frame,
+	// so a fast link (1 Gbit/s and more) is kept up with even at the low
+	// frame rate of a loading screen, and a slow device never stalls
+	double drain_until = Sys_DirtyTime() + 0.008;
 
 	*running = 0;
 	if (!env || !Fetch_Init(env))
@@ -481,8 +486,7 @@ static CURLMcode qcurl_multi_perform(CURLM *m, int *running)
 			}
 			e->state = 1;
 		}
-		// a few chunks per frame at most, so a fast link cannot stall the game
-		for (rounds = 0; e->state == 1 && rounds < 32; rounds++)
+		for (rounds = 0; e->state == 1 && (rounds < 1 || Sys_DirtyTime() < drain_until); rounds++)
 		{
 			int n = (*env)->CallIntMethod(env, e->fetch, fetch_read, fetch_buffer);
 			if (n > 0)
