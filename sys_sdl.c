@@ -211,6 +211,15 @@ char *Sys_ConsoleInput(void)
 	return NULL;
 }
 
+void Sys_SetClipboardData (const char *text)
+{
+#if SDL_MAJOR_VERSION != 1
+	SDL_SetClipboardText(text);
+#else
+	(void)text;
+#endif
+}
+
 char *Sys_GetClipboardData (void)
 {
 #if SDL_MAJOR_VERSION != 1

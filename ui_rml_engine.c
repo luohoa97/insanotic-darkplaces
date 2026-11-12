@@ -338,6 +338,22 @@ void UIE_ServerCommand(const char *line)
 	Cmd_ForwardStringToServer(line);
 }
 
+void UIE_ClipboardSet(const char *text)
+{
+	Sys_SetClipboardData(text);
+}
+
+void UIE_ClipboardGet(char *out, int size)
+{
+	char *text = Sys_GetClipboardData();
+	out[0] = 0;
+	if (text)
+	{
+		strlcpy(out, text, size);
+		Z_Free(text);
+	}
+}
+
 void UIE_Keyboard(int show)
 {
 	VID_ShowKeyboard(show != 0);
@@ -578,13 +594,48 @@ static void RML_Touch_f(void)
 static void RML_Key_f(void)
 {
 	int key;
-	if (Cmd_Argc() < 2 || (key = Key_StringToKeynum(Cmd_Argv(1))) < 0)
+	const char *name;
+	qboolean ctrl = false;
+	if (Cmd_Argc() < 2)
+		name = "";
+	else
+		name = Cmd_Argv(1);
+	// "ctrl+v": the key with control held down
+	if (!strncasecmp(name, "ctrl+", 5))
 	{
-		Con_Printf("usage: rml_key <key name>   press and release a key (for tests)\n");
+		ctrl = true;
+		name += 5;
+	}
+	if ((key = Key_StringToKeynum(name)) < 0)
+	{
+		Con_Printf("usage: rml_key [ctrl+]<key name>   press and release a key (for tests)\n");
 		return;
 	}
+	if (ctrl)
+		Key_Event(K_CTRL, 0, true);
 	Key_Event(key, 0, true);
 	Key_Event(key, 0, false);
+	if (ctrl)
+		Key_Event(K_CTRL, 0, false);
+}
+
+// typed text as one input event (what an input method or a paste delivers),
+// and the system clipboard, for tests
+static void RML_Text_f(void)
+{
+	if (Cmd_Argc() < 2)
+	{
+		Con_Printf("usage: rml_text <text>   deliver text as one input event (for tests)\n");
+		return;
+	}
+	Key_TextInput(Cmd_Argv(1));
+}
+
+static void RML_Clip_f(void)
+{
+	if (Cmd_Argc() < 2)
+		return;
+	Sys_SetClipboardData(Cmd_Argv(1));
 }
 
 static void RML_State_f(void)
@@ -662,6 +713,8 @@ void UI_RML_Init(void)
 	Cmd_AddCommand("rml_drag", RML_Drag_f, "press, drag and release the primary button between window pixels (for tests)");
 	Cmd_AddCommand("rml_touch", RML_Touch_f, "a finger by hand: rml_touch down|move <x> <y>, rml_touch up (for tests)");
 	Cmd_AddCommand("rml_key", RML_Key_f, "press and release a key by name (for tests)");
+	Cmd_AddCommand("rml_text", RML_Text_f, "deliver text as one input event, as an input method does (for tests)");
+	Cmd_AddCommand("rml_clip", RML_Clip_f, "put text on the system clipboard (for tests)");
 	Cmd_AddCommand("rml_state", RML_State_f, "print whether the element with an id is hovered or pressed (for tests)");
 	Cmd_AddCommand("rml_list", RML_List_f, "list the RmlUi documents");
 }

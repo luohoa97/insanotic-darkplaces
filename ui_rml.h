@@ -118,6 +118,11 @@ int UIE_FileList(const char *pattern, char (*out)[128], int max);
 void UIE_CvarSet(const char *name, const char *value);
 /* send a line to the server the way "cmd" does */
 void UIE_ServerCommand(const char *line);
+/* the system clipboard: text copied in other programs can be pasted into a
+ * text field, and what is copied in one can be pasted elsewhere */
+void UIE_ClipboardSet(const char *text);
+/* the text, or an empty string; at most size-1 bytes */
+void UIE_ClipboardGet(char *out, int size);
 /* the on-screen keyboard of touch devices */
 void UIE_Keyboard(int show);
 

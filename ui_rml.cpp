@@ -124,6 +124,14 @@ public:
 		UIE_Log(level, message.c_str());
 		return true;
 	}
+	// copy and paste go through the system clipboard
+	void SetClipboardText(const Rml::String& text) override { UIE_ClipboardSet(text.c_str()); }
+	void GetClipboardText(Rml::String& text) override
+	{
+		char buffer[4096];
+		UIE_ClipboardGet(buffer, sizeof(buffer));
+		text = buffer;
+	}
 	void ActivateKeyboard(Rml::Vector2f, float) override { UIE_Keyboard(1); }
 	void DeactivateKeyboard() override { UIE_Keyboard(0); }
 };

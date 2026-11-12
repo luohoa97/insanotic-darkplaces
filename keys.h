@@ -377,6 +377,10 @@ void Key_Init(void);
 void Key_Shutdown(void);
 void Key_Init_Cvars(void);
 void Key_Event(int key, int ascii, qboolean down);
+/// typed or pasted text, as one string of UTF-8: every character goes in as
+/// its own K_TEXT key, so a whole word an input method commits is not cut
+/// down to its first letter
+void Key_TextInput(const char *utf8);
 // Insanotic: whether a key or mouse button is held down
 qboolean Key_IsDown(int key);
 void Key_ReleaseAll (void);

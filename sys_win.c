@@ -200,6 +200,11 @@ char *Sys_ConsoleInput (void)
 	return NULL;
 }
 
+void Sys_SetClipboardData (const char *text)
+{
+	(void)text;
+}
+
 char *Sys_GetClipboardData (void)
 {
 	char *data = NULL;

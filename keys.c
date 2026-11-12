@@ -1694,6 +1694,20 @@ void Key_FindKeysForCommand (const char *command, int *keys, int numkeys, int bi
 	}
 }
 
+void Key_TextInput(const char *utf8)
+{
+	while (*utf8)
+	{
+		const char *end = NULL;
+		Uchar ch = u8_getchar_utf8_enabled(utf8, &end);
+		if (!ch || !end || end <= utf8)
+			break; // not text
+		Key_Event(K_TEXT, ch, true);
+		Key_Event(K_TEXT, ch, false);
+		utf8 = end;
+	}
+}
+
 /*
 ===================
 Called by the system between frames for both key up and key down events

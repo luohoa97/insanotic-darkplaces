@@ -142,6 +142,11 @@ char *Sys_GetClipboardData (void)
 	return NULL;
 }
 
+void Sys_SetClipboardData (const char *text)
+{
+	(void)text;
+}
+
 void Sys_InitConsole (void)
 {
 }

@@ -108,6 +108,8 @@ void Sys_Sleep(int microseconds);
 void Sys_SendKeyEvents (void);
 
 char *Sys_GetClipboardData (void);
+/// puts text on the system clipboard (where the system has one)
+void Sys_SetClipboardData (const char *text);
 
 extern qboolean sys_supportsdlgetticks;
 unsigned int Sys_SDL_GetTicks (void); // wrapper to call SDL_GetTicks

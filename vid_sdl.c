@@ -1258,6 +1258,7 @@ void Sys_SendKeyEvents( void )
 	int i;
 	qboolean isdown;
 	Uchar unicode;
+	char pending_text[64] = "";
 	SDL_Event event;
 
 	VID_EnableJoystick(true);
@@ -1301,7 +1302,14 @@ void Sys_SendKeyEvents( void )
 #ifdef DEBUGSDLEVENTS
 							Con_DPrintf("SDL_Event: SDL_TEXTINPUT - text: %s\n", event.text.text);
 #endif
-							unicode = u8_getchar_utf8_enabled(event.text.text + (int)u8_bytelen(event.text.text, 0), NULL);
+							{
+								const char *rest = NULL;
+								unicode = u8_getchar_utf8_enabled(event.text.text, &rest);
+								// what follows the first character (a committed word)
+								// is typed after the key itself
+								if (rest && *rest)
+									strlcpy(pending_text, rest, sizeof(pending_text));
+							}
 						}
 						else
 						{
@@ -1313,6 +1321,11 @@ void Sys_SendKeyEvents( void )
 				}
 				if (!VID_JoyBlockEmulatedKeys(keycode))
 					Key_Event(keycode, unicode, isdown);
+				if (pending_text[0])
+				{
+					Key_TextInput(pending_text);
+					pending_text[0] = 0;
+				}
 				break;
 			case SDL_MOUSEBUTTONDOWN:
 			case SDL_MOUSEBUTTONUP:
@@ -1443,11 +1456,10 @@ void Sys_SendKeyEvents( void )
 #ifdef DEBUGSDLEVENTS
 				Con_DPrintf("SDL_Event: SDL_TEXTINPUT - text: %s\n", event.text.text);
 #endif
-				// convert utf8 string to char
+				// The whole string: an input method commits a word, a paste is a
+				// sentence, and each of its characters is a key of its own.
 				// NOTE: this code is supposed to run even if utf8enable is 0
-				unicode = u8_getchar_utf8_enabled(event.text.text + (int)u8_bytelen(event.text.text, 0), NULL);
-				Key_Event(K_TEXT, unicode, true);
-				Key_Event(K_TEXT, unicode, false);
+				Key_TextInput(event.text.text);
 				break;
 			case SDL_MOUSEMOTION:
 				VID_MouseOrFinger(event.motion.which != SDL_TOUCH_MOUSEID);
