@@ -3202,8 +3202,9 @@ loaddds:
 
 	// Insanotic: GLES takes no BGRA uploads (GL_RGBA internal format with
 	// GL_BGRA data is an error, the texture stays empty: a black world on
-	// GPUs without S3TC). Software decoded pixels are swapped to RGBA there.
-	if (force_swdecode && vid.forcetextype == TEXTYPE_RGBA)
+	// GPUs without S3TC). Software decoded pixels, and uncompressed BGRA DDS
+	// files (some custom maps ship them), are swapped to RGBA there.
+	if (textype == TEXTYPE_BGRA && !bytesperblock && vid.forcetextype == TEXTYPE_RGBA)
 	{
 		unsigned char *px = (unsigned char *)mippixels_start, t;
 		size_t k, n = mipsize_total / 4;
