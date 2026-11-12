@@ -190,7 +190,7 @@ struct ServersModel {
 	// the info panel of the tapped server
 	bool info_open = false;
 	std::string info_name, info_address, info_map, info_image, info_mode, info_mod, info_extra;
-	int info_ping = 0, info_humans = 0, info_bots = 0, info_slots = 0;
+	int info_ping = 0, info_humans = 0, info_bots = 0, info_slots = 0, info_spectators = 0;
 	bool info_favorite = false;
 	std::vector<PlayerRow> info_players;
 	Rml::DataModelHandle handle;
@@ -369,6 +369,10 @@ void InfoRefresh()
 	if (!UIE_ServerDetail_Get(m.info_address.c_str(), &d))
 		return;
 	m.info_players = ParsePlayers(d.players);
+	m.info_spectators = 0;
+	for (const PlayerRow& p : m.info_players)
+		if (p.spectator)
+			m.info_spectators++;
 	m.info_humans = d.numhumans;
 	m.info_bots = d.numbots;
 	m.info_slots = d.maxplayers;
@@ -382,7 +386,7 @@ void InfoRefresh()
 			m.info_image = MapPicture(r.map);
 			m.info_mode = r.type;
 		}
-	for (const char* v : {"info_players", "info_humans", "info_bots", "info_slots", "info_mod", "info_favorite", "info_ping", "info_name", "info_map", "info_image", "info_mode"})
+	for (const char* v : {"info_players", "info_humans", "info_bots", "info_spectators", "info_slots", "info_mod", "info_favorite", "info_ping", "info_name", "info_map", "info_image", "info_mode"})
 		m.handle.DirtyVariable(v);
 }
 
@@ -478,6 +482,7 @@ void CreateServers(Rml::Context* context)
 	c.Bind("info_ping", &m.info_ping);
 	c.Bind("info_humans", &m.info_humans);
 	c.Bind("info_bots", &m.info_bots);
+	c.Bind("info_spectators", &m.info_spectators);
 	c.Bind("info_slots", &m.info_slots);
 	c.Bind("info_favorite", &m.info_favorite);
 	c.Bind("info_players", &m.info_players);
