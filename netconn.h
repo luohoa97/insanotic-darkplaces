@@ -309,7 +309,14 @@ typedef struct serverlist_info_s
 	int category;
 	/// favorite server flag
 	qboolean isfavorite;
+	/// the server can send a picture of its map (Insanotic, "inspreview" in its infoResponse)
+	qboolean mappreview;
 } serverlist_info_t;
+
+/// ask a server (its address as in the server list) for the picture of a map
+/// it announced; it ends up as mappreviews/<map>-<crc>.jpg. 1 asked, 0 no room
+/// now, -1 will not work
+int NetConn_MapPreviewRequest(const char *cname, const char *map);
 
 typedef enum
 {

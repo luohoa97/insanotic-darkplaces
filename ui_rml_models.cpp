@@ -18,6 +18,7 @@
 
 #include <algorithm>
 #include <map>
+#include <set>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -176,6 +177,7 @@ std::vector<PlayerRow> ParsePlayers(const char* text)
 
 struct ServerRow {
 	std::string address, name, map, type, players;
+	bool preview = false; // the server can send a picture of its map
 	std::string image; // the map's picture, only while the row is near the screen (else empty)
 	int ping = 0;
 	int humans = 0;
@@ -206,6 +208,8 @@ struct ServersModel {
 	double next_images = 0;
 	Rml::Context* context = nullptr;
 	std::map<std::string, std::string> pictures; // map name -> picture path, "" when the client has none
+	std::map<std::string, double> next_recheck;
+	std::set<std::string> asked; // maps a server was asked for a picture of
 };
 
 ServersModel* servers = nullptr;
@@ -219,8 +223,10 @@ std::string MapPicture(const std::string& map)
 {
 	if (map.empty() || map.find_first_of("/\\.:") != std::string::npos)
 		return "";
+	double now = UIE_Time();
 	auto it = servers->pictures.find(map);
-	if (it != servers->pictures.end())
+	// a map that was asked for may have arrived: look again now and then
+	if (it != servers->pictures.end() && (!it->second.empty() || !servers->asked.count(map) || now < servers->next_recheck[map]))
 		return it->second;
 	std::string found;
 	for (const char* ext : {".jpg", ".png", ".tga"})
@@ -228,7 +234,14 @@ std::string MapPicture(const std::string& map)
 			found = "/maps/" + map;
 			break;
 		}
+	if (found.empty()) {
+		// a picture a server sent earlier (netconn.c): mappreviews/<map>-<crc>.jpg
+		char files[4][128];
+		if (UIE_FileList(("mappreviews/" + map + "-*.jpg").c_str(), files, 4) > 0)
+			found = std::string("/") + files[0];
+	}
 	servers->pictures[map] = found;
+	servers->next_recheck[map] = now + 1.5;
 	return found;
 }
 
@@ -252,7 +265,12 @@ void UpdateRowImages()
 	int last = (int)((list->GetScrollTop() + list->GetClientHeight()) / rh) + 2;
 	bool changed = false;
 	for (int i = 0; i < (int)m.rows.size(); i++) {
-		std::string want = (i >= first && i <= last) ? MapPicture(m.rows[i].map) : "";
+		bool visible = i >= first && i <= last;
+		std::string want = visible ? MapPicture(m.rows[i].map) : "";
+		// a map the client has no picture of: ask a server that has one (a few at
+		// a time, once per map; the answer is a file that the lookup finds)
+		if (visible && want.empty() && m.rows[i].preview && !m.asked.count(m.rows[i].map) && UIE_MapPreviewRequest(m.rows[i].address.c_str(), m.rows[i].map.c_str()) != 0)
+			m.asked.insert(m.rows[i].map);
 		if (m.rows[i].image != want) {
 			m.rows[i].image = want;
 			changed = true;
@@ -291,6 +309,7 @@ void ServersRebuild(bool force)
 		r.slots = s.maxplayers;
 		r.free_slots = s.freeslots;
 		r.favorite = IsFavorite(r.address);
+		r.preview = s.mappreview != 0;
 		r.players = std::to_string(s.numhumans) + "/" + std::to_string(s.maxplayers);
 		if (!m.show_empty && s.numhumans < 1)
 			continue;
@@ -390,6 +409,7 @@ void ServersAsk(double now, bool reset)
 {
 	UIE_ServerRefresh(reset ? 1 : 0);
 	servers->pictures.clear();
+	servers->next_recheck.clear();
 	servers->refreshing = true;
 	servers->refresh_until = now + 6; // long enough for the first answers
 	servers->next_update = 0;

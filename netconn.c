@@ -27,6 +27,8 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 // for secure rcon authentication
 #include "hmac.h"
+#include "jpeg.h"
+#include "image.h"
 #include "mdfour.h"
 #include <time.h>
 
@@ -34,6 +36,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #define DPMASTER_PORT 27950
 
 // note this defaults on for dedicated servers, off for listen servers
+cvar_t sv_mappreview = {CVAR_SAVE, "sv_mappreview", "1", "1: tell clients that this server can send a small picture of its current map for their server list (they ask after a challenge, with getmappreview); 0: never"};
 cvar_t sv_public = {0, "sv_public", "0", "1: advertises this server on the master server (so that players can find it in the server browser); 0: allow direct queries only; -1: do not respond to direct queries; -2: do not allow anyone to connect; -3: already block at getchallenge level"};
 cvar_t sv_public_rejectreason = {0, "sv_public_rejectreason", "The server is closing.", "Rejection reason for connects when sv_public is -2"};
 static cvar_t sv_heartbeatperiod = {CVAR_SAVE, "sv_heartbeatperiod", "120", "how often to send heartbeat in seconds (only used if sv_public is 1)"};
@@ -119,6 +122,24 @@ int serverquerycount = 0;
 int serverreplycount = 0;
 
 challenge_t challenges[MAX_CHALLENGES];
+
+/* map previews for the server list: the protocol is described above NetConn_ServerMapPreview* */
+#define MAPPREVIEW_MAXSIZE 16384 // bytes of the whole JPEG (about 256x128 pixels)
+#define MAPPREVIEW_CHUNK 1000 // bytes in each piece but the last
+#define MAPPREVIEW_MAXCHUNKS 40
+
+static qboolean NetConn_MapPreviewName_OK(const char *name)
+{
+	size_t i, n = strlen(name);
+	if (n < 1 || n > 63)
+		return false;
+	for (i = 0; i < n; i++)
+		if (!((name[i] >= 'a' && name[i] <= 'z') || (name[i] >= 'A' && name[i] <= 'Z') || (name[i] >= '0' && name[i] <= '9') || name[i] == '_' || name[i] == '-'))
+			return false;
+	return true;
+}
+
+
 
 #ifdef CONFIG_MENU
 /// this is only false if there are still servers left to query
@@ -1997,6 +2018,200 @@ static void NetConn_ClientParsePacket_ServerList_ParseDPList(lhnetaddress_t *sen
 }
 #endif
 
+
+#ifdef CONFIG_MENU
+/*
+Client side of the map previews (see the server side above): requests are
+made for the server list rows in view, at most three at a time. The reply is
+only believed from the address that was asked, for the map that was asked,
+with the size and CRC it announced, and when it decodes as a small image.
+It is kept as mappreviews/<map>-<crc>.jpg in the user's game folder.
+*/
+#define CL_MAPPREVIEW_MAXREQUESTS 3
+#define CL_MAPPREVIEW_TIMEOUT 6.0
+
+typedef struct cl_mappreview_request_s
+{
+	int state; // 0 free, 1 waiting for the challenge, 2 waiting for the pieces
+	lhnetaddress_t address;
+	char map[64];
+	double expires;
+	unsigned int crc;
+	int count, size, received;
+	unsigned char got[MAPPREVIEW_MAXCHUNKS];
+	unsigned char *data; // MAPPREVIEW_MAXSIZE bytes when state is 2
+}
+cl_mappreview_request_t;
+
+static cl_mappreview_request_t cl_mappreview[CL_MAPPREVIEW_MAXREQUESTS];
+static char cl_mappreview_failed[64][64]; // maps that did not work out this session
+static int cl_mappreview_nfailed;
+
+static qboolean NetConn_MapPreviewFailed(const char *map)
+{
+	int i;
+	for (i = 0; i < cl_mappreview_nfailed; i++)
+		if (!strcmp(cl_mappreview_failed[i], map))
+			return true;
+	return false;
+}
+
+static void NetConn_MapPreviewEnd(cl_mappreview_request_t *r, qboolean failed)
+{
+	if (failed && cl_mappreview_nfailed < 64)
+		strlcpy(cl_mappreview_failed[cl_mappreview_nfailed++], r->map, sizeof(cl_mappreview_failed[0]));
+	if (r->data)
+		Mem_Free(r->data);
+	memset(r, 0, sizeof(*r));
+}
+
+// 1 when asked for (or already being asked), 0 when there is no room now
+// (try again later), -1 when it cannot work
+int NetConn_MapPreviewRequest(const char *cname, const char *map)
+{
+	int i, free_slot = -1;
+	lhnetaddress_t address;
+	lhnetsocket_t *sock = NULL;
+	if (!NetConn_MapPreviewName_OK(map) || NetConn_MapPreviewFailed(map) || !LHNETADDRESS_FromString(&address, cname, 26000))
+	{
+		Con_DPrintf("map preview of %s from %s: will not work\n", map, cname);
+		return -1;
+	}
+	// the socket of the kind of address the server has (IPv4 or IPv6)
+	sock = NetConn_ChooseClientSocketForAddress(&address);
+	if (!sock)
+		return 0;
+	for (i = 0; i < CL_MAPPREVIEW_MAXREQUESTS; i++)
+	{
+		if (cl_mappreview[i].state && !strcmp(cl_mappreview[i].map, map))
+			return 1; // any server with that map will do
+		if (!cl_mappreview[i].state && free_slot < 0)
+			free_slot = i;
+	}
+	if (free_slot < 0)
+		return 0;
+	memset(&cl_mappreview[free_slot], 0, sizeof(cl_mappreview[free_slot]));
+	cl_mappreview[free_slot].state = 1;
+	cl_mappreview[free_slot].address = address;
+	strlcpy(cl_mappreview[free_slot].map, map, sizeof(cl_mappreview[free_slot].map));
+	cl_mappreview[free_slot].expires = realtime + CL_MAPPREVIEW_TIMEOUT;
+	Con_DPrintf("map preview of %s: asking %s\n", map, cname);
+	NetConn_WriteString(sock, "\377\377\377\377getchallenge", &address);
+	return 1;
+}
+
+// the server's challenge: now ask for the picture
+static qboolean NetConn_MapPreviewChallenge(lhnetsocket_t *mysocket, lhnetaddress_t *peeraddress, const char *challenge)
+{
+	int i, n;
+	char buf[128];
+	for (i = 0; i < CL_MAPPREVIEW_MAXREQUESTS; i++)
+		if (cl_mappreview[i].state == 1 && !LHNETADDRESS_Compare(peeraddress, &cl_mappreview[i].address))
+			break;
+	if (i == CL_MAPPREVIEW_MAXREQUESTS)
+		return false;
+	// a challenge we need to connect is not ours to spend
+	if (cls.connect_trying && !LHNETADDRESS_Compare(peeraddress, &cls.connect_address))
+		return false;
+	for (n = 0; challenge[n] && challenge[n] != ' ' && n < 31; n++)
+		;
+	if (n < 1)
+		return false;
+	dpsnprintf(buf, sizeof(buf), "\377\377\377\377getmappreview %.*s %s", n, challenge, cl_mappreview[i].map);
+	Con_DPrintf("map preview of %s: got the challenge, asking for the picture\n", cl_mappreview[i].map);
+	NetConn_WriteString(mysocket, buf, peeraddress);
+	cl_mappreview[i].state = 2;
+	cl_mappreview[i].expires = realtime + CL_MAPPREVIEW_TIMEOUT;
+	return true;
+}
+
+// a piece of the picture; the packet is "mappreview <map> <crc> <index> <count> <size>\n<bytes>"
+static void NetConn_MapPreviewData(lhnetaddress_t *peeraddress, const char *packet, int length)
+{
+	int i, index, count, size, offset, len, headerlen;
+	unsigned int crc;
+	char map[64];
+	const char *nl = (const char *)memchr(packet, '\n', min(length, 160));
+	const char *p;
+	cl_mappreview_request_t *r;
+	if (!nl)
+		return;
+	headerlen = (int)(nl - packet) + 1;
+	// the numbers are read from a copy that ends at the line
+	{
+		char line[160];
+		memcpy(line, packet, headerlen - 1);
+		line[headerlen - 1] = 0;
+		p = line + 11;
+		if (sscanf(p, "%63s %u %d %d %d", map, &crc, &index, &count, &size) != 5)
+			return;
+	}
+	for (i = 0; i < CL_MAPPREVIEW_MAXREQUESTS; i++)
+		if (cl_mappreview[i].state == 2 && !LHNETADDRESS_Compare(peeraddress, &cl_mappreview[i].address) && !strcmp(cl_mappreview[i].map, map))
+			break;
+	if (i == CL_MAPPREVIEW_MAXREQUESTS)
+		return;
+	r = &cl_mappreview[i];
+	if (count < 1 || count > MAPPREVIEW_MAXCHUNKS || size < 1 || size > MAPPREVIEW_MAXSIZE * 2 || index < 0 || index >= count
+		|| count != (size + MAPPREVIEW_CHUNK - 1) / MAPPREVIEW_CHUNK)
+		goto bad;
+	if (!r->data)
+	{
+		r->data = (unsigned char *)Mem_Alloc(tempmempool, size);
+		r->count = count;
+		r->size = size;
+		r->crc = crc;
+	}
+	else if (r->count != count || r->size != size || r->crc != crc)
+		goto bad;
+	offset = index * MAPPREVIEW_CHUNK;
+	len = length - headerlen;
+	if (len != min(MAPPREVIEW_CHUNK, size - offset))
+		goto bad;
+	if (r->got[index])
+		return;
+	memcpy(r->data + offset, packet + headerlen, len);
+	r->got[index] = 1;
+	if (++r->received < r->count)
+		return;
+	// all of it: the CRC and a decode have to agree before it is kept
+	{
+		int w = 0, h = 0;
+		unsigned char *pixels;
+		char name[MAX_QPATH];
+		if (CRC_Block(r->data, r->size) != r->crc)
+			goto bad;
+		JPEG_OpenLibrary();
+		pixels = JPEG_LoadImage_BGRA(r->data, r->size, NULL);
+		if (!pixels)
+			goto bad;
+		w = image_width;
+		h = image_height;
+		Mem_Free(pixels);
+		if (w < 8 || h < 8 || w > 512 || h > 512)
+			goto bad;
+		dpsnprintf(name, sizeof(name), "mappreviews/%s-%u.jpg", r->map, r->crc);
+		FS_WriteFile(name, r->data, r->size);
+	}
+	Con_DPrintf("map preview of %s: kept\n", r->map);
+	NetConn_MapPreviewEnd(r, false);
+	return;
+bad:
+	Con_DPrintf("map preview of %s: the answer was not usable\n", r->map);
+	NetConn_MapPreviewEnd(r, true);
+}
+
+static void NetConn_MapPreviewFrame(void)
+{
+	int i;
+	for (i = 0; i < CL_MAPPREVIEW_MAXREQUESTS; i++)
+		if (cl_mappreview[i].state && realtime > cl_mappreview[i].expires)
+			NetConn_MapPreviewEnd(&cl_mappreview[i], true);
+}
+#else
+#define NetConn_MapPreviewFrame()
+#endif
+
 static int NetConn_ClientParsePacket(lhnetsocket_t *mysocket, unsigned char *data, int length, lhnetaddress_t *peeraddress)
 {
 	qboolean fromserver;
@@ -2061,6 +2276,15 @@ static int NetConn_ClientParsePacket(lhnetsocket_t *mysocket, unsigned char *dat
 				break;
 		}
 
+#ifdef CONFIG_MENU
+		if (length >= 11 && !memcmp(string, "challenge ", 10) && NetConn_MapPreviewChallenge(mysocket, peeraddress, string + 10))
+			return true;
+		if (length > 11 && !memcmp(string, "mappreview ", 11))
+		{
+			NetConn_MapPreviewData(peeraddress, string, length);
+			return true;
+		}
+#endif
 		if (length >= 10 && !memcmp(string, "challenge ", 10) && cls.rcon_trying)
 		{
 			int i = 0, j;
@@ -2217,6 +2441,7 @@ static int NetConn_ClientParsePacket(lhnetsocket_t *mysocket, unsigned char *dat
 			if ((s = InfoString_GetValue(string, "sv_maxclients", infostringvalue, sizeof(infostringvalue))) != NULL) info->maxplayers = atoi(s);
 			if ((s = InfoString_GetValue(string, "gameversion"  , infostringvalue, sizeof(infostringvalue))) != NULL) info->gameversion = atoi(s);
 			if ((s = InfoString_GetValue(string, "qcstatus"     , infostringvalue, sizeof(infostringvalue))) != NULL) strlcpy(info->qcstatus, s, sizeof(info->qcstatus));
+			info->mappreview = (s = InfoString_GetValue(string, "inspreview", infostringvalue, sizeof(infostringvalue))) != NULL && atoi(s) != 0;
 			if (p                                                                                         != NULL) strlcpy(info->players, p, sizeof(info->players));
 			info->numhumans = info->numplayers - max(0, info->numbots);
 			info->freeslots = info->maxplayers - info->numplayers;
@@ -2259,6 +2484,7 @@ static int NetConn_ClientParsePacket(lhnetsocket_t *mysocket, unsigned char *dat
 			if ((s = InfoString_GetValue(string, "sv_maxclients", infostringvalue, sizeof(infostringvalue))) != NULL) info->maxplayers = atoi(s);
 			if ((s = InfoString_GetValue(string, "gameversion"  , infostringvalue, sizeof(infostringvalue))) != NULL) info->gameversion = atoi(s);
 			if ((s = InfoString_GetValue(string, "qcstatus"     , infostringvalue, sizeof(infostringvalue))) != NULL) strlcpy(info->qcstatus, s, sizeof(info->qcstatus));
+			info->mappreview = (s = InfoString_GetValue(string, "inspreview", infostringvalue, sizeof(infostringvalue))) != NULL && atoi(s) != 0;
 			info->numhumans = info->numplayers - max(0, info->numbots);
 			info->freeslots = info->maxplayers - info->numplayers;
 
@@ -2665,6 +2891,7 @@ void NetConn_ClientFrame(void)
 	lhnetaddress_t peeraddress;
 	unsigned char readbuffer[NET_HEADERSIZE+NET_MAXMESSAGE];
 	NetConn_UpdateSockets();
+	NetConn_MapPreviewFrame();
 	if (cls.connect_trying && cls.connect_nextsendtime < realtime)
 	{
 #ifdef CONFIG_MENU
@@ -2740,6 +2967,88 @@ static void NetConn_BuildChallengeString(char *buffer, int bufferlength)
 	buffer[i] = 0;
 }
 
+
+/*
+================================================================================
+Map previews for the server list (Insanotic)
+
+A server that has a picture of its map says so in its infoResponse
+(\inspreview\1). A client that wants it asks "getchallenge" first, as it does
+to connect, and then "getmappreview <challenge> <map>": the challenge only
+comes back to the address that asked, so a forged sender address cannot make
+the server send pictures to somebody else. The server sends only the picture
+of its current map, as a small JPEG, in numbered pieces that each fit one
+packet:
+  mappreview <map> <crc> <index> <count> <size> \n <bytes>
+================================================================================
+*/
+static char sv_mappreview_map[MAX_QPATH]; // the map the cached picture below is of
+static unsigned char *sv_mappreview_data; // owned by the image compression cache
+static size_t sv_mappreview_size;
+static unsigned int sv_mappreview_crc;
+static char sv_mappreview_adv_map[MAX_QPATH];
+static qboolean sv_mappreview_adv;
+static server_floodaddress_t sv_mappreview_flood[16];
+
+// whether this map has a picture to send; remembered for the map
+static qboolean NetConn_ServerMapPreviewAvailable(void)
+{
+	char vabuf[MAX_QPATH];
+	if (!sv_mappreview.integer || !NetConn_MapPreviewName_OK(sv.worldbasename))
+		return false;
+	if (strcmp(sv_mappreview_adv_map, sv.worldbasename))
+	{
+		strlcpy(sv_mappreview_adv_map, sv.worldbasename, sizeof(sv_mappreview_adv_map));
+		sv_mappreview_adv = FS_FileExists(va(vabuf, sizeof(vabuf), "maps/%s.jpg", sv.worldbasename))
+			|| FS_FileExists(va(vabuf, sizeof(vabuf), "maps/%s.png", sv.worldbasename))
+			|| FS_FileExists(va(vabuf, sizeof(vabuf), "maps/%s.tga", sv.worldbasename));
+	}
+	return sv_mappreview_adv;
+}
+
+// the small JPEG of the current map, made once per map
+static qboolean NetConn_ServerMapPreviewLoad(void)
+{
+	char vabuf[MAX_QPATH];
+	void *buf = NULL;
+	size_t size = 0;
+	if (!NetConn_ServerMapPreviewAvailable())
+		return false;
+	if (!strcmp(sv_mappreview_map, sv.worldbasename))
+		return sv_mappreview_size > 0;
+	strlcpy(sv_mappreview_map, sv.worldbasename, sizeof(sv_mappreview_map));
+	sv_mappreview_data = NULL;
+	sv_mappreview_size = 0;
+	if (Image_Compress(va(vabuf, sizeof(vabuf), "maps/%s", sv.worldbasename), MAPPREVIEW_MAXSIZE, &buf, &size) && buf && size && size <= MAPPREVIEW_MAXSIZE)
+	{
+		sv_mappreview_data = (unsigned char *)buf;
+		sv_mappreview_size = size;
+		sv_mappreview_crc = CRC_Block(sv_mappreview_data, size);
+	}
+	return sv_mappreview_size > 0;
+}
+
+static void NetConn_ServerSendMapPreview(lhnetsocket_t *mysocket, lhnetaddress_t *peeraddress)
+{
+	unsigned char packet[1400];
+	size_t count, i, offset, len;
+	int header;
+	if (!NetConn_ServerMapPreviewLoad())
+		return;
+	count = (sv_mappreview_size + MAPPREVIEW_CHUNK - 1) / MAPPREVIEW_CHUNK;
+	for (i = 0; i < count; i++)
+	{
+		offset = i * MAPPREVIEW_CHUNK;
+		len = min((size_t)MAPPREVIEW_CHUNK, sv_mappreview_size - offset);
+		memcpy(packet, "\377\377\377\377", 4);
+		header = dpsnprintf((char *)packet + 4, sizeof(packet) - 4, "mappreview %s %u %d %d %d\n", sv.worldbasename, sv_mappreview_crc, (int)i, (int)count, (int)sv_mappreview_size);
+		if (header < 0 || (size_t)header + 4 + len > sizeof(packet))
+			return;
+		memcpy(packet + 4 + header, sv_mappreview_data + offset, len);
+		NetConn_Write(mysocket, packet, 4 + header + (int)len, peeraddress);
+	}
+}
+
 /// (div0) build the full response only if possible; better a getinfo response than no response at all if getstatus won't fit
 static qboolean NetConn_BuildStatusResponse(const char* challenge, char* out_msg, size_t out_size, qboolean fullstatus)
 {
@@ -2784,13 +3093,14 @@ static qboolean NetConn_BuildStatusResponse(const char* challenge, char* out_msg
 						"%s%s"
 						"%s%s"
 						"%s%s"
-						"%s",
+						"%s%s",
 						fullstatus ? "statusResponse" : "infoResponse",
 						gamenetworkfiltername, com_modname, gameversion.integer, svs.maxclients,
 						nb_clients, nb_bots, sv.worldbasename, hostname.string, NET_PROTOCOL_VERSION,
 						*qcstatus ? "\\qcstatus\\" : "", qcstatus,
 						challenge ? "\\challenge\\" : "", challenge ? challenge : "",
 						crypto_idstring ? "\\d0_blind_id\\" : "", crypto_idstring ? crypto_idstring : "",
+						NetConn_ServerMapPreviewAvailable() ? "\\inspreview\\1" : "",
 						fullstatus ? "\n" : "");
 
 	// Make sure it fits in the buffer
@@ -3454,6 +3764,28 @@ static int NetConn_ServerParsePacket(lhnetsocket_t *mysocket, unsigned char *dat
 					Con_DPrintf("Sending reply to master %s - %s\n", addressstring2, response);
 				NetConn_WriteString(mysocket, response, peeraddress);
 			}
+			return true;
+		}
+		if (length > 14 && !memcmp(string, "getmappreview ", 14) && sv_mappreview.integer && (islocal || sv_public.integer > -1))
+		{
+			char token[3][128];
+			int ntokens = 0;
+			const char *p = string + 14;
+			while (ntokens < 3 && COM_ParseToken_Console(&p))
+				strlcpy(token[ntokens++], com_token, sizeof(token[0]));
+			// one request a second from an address, and the challenge has to be
+			// the one this address was given (so it can be reached there)
+			if (ntokens != 2 || NetConn_PreventFlood(peeraddress, sv_mappreview_flood, sizeof(sv_mappreview_flood) / sizeof(sv_mappreview_flood[0]), 1.0, false))
+				return true;
+			for (i = 0;i < MAX_CHALLENGES;i++)
+				if (challenges[i].time > 0 && !LHNETADDRESS_Compare(peeraddress, &challenges[i].address) && !strcmp(challenges[i].string, token[0]))
+					break;
+			if (i == MAX_CHALLENGES)
+				return true;
+			// only the map that is running, whatever else is asked for
+			if (strcmp(token[1], sv.worldbasename))
+				return true;
+			NetConn_ServerSendMapPreview(mysocket, peeraddress);
 			return true;
 		}
 		if (length >= 9 && !memcmp(string, "getstatus", 9) && (islocal || sv_public.integer > -1))
@@ -4154,6 +4486,7 @@ void NetConn_Init(void)
 	Cvar_RegisterVariable(&net_address);
 	Cvar_RegisterVariable(&net_address_ipv6);
 	Cvar_RegisterVariable(&sv_public);
+	Cvar_RegisterVariable(&sv_mappreview);
 	Cvar_RegisterVariable(&sv_public_rejectreason);
 	Cvar_RegisterVariable(&sv_heartbeatperiod);
 	for (i = 0;sv_masters[i].name;i++)

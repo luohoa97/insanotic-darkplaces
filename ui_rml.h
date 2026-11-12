@@ -98,6 +98,7 @@ void UIE_CaptureKeys(int on);
 typedef struct UIE_Server {
 	char cname[128], name[128], map[32], type[32];
 	int ping, numplayers, numhumans, maxplayers, freeslots, isfavorite;
+	int mappreview; /* the server can send a picture of its map */
 } UIE_Server;
 int UIE_ServerList(UIE_Server *out, int max);
 /* what one server told besides the list columns; 0 when it is not in the list */
@@ -107,6 +108,8 @@ typedef struct UIE_ServerDetail {
 	int numbots, numhumans, maxplayers;
 } UIE_ServerDetail;
 int UIE_ServerDetail_Get(const char *cname, UIE_ServerDetail *out);
+/* ask a server for the picture of its map (see netconn.c): 1 asked, 0 no room now, -1 will not work */
+int UIE_MapPreviewRequest(const char *cname, const char *map);
 /* ask the master servers again (reset empties the list first) */
 void UIE_ServerRefresh(int reset);
 /* names of the files matching a pattern, for the campaign list; returns how many */

@@ -274,6 +274,7 @@ int UIE_ServerList(UIE_Server *out, int max)
 		o->maxplayers = e->info.maxplayers;
 		o->freeslots = e->info.freeslots;
 		o->isfavorite = e->info.isfavorite != 0;
+		o->mappreview = e->info.mappreview != 0;
 		n++;
 	}
 	return n;
@@ -297,6 +298,11 @@ int UIE_ServerDetail_Get(const char *cname, UIE_ServerDetail *out)
 		return 1;
 	}
 	return 0;
+}
+
+int UIE_MapPreviewRequest(const char *cname, const char *map)
+{
+	return NetConn_MapPreviewRequest(cname, map);
 }
 
 void UIE_ServerRefresh(int reset)
