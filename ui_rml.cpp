@@ -715,8 +715,22 @@ void UpdateBindings()
 		if (!kv.second.shown || kv.second.server)
 			continue;
 		Rml::ElementList list;
-		kv.second.doc->QuerySelectorAll(list, "[data-cvar]");
+		kv.second.doc->QuerySelectorAll(list, "[data-cvar], [data-cvar-image]");
 		for (Rml::Element* e : list) {
+			// data-cvar-image="name": the cvar holds the path of a picture the
+			// element shows as its background, covering it (empty: none)
+			if (e->HasAttribute("data-cvar-image")) {
+				Rml::String path = UIE_CvarString(e->GetAttribute<Rml::String>("data-cvar-image", "").c_str());
+				auto it = g->bound.find(e);
+				if (it != g->bound.end() && it->second == path)
+					continue;
+				g->bound[e] = path;
+				if (path.empty() || path.find_first_of("()\"'; ") != Rml::String::npos)
+					e->RemoveProperty("decorator");
+				else
+					e->SetProperty("decorator", "image(" + path + " cover center center)");
+				continue;
+			}
 			Rml::String value = UIE_CvarString(e->GetAttribute<Rml::String>("data-cvar", "").c_str());
 			auto it = g->bound.find(e);
 			if (it != g->bound.end() && it->second == value)
