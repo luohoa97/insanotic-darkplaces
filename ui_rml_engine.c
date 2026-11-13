@@ -40,6 +40,7 @@ static cvar_t menu_rml_active = {0, "_menu_rml_active", "0", "set by the engine:
 // Pages a server sends (see docs/MODDING.md). They are untrusted: they can
 // only talk back to the server, never run commands here.
 cvar_t cl_allow_server_pages = {CF_CLIENT | CF_ARCHIVE, "cl_allow_server_pages", "1", "1 lets a server open its own pages (RmlUi documents from its pk3) on this client; they can only answer the server, never run commands here"};
+cvar_t ui_reduce_motion = {CF_CLIENT | CF_ARCHIVE, "ui_reduce_motion", "0", "1 = menus appear and disappear without animation"};
 cvar_t cl_server_page_timeout = {CF_CLIENT | CF_ARCHIVE, "cl_server_page_timeout", "600", "seconds a page from a server stays open before it is closed; 0 = no limit"};
 
 static qbool ui_created;
@@ -702,6 +703,7 @@ void UI_RML_Init(void)
 	Cvar_RegisterVariable(&rml_scale);
 	Cvar_RegisterVariable(&cl_allow_server_pages);
 	Cvar_RegisterVariable(&cl_server_page_timeout);
+	Cvar_RegisterVariable(&ui_reduce_motion);
 	Cvar_RegisterVariable(&menu_overview);
 	Cvar_RegisterVariable(&menu_rml_active);
 	Cmd_AddCommand(CF_CLIENT, "rml_show", RML_Show_f, "show an RmlUi document: rml_show <name> loads ui/<name>.rml and draws it above the menu");
