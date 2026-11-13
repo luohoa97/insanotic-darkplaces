@@ -735,8 +735,22 @@ void UpdateBindings()
 		if (!kv.second.shown || kv.second.server)
 			continue;
 		Rml::ElementList list;
-		kv.second.doc->QuerySelectorAll(list, "[data-cvar]");
+		kv.second.doc->QuerySelectorAll(list, "[data-cvar], [data-cvar-image]");
 		for (Rml::Element* e : list) {
+			// data-cvar-image="name": the cvar holds the path of a picture the
+			// element shows as its background, covering it (empty: none)
+			if (e->HasAttribute("data-cvar-image")) {
+				Rml::String path = UIE_CvarString(e->GetAttribute<Rml::String>("data-cvar-image", "").c_str());
+				auto it = g->bound.find(e);
+				if (it != g->bound.end() && it->second == path)
+					continue;
+				g->bound[e] = path;
+				if (path.empty() || path.find_first_of("()\"'; ") != Rml::String::npos)
+					e->RemoveProperty("decorator");
+				else
+					e->SetProperty("decorator", "image(" + path + " cover center center)");
+				continue;
+			}
 			Rml::String value = UIE_CvarString(e->GetAttribute<Rml::String>("data-cvar", "").c_str());
 			auto it = g->bound.find(e);
 			if (it != g->bound.end() && it->second == value)
@@ -775,12 +789,21 @@ void CloseDocument(const std::string& name)
 	if (!d.doc || !d.server) {
 		if (d.doc && d.shown) {
 			if (name == "mainmenu") {
+				d.doc->SetClass("open", false);
 				d.doc->Hide();
 				d.shown = false;
 			} else if (!d.closing_until) {
-				// fade out first (the stylesheet animates body.closing)
-				d.doc->SetClass("closing", true);
-				d.closing_until = UIE_Time() + 0.16;
+				// short exit first (the stylesheet animates body.closing). The
+				// "open" class goes, so showing the page again plays the
+				// entrance again. With reduced motion there is no exit at all.
+				if (atoi(UIE_CvarString("ui_reduce_motion"))) {
+					d.doc->Hide();
+					d.doc->SetClass("open", false);
+					d.shown = false;
+				} else {
+					d.doc->SetClass("closing", true);
+					d.closing_until = UIE_Time() + 0.12;
+				}
 			}
 		}
 	} else {
@@ -898,6 +921,10 @@ int UIRml_Show(const char* name)
 		d.doc->SetClass("closing", false);
 	}
 	if (!d.shown) {
+		// "open" starts the entrance animation of the page (every time, not
+		// only the first); "reduce-motion" turns all of them off
+		d.doc->SetClass("reduce-motion", atoi(UIE_CvarString("ui_reduce_motion")) != 0);
+		d.doc->SetClass("open", true);
 		d.doc->Show();
 		d.shown = true;
 	}
@@ -1024,6 +1051,8 @@ const char* UIRml_ShowServer(const char* path)
 		return "the page asks for data of the game";
 	}
 	PrepareDocument(d);
+	d.doc->SetClass("reduce-motion", atoi(UIE_CvarString("ui_reduce_motion")) != 0);
+	d.doc->SetClass("open", true);
 	d.doc->Show();
 	d.shown = true;
 	d.shown_at = UIE_Time();
@@ -1089,8 +1118,10 @@ void UIRml_Reload(void)
 			continue;
 		}
 		PrepareDocument(d);
-		if (d.shown)
+		if (d.shown) {
+			d.doc->SetClass("open", true);
 			d.doc->Show();
+		}
 	}
 }
 
@@ -1429,6 +1460,7 @@ void UIRml_Frame(void)
 			d.closing_until = 0;
 			d.doc->Hide();
 			d.doc->SetClass("closing", false);
+			d.doc->SetClass("open", false);
 			d.shown = false;
 		}
 	}

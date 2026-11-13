@@ -1946,6 +1946,31 @@ Draws the console with the solid background
 The typing input line at the bottom should only be drawn if typing is allowed
 ================
 */
+/*
+Insanotic: the on-screen close button of the console, in console units: a
+square in the top right corner, as big as a fingertip.
+*/
+void Con_TouchCloseRect(float *x, float *y, float *w, float *h)
+{
+	float size = max(48.0f, con_textsize.value * 3.0f);
+	*w = *h = size;
+	*x = vid_conwidth.value - size;
+	*y = 0;
+}
+
+// is the pointer (the finger that just touched down) on that button?
+qboolean Con_TouchCloseHit(void)
+{
+	float bx, by, bw, bh, px, py;
+
+	if (!vid_touchscreen.integer || !vid.mode.width || !vid.mode.height)
+		return false;
+	Con_TouchCloseRect(&bx, &by, &bw, &bh);
+	px = in_windowmouse_x * vid_conwidth.value / vid.mode.width;
+	py = in_windowmouse_y * vid_conheight.value / vid.mode.height;
+	return px >= bx && px < bx + bw && py >= by && py < by + bh;
+}
+
 void Con_DrawConsole (int lines)
 {
 	float alpha, alpha0;
@@ -2063,6 +2088,15 @@ void Con_DrawConsole (int lines)
 
 // draw the input prompt, user text, and cursor if desired
 	Con_DrawInput ();
+
+	// Insanotic: a phone has no Escape key, so the console gets a button
+	if (vid_touchscreen.integer)
+	{
+		float bx, by, bw, bh;
+		Con_TouchCloseRect(&bx, &by, &bw, &bh);
+		DrawQ_Fill(bx, by, bw, bh, 0.69f, 0.19f, 0.19f, 0.9f, 0);
+		DrawQ_String(bx + bw * 0.5f - bh * 0.25f, by + bh * 0.25f, "X", 0, bh * 0.5f, bh * 0.5f, 1, 1, 1, 1, 0, NULL, true, FONT_DEFAULT);
+	}
 
 	r_draw2d_force = false;
 	if (con_mutex) Thread_UnlockMutex(con_mutex);

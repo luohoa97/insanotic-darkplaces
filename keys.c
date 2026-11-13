@@ -1812,6 +1812,23 @@ Key_Event (int key, int ascii, qboolean down)
 	if(keydest == key_void)
 		return;
 
+	// Insanotic: the console's on-screen close button (a phone has no Escape
+	// key and the back gesture is not a button). Its release goes nowhere.
+	if (keydest == key_console && key == K_MOUSE1 && down && keydown[key] == 1 && Con_TouchCloseHit())
+	{
+		tbl_keydest[key] = key_void;
+		if (key_consoleactive & KEY_CONSOLEACTIVE_FORCED)
+		{
+			key_consoleactive &= ~KEY_CONSOLEACTIVE_USER;
+#ifdef CONFIG_MENU
+			MR_ToggleMenu(1);
+#endif
+		}
+		else
+			Con_ToggleConsole_f();
+		return;
+	}
+
 	// Insanotic: a document shown with rml_show takes every key and mouse
 	// event, except while the console is up
 #ifdef CONFIG_MENU

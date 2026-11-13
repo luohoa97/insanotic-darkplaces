@@ -41,6 +41,7 @@ static cvar_t menu_rml_active = {0, "_menu_rml_active", "0", "set by the engine:
 // only talk back to the server, never run commands here.
 cvar_t cl_allow_server_pages = {CVAR_SAVE, "cl_allow_server_pages", "1", "1 lets a server open its own pages (RmlUi documents from its pk3) on this client; they can only answer the server, never run commands here"};
 cvar_t cl_server_page_timeout = {CVAR_SAVE, "cl_server_page_timeout", "600", "seconds a page from a server stays open before it is closed; 0 = no limit"};
+cvar_t ui_reduce_motion = {CVAR_SAVE, "ui_reduce_motion", "0", "1 = menus appear and disappear without animation"};
 
 static qboolean ui_created;
 static qboolean ui_mainmenu_failed;
@@ -56,6 +57,7 @@ static int ui_num_remembered;
 static unsigned char ui_routed[MAX_KEYS];
 
 static float ui_mouse_sent[2] = {-1, -1};
+static qboolean ui_modal_was; // a document from rml_show was up on the last frame
 
 /*
 ================================================================================
@@ -365,15 +367,38 @@ Life cycle
 ================================================================================
 */
 
+/*
+Sizes follow the device, not the last input. vid_touchscreen is an input mode:
+a mouse event (a hover, a pen, a Bluetooth mouse, a synthetic event while the
+game loads) clears it and the next finger sets it again, so a dp ratio derived
+from it made the whole UI jump in size on the first tap. A phone or tablet
+(DP_MOBILETOUCH) is a touch device for good; anything else is not, unless it
+started in touch mode (+vid_touchscreen 1 on the command line).
+*/
+static qboolean UI_RML_TouchDevice(void)
+{
+	static int latched = -1;
+
+	if (latched < 0)
+	{
+#ifdef DP_MOBILETOUCH
+		latched = 1;
+#else
+		latched = vid_touchscreen.integer != 0;
+#endif
+	}
+	return latched != 0;
+}
+
 static float UI_RML_DPRatio(void)
 {
 	if (rml_scale.value > 0)
 		return rml_scale.value;
-	// 720 dp on the short side on a monitor; touch screens are held close and used
+	// 720 dp on the short side on a monitor; touch devices are held close and used
 	// with a finger, so they get fewer, bigger dps (a phone in landscape
 	// ends up about 450 dp high). The short side counts, so a phone held
 	// upright is about 450 dp wide instead of 210.
-	return (float)(vid.height < vid.width ? vid.height : vid.width) / (vid_touchscreen.integer ? 450.0f : 720.0f);
+	return (float)(vid.height < vid.width ? vid.height : vid.width) / (UI_RML_TouchDevice() ? 450.0f : 720.0f);
 }
 
 static void UI_RML_Create(void)
@@ -702,6 +727,7 @@ void UI_RML_Init(void)
 	Cvar_RegisterVariable(&rml_scale);
 	Cvar_RegisterVariable(&cl_allow_server_pages);
 	Cvar_RegisterVariable(&cl_server_page_timeout);
+	Cvar_RegisterVariable(&ui_reduce_motion);
 	Cvar_RegisterVariable(&menu_overview);
 	Cvar_RegisterVariable(&menu_rml_active);
 	Cmd_AddCommand("rml_show", RML_Show_f, "show an RmlUi document: rml_show <name> loads ui/<name>.rml and draws it above the menu");
@@ -834,6 +860,19 @@ void UI_RML_Draw(void)
 		else
 			UIRml_Hide(MAINMENU);
 	}
+	// Hand the game back. The in-game menu (gamemenu, teamselect) is a document
+	// shown over key_menu; closing it with Resume, Escape, the close button or
+	// a tap outside, only hid the document and left the game stuck in the menu
+	// with nothing drawn. When the last one is gone and neither the main menu
+	// nor the old menu has taken over, close the menu as well.
+	{
+		qboolean modal_now = UIRml_AnyShownExcept(MAINMENU) != 0;
+		if (ui_modal_was && !modal_now && !UI_RML_MainMenuShown() && cls.state == ca_connected
+			&& (key_dest == key_menu || key_dest == key_menu_grabbed)
+			&& Cvar_VariableValue("_menu_overview") == 0)
+			Cbuf_AddText("\ntogglemenu 0\n");
+		ui_modal_was = modal_now;
+	}
 	if (!UI_RML_MainMenuShown() && !UIRml_AnyShownExcept(MAINMENU))
 		return;
 
@@ -842,6 +881,7 @@ void UI_RML_Draw(void)
 	UIRml_SetBodyClass(MAINMENU, "touch", vid_touchscreen.integer != 0);
 	UIRml_SetBodyClass(MAINMENU, "ingame", cls.state == ca_connected);
 	// state the in-game menu's stylesheet reacts to: which words and buttons it shows
+	UIRml_SetBodyClass("welcome", "demo", cls.demoplayback != 0);
 	UIRml_SetBodyClass("settings", "ingame", cls.state == ca_connected);
 	UIRml_SetBodyClass("gamemenu", "demo", cls.demoplayback != 0);
 	UIRml_SetBodyClass("gamemenu", "campaign", Cvar_VariableValue("g_campaign") != 0);
