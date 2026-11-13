@@ -842,6 +842,7 @@ void UI_RML_Draw(void)
 	UIRml_SetBodyClass(MAINMENU, "touch", vid_touchscreen.integer != 0);
 	UIRml_SetBodyClass(MAINMENU, "ingame", cls.state == ca_connected);
 	// state the in-game menu's stylesheet reacts to: which words and buttons it shows
+	UIRml_SetBodyClass("settings", "ingame", cls.state == ca_connected);
 	UIRml_SetBodyClass("gamemenu", "demo", cls.demoplayback != 0);
 	UIRml_SetBodyClass("gamemenu", "campaign", Cvar_VariableValue("g_campaign") != 0);
 	UIRml_SetBodyClass("gamemenu", "solo", sv.active && !strcmp(Cvar_VariableString("net_address"), "127.0.0.1"));
