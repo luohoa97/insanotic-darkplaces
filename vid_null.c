@@ -26,6 +26,11 @@ int cl_available = false;
 
 qboolean vid_supportrefreshrate = false;
 
+// Insanotic: no keyboard to restart on the dedicated server (console.c calls this)
+void VID_RestartKeyboard(void)
+{
+}
+
 void VID_Shutdown(void)
 {
 }
