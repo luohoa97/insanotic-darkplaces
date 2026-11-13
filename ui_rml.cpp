@@ -740,6 +740,9 @@ void CloseDocument(const std::string& name)
 	if (it == g->documents.end())
 		return;
 	Document& d = it->second;
+	// a slider being dragged in this page must not be left pointing into it
+	if (g->slider_drag && d.doc && g->slider_drag->GetOwnerDocument() == d.doc)
+		g->slider_drag = nullptr;
 	if (!d.doc || !d.server) {
 		if (d.doc && d.shown) {
 			d.doc->Hide();
