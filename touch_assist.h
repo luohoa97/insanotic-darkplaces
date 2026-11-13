@@ -10,7 +10,8 @@
 #define TOUCH_ASSIST_AUTOSHOOT  2 // auto-shoot
 #define TOUCH_ASSIST_AUTOSWITCH 4 // automatic weapon switching
 #define TOUCH_ASSIST_MOVE       8 // auto dodge, ledge guard, hook fall rescue
-#define TOUCH_ASSIST_ALL        15
+#define TOUCH_ASSIST_WALK       16 // auto walk (cl_touch_autowalk)
+#define TOUCH_ASSIST_ALL        31
 
 // Client: once a frame, forget the last server's word once disconnected.
 void TouchAssist_Frame(void);

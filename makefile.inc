@@ -128,6 +128,7 @@ OBJ_COMMON= \
 	touch_turn.o \
 	touch_tactics.o \
 	touch_wepquery.o \
+	touch_autowalk.o \
 	crypto.o \
 	cl_collision.o \
 	cl_demo.o \
