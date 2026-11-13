@@ -26,12 +26,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "dpsoftrast.h"
 #include "utf8lib.h"
 
-#ifndef __IPHONEOS__
-#ifdef MACOSX
-#include <Carbon/Carbon.h>
-#include <IOKit/hidsystem/IOHIDLib.h>
-#include <IOKit/hidsystem/IOHIDParameter.h>
-#include <IOKit/hidsystem/event_status_driver.h>
 #ifdef __ANDROID__
 #include <dlfcn.h>
 // Insanotic: render through ANGLE (GLES on Vulkan) instead of the phone's own
@@ -42,6 +36,13 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 static cvar_t vid_android_angle = {CVAR_SAVE, "vid_android_angle", "0", "Android: use the bundled ANGLE (GLES over Vulkan) instead of the native GLES driver; takes effect on the next app start"};
 static const char *vid_angle_state = "native";
 #endif
+
+#ifndef __IPHONEOS__
+#ifdef MACOSX
+#include <Carbon/Carbon.h>
+#include <IOKit/hidsystem/IOHIDLib.h>
+#include <IOKit/hidsystem/IOHIDParameter.h>
+#include <IOKit/hidsystem/event_status_driver.h>
 static cvar_t apple_mouse_noaccel = {CVAR_SAVE, "apple_mouse_noaccel", "1", "disables mouse acceleration while DarkPlaces is active"};
 static qboolean vid_usingnoaccel;
 static double originalMouseSpeed = -1.0;
