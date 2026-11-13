@@ -24,35 +24,9 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 int cl_available = false;
 
-qboolean vid_supportrefreshrate = false;
+qbool vid_supportrefreshrate = false;
 
 void VID_Shutdown(void)
-{
-}
-
-static void signal_handler(int sig)
-{
-	Con_Printf("Received signal %d, exiting...\n", sig);
-	Sys_Quit(1);
-}
-
-static void InitSig(void)
-{
-#ifndef WIN32
-	signal(SIGHUP, signal_handler);
-	signal(SIGINT, signal_handler);
-	signal(SIGQUIT, signal_handler);
-	signal(SIGILL, signal_handler);
-	signal(SIGTRAP, signal_handler);
-	signal(SIGIOT, signal_handler);
-	signal(SIGBUS, signal_handler);
-	signal(SIGFPE, signal_handler);
-	signal(SIGSEGV, signal_handler);
-	signal(SIGTERM, signal_handler);
-#endif
-}
-
-void VID_SetMouse (qboolean fullscreengrab, qboolean relative, qboolean hidecursor)
 {
 }
 
@@ -62,10 +36,9 @@ void VID_Finish (void)
 
 void VID_Init(void)
 {
-	InitSig(); // trap evil signals
 }
 
-qboolean VID_InitMode(viddef_mode_t *mode)
+qbool VID_InitMode(const viddef_mode_t *mode)
 {
 	return false;
 }
@@ -75,7 +48,7 @@ void *GL_GetProcAddress(const char *name)
 	return NULL;
 }
 
-void Sys_SendKeyEvents(void)
+void Sys_SDL_HandleEvents(void)
 {
 }
 
@@ -87,14 +60,14 @@ void IN_Move(void)
 {
 }
 
-vid_mode_t *VID_GetDesktopMode(void)
-{
-	return NULL;
-}
-
 size_t VID_ListModes(vid_mode_t *modes, size_t maxcount)
 {
 	return 0;
+}
+
+qbool GL_ExtensionSupported(const char *name)
+{
+	return false;
 }
 
 int VID_GetTouches(vid_touch_t *out, int max)

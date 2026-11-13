@@ -25,5 +25,7 @@ extern cvar_t developer_loadtimes;
 void LoadTimes_Report(void);
 void Host_PreloadRecordStart(void);
 void Host_PreloadGameReady(void);
+void Host_PreloadMaybeStart(void);
+void Host_PreloadFrame(void);
 
 #endif

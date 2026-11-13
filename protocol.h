@@ -22,13 +22,37 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #ifndef PROTOCOL_H
 #define PROTOCOL_H
 
-// protocolversion_t is defined in common.h
+#include <stddef.h>
+#include "qtypes.h"
+#include "qdefs.h"
+#include "qstats.h"
+struct mempool_s;
+struct sizebuf_s;
 
-protocolversion_t Protocol_EnumForName(const char *s);
-const char *Protocol_NameForEnum(protocolversion_t p);
-protocolversion_t Protocol_EnumForNumber(int n);
-int Protocol_NumberForEnum(protocolversion_t p);
+// protocolversion_t is defined in common.h
+enum protocolversion_e Protocol_EnumForName(const char *s);
+const char *Protocol_NameForEnum(enum protocolversion_e p);
+enum protocolversion_e Protocol_EnumForNumber(int n);
+int Protocol_NumberForEnum(enum protocolversion_e p);
 void Protocol_Names(char *buffer, size_t buffersize);
+
+#define ENTITYSIZEPROFILING_START(msg, num, flags) \
+	int entityprofiling_startsize = msg->cursize
+
+#define ENTITYSIZEPROFILING_END(msg, num, flags) \
+	if(developer_networkentities.integer >= 2) \
+	{ \
+		prvm_edict_t *edict = prog->edicts + num; \
+		Con_Printf("sent entity update of size %u for %d classname %s flags %d\n", (msg->cursize - entityprofiling_startsize), num, PRVM_serveredictstring(edict, classname) ? PRVM_GetString(prog, PRVM_serveredictstring(edict, classname)) : "(no classname)", flags); \
+	}
+
+// CSQC entity scope values. Bitflags!
+#define SCOPE_WANTREMOVE 1        // Set if a remove has been scheduled. Never set together with WANTUPDATE.
+#define SCOPE_WANTUPDATE 2        // Set if an update has been scheduled.
+#define SCOPE_WANTSEND (SCOPE_WANTREMOVE | SCOPE_WANTUPDATE)
+#define SCOPE_EXISTED_ONCE 4      // Set if the entity once existed. All these get resent on a full loss.
+#define SCOPE_ASSUMED_EXISTING 8  // Set if the entity is currently assumed existing and therefore needs removes.
+
 
 // model effects
 #define	MF_ROCKET	1			// leave a trail
@@ -49,21 +73,21 @@ void Protocol_Names(char *buffer, size_t buffersize);
 #define EF_ADDITIVE				32
 #define EF_BLUE					64
 #define EF_RED					128
-#define EF_NOGUNBOB				256			// LordHavoc: when used with .viewmodelforclient this makes the entity attach to the view without gun bobbing and such effects, it also works on the player entity to disable gun bobbing of the engine-managed .viewmodel (without affecting any .viewmodelforclient entities attached to the player)
-#define EF_FULLBRIGHT			512			// LordHavoc: fullbright
-#define EF_FLAME				1024		// LordHavoc: on fire
-#define EF_STARDUST				2048		// LordHavoc: showering sparks
-#define EF_NOSHADOW				4096		// LordHavoc: does not cast a shadow
-#define EF_NODEPTHTEST			8192		// LordHavoc: shows through walls
-#define EF_SELECTABLE			16384		// LordHavoc: highlights when PRYDON_CLIENTCURSOR mouse is over it
+#define EF_NOGUNBOB				256			// LadyHavoc: when used with .viewmodelforclient this makes the entity attach to the view without gun bobbing and such effects, it also works on the player entity to disable gun bobbing of the engine-managed .viewmodel (without affecting any .viewmodelforclient entities attached to the player)
+#define EF_FULLBRIGHT			512			// LadyHavoc: fullbright
+#define EF_FLAME				1024		// LadyHavoc: on fire
+#define EF_STARDUST				2048		// LadyHavoc: showering sparks
+#define EF_NOSHADOW				4096		// LadyHavoc: does not cast a shadow
+#define EF_NODEPTHTEST			8192		// LadyHavoc: shows through walls
+#define EF_SELECTABLE			16384		// LadyHavoc: highlights when PRYDON_CLIENTCURSOR mouse is over it
 #define EF_DOUBLESIDED			32768		//[515]: disable cull face for this entity
-#define EF_NOSELFSHADOW			65536		// LordHavoc: does not cast a shadow on itself (or any other EF_NOSELFSHADOW entities)
+#define EF_NOSELFSHADOW			65536		// LadyHavoc: does not cast a shadow on itself (or any other EF_NOSELFSHADOW entities)
 #define EF_DYNAMICMODELLIGHT			131072
 #define EF_UNUSED18				262144
 #define EF_UNUSED19				524288
 #define EF_RESTARTANIM_BIT		1048576     // div0: restart animation bit (like teleport bit, but lerps between end and start of the anim, and doesn't stop player lerping)
 #define EF_TELEPORT_BIT			2097152		// div0: teleport bit (toggled when teleporting, prevents lerping when the bit has changed)
-#define EF_LOWPRECISION			4194304		// LordHavoc: entity is low precision (integer coordinates) to save network bandwidth  (serverside only)
+#define EF_LOWPRECISION			4194304		// LadyHavoc: entity is low precision (integer coordinates) to save network bandwidth  (serverside only)
 #define EF_NOMODELFLAGS			8388608		// indicates the model's .effects should be ignored (allows overriding them)
 #define EF_ROCKET				16777216	// leave a trail
 #define EF_GRENADE				33554432	// leave a trail
@@ -84,80 +108,82 @@ void Protocol_Names(char *buffer, size_t buffersize);
 #define PFLAGS_FULLDYNAMIC		128 // must be set or the light fields are ignored
 
 // if the high bit of the servercmd is set, the low bits are fast update flags:
-#define U_MOREBITS		(1<<0)
-#define U_ORIGIN1		(1<<1)
-#define U_ORIGIN2		(1<<2)
-#define U_ORIGIN3		(1<<3)
-#define U_ANGLE2		(1<<4)
-// LordHavoc: U_NOLERP was only ever used for monsters, so I renamed it U_STEP
-#define U_STEP			(1<<5)
-#define U_FRAME			(1<<6)
-// just differentiates from other updates
-#define U_SIGNAL		(1<<7)
+#define U_MOREBITS       (1u<<0)
+#define U_ORIGIN1        (1u<<1)
+#define U_ORIGIN2        (1u<<2)
+#define U_ORIGIN3        (1u<<3)
+#define U_ANGLE2         (1u<<4)
+// LadyHavoc: U_NOLERP was uonly ever used for monsters, so I renamed it U_STEP
+#define U_STEP           (1u<<5)
+#define U_FRAME          (1u<<6)
+// just differentiates fromu other updates
+#define U_SIGNAL         (1u<<7)
 
-#define U_ANGLE1		(1<<8)
-#define U_ANGLE3		(1<<9)
-#define U_MODEL			(1<<10)
-#define U_COLORMAP		(1<<11)
-#define U_SKIN			(1<<12)
-#define U_EFFECTS		(1<<13)
-#define U_LONGENTITY	(1<<14)
+#define U_ANGLE1         (1u<<8)
+#define U_ANGLE3         (1u<<9)
+#define U_MODEL          (1u<<10)
+#define U_COLORMAP       (1u<<11)
+#define U_SKIN           (1u<<12)
+#define U_EFFECTS        (1u<<13)
+#define U_LONGENTITY     (1u<<14)
 
-// LordHavoc: protocol extension
-#define U_EXTEND1		(1<<15)
-// LordHavoc: first extend byte
-#define U_DELTA			(1<<16) // no data, while this is set the entity is delta compressed (uses previous frame as a baseline, meaning only things that have changed from the previous frame are sent, except for the forced full update every half second)
-#define U_ALPHA			(1<<17) // 1 byte, 0.0-1.0 maps to 0-255, not sent if exactly 1, and the entity is not sent if <=0 unless it has effects (model effects are checked as well)
-#define U_SCALE			(1<<18) // 1 byte, scale / 16 positive, not sent if 1.0
-#define U_EFFECTS2		(1<<19) // 1 byte, this is .effects & 0xFF00 (second byte)
-#define U_GLOWSIZE		(1<<20) // 1 byte, encoding is float/4.0, unsigned, not sent if 0
-#define U_GLOWCOLOR		(1<<21) // 1 byte, palette index, default is 254 (white), this IS used for darklight (allowing colored darklight), however the particles from a darklight are always black, not sent if default value (even if glowsize or glowtrail is set)
-#define U_COLORMOD		(1<<22) // 1 byte, 3 bit red, 3 bit green, 2 bit blue, this lets you tint an object artifically, so you could make a red rocket, or a blue fiend...
-#define U_EXTEND2		(1<<23) // another byte to follow
-// LordHavoc: second extend byte
-#define U_GLOWTRAIL		(1<<24) // leaves a trail of particles (of color .glowcolor, or black if it is a negative glowsize)
-#define U_VIEWMODEL		(1<<25) // attachs the model to the view (origin and angles become relative to it), only shown to owner, a more powerful alternative to .weaponmodel and such
-#define U_FRAME2		(1<<26) // 1 byte, this is .frame & 0xFF00 (second byte)
-#define U_MODEL2		(1<<27) // 1 byte, this is .modelindex & 0xFF00 (second byte)
-#define U_EXTERIORMODEL	(1<<28) // causes this model to not be drawn when using a first person view (third person will draw it, first person will not)
-#define U_UNUSED29		(1<<29) // future expansion
-#define U_UNUSED30		(1<<30) // future expansion
-#define U_EXTEND3		(1<<31) // another byte to follow, future expansion
+// LadyHavoc: protocol extension
+#define U_EXTEND1        (1u<<15)
+// LadyHavoc: first extend byte
+#define U_DELTA          (1u<<16) ///< no data, while this is set the entity is delta compressed (uses previous frame as a baseline, meaning only things that have changed from the previous frame are sent, except for the forced full update every half second)
+#define U_ALPHA          (1u<<17) ///< 1 byte, 0.0-1.0 maps to 0-255, not sent if exactly 1, and the entity is not sent if <=0 unless it has effects (model effects are checked as well)
+#define U_SCALE          (1u<<18) ///< 1 byte, scale / 16 positive, not sent if 1.0
+#define U_EFFECTS2       (1u<<19) ///< 1 byte, this is .effects & 0xFF00 (second byte)
+#define U_GLOWSIZE       (1u<<20) ///< 1 byte, encoding is float/4.0, unsigned, not sent if 0
+#define U_GLOWCOLOR      (1u<<21) ///< 1 byte, palette index, default is 254 (white), this IS used for darklight (allowing colored darklight), however the particles from a darklight are always black, not sent if default value (even if glowsize or glowtrail is set)
+#define U_COLORMOD       (1u<<22) ///< 1 byte, 3 bit red, 3 bit green, 2 bit blue, this lets you tint an object artifically, so you could make a red rocket, or a blue fiend...
+#define U_EXTEND2        (1u<<23) ///< another byte to follow
+// LadyHavoc: second extend byte
+#define U_GLOWTRAIL      (1u<<24) ///< leaves a trail of particles (of color .glowcolor, or black if it is a negative glowsize)
+#define U_VIEWMODEL      (1u<<25) ///< attachs the model to the view (origin and angles become relative to it), only shown to owner, a more powerful alternative to .weaponmodel and such
+#define U_FRAME2         (1u<<26) ///< 1 byte, this is .frame & 0xFF00 (second byte)
+#define U_MODEL2         (1u<<27) ///< 1 byte, this is .modelindex & 0xFF00 (second byte)
+#define U_EXTERIORMODEL  (1u<<28) ///< causes this model to not be drawn when using a first person view (third person will draw it, first person will not)
+#define U_UNUSED29       (1u<<29) ///< future expansion
+#define U_UNUSED30       (1u<<30) ///< future expansion
+#define U_EXTEND3        (1u<<31) ///< another byte to follow, future expansion
+// UBSan: unsigned literals because left shifting by 31 causes signed overflow, although it works as expected on x86.
 
-#define	SU_VIEWHEIGHT	(1<<0)
-#define	SU_IDEALPITCH	(1<<1)
-#define	SU_PUNCH1		(1<<2)
-#define	SU_PUNCH2		(1<<3)
-#define	SU_PUNCH3		(1<<4)
-#define	SU_VELOCITY1	(1<<5)
-#define	SU_VELOCITY2	(1<<6)
-#define	SU_VELOCITY3	(1<<7)
-//define	SU_AIMENT		(1<<8)  AVAILABLE BIT
-#define	SU_ITEMS		(1<<9)
-#define	SU_ONGROUND		(1<<10)		// no data follows, the bit is it
-#define	SU_INWATER		(1<<11)		// no data follows, the bit is it
-#define	SU_WEAPONFRAME	(1<<12)
-#define	SU_ARMOR		(1<<13)
-#define	SU_WEAPON		(1<<14)
-#define SU_EXTEND1		(1<<15)
+#define SU_VIEWHEIGHT    (1u<<0)
+#define SU_IDEALPITCH    (1u<<1)
+#define SU_PUNCH1        (1u<<2)
+#define SU_PUNCH2        (1u<<3)
+#define SU_PUNCH3        (1u<<4)
+#define SU_VELOCITY1     (1u<<5)
+#define SU_VELOCITY2     (1u<<6)
+#define SU_VELOCITY3     (1u<<7)
+//#define SU_AIMENT        (1u<<8)  AVAILABLE BIT
+#define SU_ITEMS         (1u<<9)
+#define SU_ONGROUND      (1u<<10) ///< no data follows, the bit is it
+#define SU_INWATER       (1u<<11) ///< no data follows, the bit is it
+#define SU_WEAPONFRAME   (1u<<12)
+#define SU_ARMOR         (1u<<13)
+#define SU_WEAPON        (1u<<14)
+#define SU_EXTEND1       (1u<<15)
 // first extend byte
-#define SU_PUNCHVEC1	(1<<16)
-#define SU_PUNCHVEC2	(1<<17)
-#define SU_PUNCHVEC3	(1<<18)
-#define SU_VIEWZOOM		(1<<19) // byte factor (0 = 0.0 (not valid), 255 = 1.0)
-#define SU_UNUSED20		(1<<20)
-#define SU_UNUSED21		(1<<21)
-#define SU_UNUSED22		(1<<22)
-#define SU_EXTEND2		(1<<23) // another byte to follow, future expansion
+#define SU_PUNCHVEC1     (1u<<16)
+#define SU_PUNCHVEC2     (1u<<17)
+#define SU_PUNCHVEC3     (1u<<18)
+#define SU_VIEWZOOM      (1u<<19) ///< byte factor (0 = 0.0 (not valid), 255 = 1.0)
+#define SU_UNUSED20      (1u<<20)
+#define SU_UNUSED21      (1u<<21)
+#define SU_UNUSED22      (1u<<22)
+#define SU_EXTEND2       (1u<<23) ///< another byte to follow, future expansion
 // second extend byte
-#define SU_UNUSED24		(1<<24)
-#define SU_UNUSED25		(1<<25)
-#define SU_UNUSED26		(1<<26)
-#define SU_UNUSED27		(1<<27)
-#define SU_UNUSED28		(1<<28)
-#define SU_UNUSED29		(1<<29)
-#define SU_UNUSED30		(1<<30)
-#define SU_EXTEND3		(1<<31) // another byte to follow, future expansion
+#define SU_UNUSED24      (1u<<24)
+#define SU_UNUSED25      (1u<<25)
+#define SU_UNUSED26      (1u<<26)
+#define SU_UNUSED27      (1u<<27)
+#define SU_UNUSED28      (1u<<28)
+#define SU_UNUSED29      (1u<<29)
+#define SU_UNUSED30      (1u<<30)
+#define SU_EXTEND3       (1u<<31) ///< another byte to follow, future expansion
+// UBSan: unsigned literals because left shifting by 31 causes signed overflow, although it works as expected on x86.
 
 // a sound with no channel is a local only sound
 #define	SND_VOLUME		(1<<0)		// a byte
@@ -239,7 +265,7 @@ void Protocol_Names(char *buffer, size_t buffersize);
 #define	svc_hidelmp			36		// [string] slotname
 #define	svc_skybox			37		// [string] skyname
 
-// LordHavoc: my svc_ range, 50-69
+// LadyHavoc: my svc_ range, 50-69
 #define svc_downloaddata	50		// [int] start [short] size
 #define svc_updatestatubyte	51		// [byte] stat [byte] value
 #define svc_effect			52		// [vector] org [byte] modelindex [byte] startframe [byte] framecount [byte] framerate
@@ -264,7 +290,7 @@ void Protocol_Names(char *buffer, size_t buffersize);
 #define	clc_move		3			// [usercmd_t]
 #define	clc_stringcmd	4		// [string] message
 
-// LordHavoc: my clc_ range, 50-59
+// LadyHavoc: my clc_ range, 50-59
 #define clc_ackframe	50		// [int] framenumber
 #define clc_ackdownloaddata	51	// [int] start [short] size   (note: exact echo of latest values received in svc_downloaddata, packet-loss handling is in the server)
 #define clc_unusedlh2 	52
@@ -301,7 +327,7 @@ void Protocol_Names(char *buffer, size_t buffersize);
 #define	TE_EXPLOSION3		16 // [vector] origin [coord] red [coord] green [coord] blue
 #define TE_LIGHTNING4NEH	17 // [string] model [entity] entity [vector] start [vector] end
 
-// LordHavoc: added some TE_ codes (block1 - 50-60)
+// LadyHavoc: added some TE_ codes (block1 - 50-60)
 #define	TE_BLOOD			50 // [vector] origin [byte] xvel [byte] yvel [byte] zvel [byte] count
 #define	TE_SPARK			51 // [vector] origin [byte] xvel [byte] yvel [byte] zvel [byte] count
 #define	TE_BLOODSHOWER		52 // [vector] min [vector] max [coord] explosionspeed [short] count
@@ -312,14 +338,14 @@ void Protocol_Names(char *buffer, size_t buffersize);
 #define TE_GUNSHOTQUAD		57 // [vector] origin
 #define TE_SPIKEQUAD		58 // [vector] origin
 #define TE_SUPERSPIKEQUAD	59 // [vector] origin
-// LordHavoc: block2 - 70-80
+// LadyHavoc: block2 - 70-80
 #define TE_EXPLOSIONQUAD	70 // [vector] origin
 #define	TE_UNUSED1			71 // unused
 #define TE_SMALLFLASH		72 // [vector] origin
 #define TE_CUSTOMFLASH		73 // [vector] origin [byte] radius / 8 - 1 [byte] lifetime / 256 - 1 [byte] red [byte] green [byte] blue
 #define TE_FLAMEJET			74 // [vector] origin [vector] velocity [byte] count
 #define TE_PLASMABURN		75 // [vector] origin
-// LordHavoc: Tei grabbed these codes
+// LadyHavoc: Tei grabbed these codes
 #define TE_TEI_G3			76 // [vector] start [vector] end [vector] angles
 #define TE_TEI_SMOKE		77 // [vector] origin [vector] dir [byte] count
 #define TE_TEI_BIGEXPLOSION	78 // [vector] origin
@@ -340,12 +366,44 @@ void Protocol_Names(char *buffer, size_t buffersize);
 #define RENDER_LIGHT 131072 // receive light
 #define RENDER_NOSELFSHADOW 262144 // render lighting on this entity before its own shadow is added to the scene
 // (note: all RENDER_NOSELFSHADOW entities are grouped together and rendered in a batch before their shadows are rendered, so they can not shadow eachother either)
-#define RENDER_EQUALIZE 524288 // (subflag of RENDER_LIGHT) equalize the light from the light grid hitting this ent (less invasive EF_FULLBRIGHT implementation)
 #define RENDER_NODEPTHTEST 1048576
 #define RENDER_ADDITIVE 2097152
 #define RENDER_DOUBLESIDED 4194304
 #define RENDER_CUSTOMIZEDMODELLIGHT 4096
 #define RENDER_DYNAMICMODELLIGHT 8388608 // origin dependent model light
+
+typedef struct usercmd_s
+{
+	vec3_t	viewangles;
+
+// intended velocities
+	float	forwardmove;
+	float	sidemove;
+	float	upmove;
+
+	vec3_t	cursor_screen;
+	vec3_t	cursor_start;
+	vec3_t	cursor_end;
+	vec3_t	cursor_impact;
+	vec3_t	cursor_normal;
+	vec_t	cursor_fraction;
+	int		cursor_entitynumber;
+
+	double time; // time the move is executed for (non-cl_movement is executed at receivetime)
+	float receivetime; // time the move was received at (used for ping)
+	unsigned char msec; // for predicted moves
+	int buttons;
+	int impulse;
+	unsigned int sequence;
+	qbool applied; // if false we're still accumulating a move
+	qbool predicted; // if true the sequence should be sent as 0
+
+	// derived properties
+	double frametime;
+	qbool canjump;
+	qbool jump;
+	qbool crouch;
+} usercmd_t;
 
 #define MAX_FRAMEGROUPBLENDS 4
 typedef struct framegroupblend_s
@@ -412,7 +470,7 @@ typedef struct entity_state_s
 	unsigned char tagindex;
 	unsigned char colormod[3];
 	unsigned char glowmod[3];
-	// LordHavoc: very big data here :(
+	// LadyHavoc: very big data here :(
 	framegroupblend_t framegroupblend[4];
 	skeleton_t skeletonobject;
 }
@@ -431,7 +489,7 @@ void Protocol_UpdateClientStats(const int *stats);
 void Protocol_WriteStatsReliable(void);
 // writes a list of quake entities to the network stream
 // (or as many will fit)
-qboolean EntityFrameQuake_WriteFrame(sizebuf_t *msg, int maxsize, int numstates, const entity_state_t **states);
+qbool EntityFrameQuake_WriteFrame(struct sizebuf_s *msg, int maxsize, int numstates, const entity_state_t **states);
 // cleans up dead entities each frame after ReadEntity (which doesn't clear unused entities)
 void EntityFrameQuake_ISeeDeadEntities(void);
 
@@ -545,66 +603,67 @@ typedef struct entityframe_database_s
 }
 entityframe_database_t;
 
-// LordHavoc: these are in approximately sorted order, according to cost and
+// LadyHavoc: these are in approximately sorted order, according to cost and
 // likelyhood of being used for numerous objects in a frame
 
 // note that the bytes are not written/read in this order, this is only the
 // order of the bits to minimize overhead from extend bytes
 
 // enough to describe a nail, gib, shell casing, bullet hole, or rocket
-#define E_ORIGIN1		(1<<0)
-#define E_ORIGIN2		(1<<1)
-#define E_ORIGIN3		(1<<2)
-#define E_ANGLE1		(1<<3)
-#define E_ANGLE2		(1<<4)
-#define E_ANGLE3		(1<<5)
-#define E_MODEL1		(1<<6)
-#define E_EXTEND1		(1<<7)
+#define E_ORIGIN1        (1u<<0)
+#define E_ORIGIN2        (1u<<1)
+#define E_ORIGIN3        (1u<<2)
+#define E_ANGLE1         (1u<<3)
+#define E_ANGLE2         (1u<<4)
+#define E_ANGLE3         (1u<<5)
+#define E_MODEL1         (1u<<6)
+#define E_EXTEND1        (1u<<7)
 
 // enough to describe almost anything
-#define E_FRAME1		(1<<8)
-#define E_EFFECTS1		(1<<9)
-#define E_ALPHA			(1<<10)
-#define E_SCALE			(1<<11)
-#define E_COLORMAP		(1<<12)
-#define E_SKIN			(1<<13)
-#define E_FLAGS			(1<<14)
-#define E_EXTEND2		(1<<15)
+#define E_FRAME1         (1u<<8)
+#define E_EFFECTS1       (1u<<9)
+#define E_ALPHA          (1u<<10)
+#define E_SCALE          (1u<<11)
+#define E_COLORMAP       (1u<<12)
+#define E_SKIN           (1u<<13)
+#define E_FLAGS          (1u<<14)
+#define E_EXTEND2        (1u<<15)
 
 // players, custom color glows, high model numbers
-#define E_FRAME2		(1<<16)
-#define E_MODEL2		(1<<17)
-#define E_EFFECTS2		(1<<18)
-#define E_GLOWSIZE		(1<<19)
-#define E_GLOWCOLOR		(1<<20)
-#define E_LIGHT			(1<<21)
-#define E_LIGHTPFLAGS	(1<<22)
-#define E_EXTEND3		(1<<23)
+#define E_FRAME2         (1u<<16)
+#define E_MODEL2         (1u<<17)
+#define E_EFFECTS2       (1u<<18)
+#define E_GLOWSIZE       (1u<<19)
+#define E_GLOWCOLOR      (1u<<20)
+#define E_LIGHT          (1u<<21)
+#define E_LIGHTPFLAGS    (1u<<22)
+#define E_EXTEND3        (1u<<23)
 
-#define E_SOUND1		(1<<24)
-#define E_SOUNDVOL		(1<<25)
-#define E_SOUNDATTEN	(1<<26)
-#define E_TAGATTACHMENT	(1<<27)
-#define E_LIGHTSTYLE	(1<<28)
-#define E_UNUSED6		(1<<29)
-#define E_UNUSED7		(1<<30)
-#define E_EXTEND4		(1<<31)
+#define E_SOUND1         (1u<<24)
+#define E_SOUNDVOL       (1u<<25)
+#define E_SOUNDATTEN     (1u<<26)
+#define E_TAGATTACHMENT  (1u<<27)
+#define E_LIGHTSTYLE     (1u<<28)
+#define E_UNUSED6        (1u<<29)
+#define E_UNUSED7        (1u<<30)
+#define E_EXTEND4        (1u<<31)
+// UBSan: unsigned literals because left shifting by 31 causes signed overflow, although it works as expected on x86.
 
 // returns difference between two states as E_ flags
 int EntityState_DeltaBits(const entity_state_t *o, const entity_state_t *n);
 // write E_ flags to a msg
-void EntityState_WriteExtendBits(sizebuf_t *msg, unsigned int bits);
+void EntityState_WriteExtendBits(struct sizebuf_s *msg, unsigned int bits);
 // write values for the E_ flagged fields to a msg
-void EntityState_WriteFields(const entity_state_t *ent, sizebuf_t *msg, unsigned int bits);
+void EntityState_WriteFields(const entity_state_t *ent, struct sizebuf_s *msg, unsigned int bits);
 // write entity number and E_ flags and their values, or a remove number, describing the change from delta to ent
-void EntityState_WriteUpdate(const entity_state_t *ent, sizebuf_t *msg, const entity_state_t *delta);
+void EntityState_WriteUpdate(const entity_state_t *ent, struct sizebuf_s *msg, const entity_state_t *delta);
 // read E_ flags
 int EntityState_ReadExtendBits(void);
 // read values for E_ flagged fields and apply them to a state
 void EntityState_ReadFields(entity_state_t *e, unsigned int bits);
 
 // (client and server) allocates a new empty database
-entityframe_database_t *EntityFrame_AllocDatabase(mempool_t *mempool);
+entityframe_database_t *EntityFrame_AllocDatabase(struct mempool_s *mempool);
 // (client and server) frees the database
 void EntityFrame_FreeDatabase(entityframe_database_t *d);
 // (server) clears the database to contain no frames (thus delta compression
@@ -621,7 +680,7 @@ void EntityFrame_AddFrame_Client(entityframe_database_t *d, vec3_t eye, int fram
 // (server) adds a entity_frame to the database, for future reference
 void EntityFrame_AddFrame_Server(entityframe_database_t *d, vec3_t eye, int framenum, int numentities, const entity_state_t **entitydata);
 // (server) writes a frame to network stream
-qboolean EntityFrame_WriteFrame(sizebuf_t *msg, int maxsize, entityframe_database_t *d, int numstates, const entity_state_t **states, int viewentnum);
+qbool EntityFrame_WriteFrame(struct sizebuf_s *msg, int maxsize, entityframe_database_t *d, int numstates, const entity_state_t **states, int viewentnum);
 // (client) reads a frame from network stream
 void EntityFrame_CL_ReadFrame(void);
 // (client) returns the frame number of the most recent frame recieved
@@ -642,7 +701,7 @@ entity_database4_commit_t;
 typedef struct entity_database4_s
 {
 	// what mempool to use for allocations
-	mempool_t *mempool;
+	struct mempool_s *mempool;
 	// reference frame
 	int referenceframenum;
 	// reference entities array is resized according to demand
@@ -667,7 +726,7 @@ entity_state_t *EntityFrame4_GetReferenceEntity(entityframe4_database_t *d, int 
 void EntityFrame4_AddCommitEntity(entityframe4_database_t *d, const entity_state_t *s);
 
 // allocate a database
-entityframe4_database_t *EntityFrame4_AllocDatabase(mempool_t *pool);
+entityframe4_database_t *EntityFrame4_AllocDatabase(struct mempool_s *pool);
 // free a database
 void EntityFrame4_FreeDatabase(entityframe4_database_t *d);
 // reset a database (resets compression but does not reallocate anything)
@@ -675,93 +734,94 @@ void EntityFrame4_ResetDatabase(entityframe4_database_t *d);
 // updates database to account for a frame-received acknowledgment
 int EntityFrame4_AckFrame(entityframe4_database_t *d, int framenum, int servermode);
 // writes a frame to the network stream
-qboolean EntityFrame4_WriteFrame(sizebuf_t *msg, int maxsize, entityframe4_database_t *d, int numstates, const entity_state_t **states);
+qbool EntityFrame4_WriteFrame(struct sizebuf_s *msg, int maxsize, entityframe4_database_t *d, int numstates, const entity_state_t **states);
 // reads a frame from the network stream
 void EntityFrame4_CL_ReadFrame(void);
 
-// reset all entity fields (typically used if status changed)
-#define E5_FULLUPDATE (1<<0)
-// E5_ORIGIN32=0: short[3] = s->origin[0] * 8, s->origin[1] * 8, s->origin[2] * 8
-// E5_ORIGIN32=1: float[3] = s->origin[0], s->origin[1], s->origin[2]
-#define E5_ORIGIN (1<<1)
-// E5_ANGLES16=0: byte[3] = s->angle[0] * 256 / 360, s->angle[1] * 256 / 360, s->angle[2] * 256 / 360
-// E5_ANGLES16=1: short[3] = s->angle[0] * 65536 / 360, s->angle[1] * 65536 / 360, s->angle[2] * 65536 / 360
-#define E5_ANGLES (1<<2)
-// E5_MODEL16=0: byte = s->modelindex
-// E5_MODEL16=1: short = s->modelindex
-#define E5_MODEL (1<<3)
-// E5_FRAME16=0: byte = s->frame
-// E5_FRAME16=1: short = s->frame
-#define E5_FRAME (1<<4)
-// byte = s->skin
-#define E5_SKIN (1<<5)
-// E5_EFFECTS16=0 && E5_EFFECTS32=0: byte = s->effects
-// E5_EFFECTS16=1 && E5_EFFECTS32=0: short = s->effects
-// E5_EFFECTS16=0 && E5_EFFECTS32=1: int = s->effects
-// E5_EFFECTS16=1 && E5_EFFECTS32=1: int = s->effects
-#define E5_EFFECTS (1<<6)
-// bits >= (1<<8)
-#define E5_EXTEND1 (1<<7)
+/// reset all entity fields (typically used if status changed)
+#define E5_FULLUPDATE        (1u<<0)
+/// E5_ORIGIN32=0: short[3] = s->origin[0] * 8, s->origin[1] * 8, s->origin[2] * 8
+/// E5_ORIGIN32=1: float[3] = s->origin[0], s->origin[1], s->origin[2]
+#define E5_ORIGIN            (1u<<1)
+/// E5_ANGLES16=0: byte[3] = s->angle[0] * 256 / 360, s->angle[1] * 256 / 360, s->angle[2] * 256 / 360
+/// E5_ANGLES16=1: short[3] = s->angle[0] * 65536 / 360, s->angle[1] * 65536 / 360, s->angle[2] * 65536 / 360
+#define E5_ANGLES            (1u<<2)
+/// E5_MODEL16=0: byte = s->modelindex
+/// E5_MODEL16=1: short = s->modelindex
+#define E5_MODEL             (1u<<3)
+/// E5_FRAME16=0: byte = s->frame
+/// E5_FRAME16=1: short = s->frame
+#define E5_FRAME             (1u<<4)
+/// byte = s->skin
+#define E5_SKIN              (1u<<5)
+/// E5_EFFECTS16=0 && E5_EFFECTS32=0: byte = s->effects
+/// E5_EFFECTS16=1 && E5_EFFECTS32=0: short = s->effects
+/// E5_EFFECTS16=0 && E5_EFFECTS32=1: int = s->effects
+/// E5_EFFECTS16=1 && E5_EFFECTS32=1: int = s->effects
+#define E5_EFFECTS           (1u<<6)
+/// bits >= (1<<8)
+#define E5_EXTEND1           (1u<<7)
 
-// byte = s->renderflags
-#define E5_FLAGS (1<<8)
-// byte = bound(0, s->alpha * 255, 255)
-#define E5_ALPHA (1<<9)
-// byte = bound(0, s->scale * 16, 255)
-#define E5_SCALE (1<<10)
-// flag
-#define E5_ORIGIN32 (1<<11)
-// flag
-#define E5_ANGLES16 (1<<12)
-// flag
-#define E5_MODEL16 (1<<13)
-// byte = s->colormap
-#define E5_COLORMAP (1<<14)
-// bits >= (1<<16)
-#define E5_EXTEND2 (1<<15)
+/// byte = s->renderflags
+#define E5_FLAGS             (1u<<8)
+/// byte = bound(0, s->alpha * 255, 255)
+#define E5_ALPHA             (1u<<9)
+/// byte = bound(0, s->scale * 16, 255)
+#define E5_SCALE             (1u<<10)
+/// flag
+#define E5_ORIGIN32          (1u<<11)
+/// flag
+#define E5_ANGLES16          (1u<<12)
+/// flag
+#define E5_MODEL16           (1u<<13)
+/// byte = s->colormap
+#define E5_COLORMAP          (1u<<14)
+/// bits >= (1<<16)
+#define E5_EXTEND2           (1u<<15)
 
-// short = s->tagentity
-// byte = s->tagindex
-#define E5_ATTACHMENT (1<<16)
-// short[4] = s->light[0], s->light[1], s->light[2], s->light[3]
-// byte = s->lightstyle
-// byte = s->lightpflags
-#define E5_LIGHT (1<<17)
-// byte = s->glowsize
-// byte = s->glowcolor
-#define E5_GLOW (1<<18)
-// short = s->effects
-#define E5_EFFECTS16 (1<<19)
-// int = s->effects
-#define E5_EFFECTS32 (1<<20)
-// flag
-#define E5_FRAME16 (1<<21)
-// byte[3] = s->colormod[0], s->colormod[1], s->colormod[2]
-#define E5_COLORMOD (1<<22)
-// bits >= (1<<24)
-#define E5_EXTEND3 (1<<23)
+/// short = s->tagentity
+/// byte = s->tagindex
+#define E5_ATTACHMENT        (1u<<16)
+/// short[4] = s->light[0], s->light[1], s->light[2], s->light[3]
+/// byte = s->lightstyle
+/// byte = s->lightpflags
+#define E5_LIGHT             (1u<<17)
+/// byte = s->glowsize
+/// byte = s->glowcolor
+#define E5_GLOW              (1u<<18)
+/// short = s->effects
+#define E5_EFFECTS16         (1u<<19)
+/// int = s->effects
+#define E5_EFFECTS32         (1u<<20)
+/// flag
+#define E5_FRAME16           (1u<<21)
+/// byte[3] = s->colormod[0], s->colormod[1], s->colormod[2]
+#define E5_COLORMOD          (1u<<22)
+/// bits >= (1<<24)
+#define E5_EXTEND3           (1u<<23)
 
-// byte[3] = s->glowmod[0], s->glowmod[1], s->glowmod[2]
-#define E5_GLOWMOD (1<<24)
-// byte type=0 short frames[1] short times[1]
-// byte type=1 short frames[2] short times[2] byte lerps[2]
-// byte type=2 short frames[3] short times[3] byte lerps[3]
-// byte type=3 short frames[4] short times[4] byte lerps[4]
-// byte type=4 short modelindex byte numbones {short pose7s[7]}
-// see also RENDER_COMPLEXANIMATION
-#define E5_COMPLEXANIMATION (1<<25)
-// ushort traileffectnum
-#define E5_TRAILEFFECTNUM (1<<26)
-// unused
-#define E5_UNUSED27 (1<<27)
-// unused
-#define E5_UNUSED28 (1<<28)
-// unused
-#define E5_UNUSED29 (1<<29)
-// unused
-#define E5_UNUSED30 (1<<30)
-// bits2 > 0
-#define E5_EXTEND4 (1<<31)
+/// byte[3] = s->glowmod[0], s->glowmod[1], s->glowmod[2]
+#define E5_GLOWMOD           (1u<<24)
+/// byte type=0 short frames[1] short times[1]
+/// byte type=1 short frames[2] short times[2] byte lerps[2]
+/// byte type=2 short frames[3] short times[3] byte lerps[3]
+/// byte type=3 short frames[4] short times[4] byte lerps[4]
+/// byte type=4 short modelindex byte numbones {short pose7s[7]}
+/// see also RENDER_COMPLEXANIMATION
+#define E5_COMPLEXANIMATION  (1u<<25)
+/// ushort traileffectnum
+#define E5_TRAILEFFECTNUM    (1u<<26)
+/// unused
+#define E5_UNUSED27          (1u<<27)
+/// unused
+#define E5_UNUSED28          (1u<<28)
+/// unused
+#define E5_UNUSED29          (1u<<29)
+/// unused
+#define E5_UNUSED30          (1u<<30)
+/// bits2 > 0
+#define E5_EXTEND4           (1u<<31)
+// UBSan: unsigned literals because left shifting by 31 causes signed overflow, although it works as expected on x86.
 
 #define ENTITYFRAME5_MAXPACKETLOGS 64
 #define ENTITYFRAME5_MAXSTATES 1024
@@ -830,16 +890,16 @@ typedef struct entityframe5_database_s
 }
 entityframe5_database_t;
 
-entityframe5_database_t *EntityFrame5_AllocDatabase(mempool_t *pool);
+entityframe5_database_t *EntityFrame5_AllocDatabase(struct mempool_s *pool);
 void EntityFrame5_FreeDatabase(entityframe5_database_t *d);
-void EntityState5_WriteUpdate(int number, const entity_state_t *s, int changedbits, sizebuf_t *msg);
+void EntityState5_WriteUpdate(int number, const entity_state_t *s, int changedbits, struct sizebuf_s *msg);
 int EntityState5_DeltaBitsForState(entity_state_t *o, entity_state_t *n);
 void EntityFrame5_CL_ReadFrame(void);
 void EntityFrame5_LostFrame(entityframe5_database_t *d, int framenum);
 void EntityFrame5_AckFrame(entityframe5_database_t *d, int framenum);
-qboolean EntityFrame5_WriteFrame(sizebuf_t *msg, int maxsize, entityframe5_database_t *d, int numstates, const entity_state_t **states, int viewentnum, unsigned int movesequence, qboolean need_empty);
+qbool EntityFrame5_WriteFrame(struct sizebuf_s *msg, int maxsize, entityframe5_database_t *d, int numstates, const entity_state_t **states, int viewentnum, unsigned int movesequence, qbool need_empty);
 
-extern cvar_t developer_networkentities;
+extern struct cvar_s developer_networkentities;
 
 // QUAKEWORLD
 // server to client
@@ -999,7 +1059,7 @@ extern cvar_t developer_networkentities;
 typedef struct entityframeqw_snapshot_s
 {
 	double time;
-	qboolean invalid;
+	qbool invalid;
 	int num_entities;
 	entity_state_t entities[QW_MAX_PACKET_ENTITIES];
 }
@@ -1011,14 +1071,14 @@ typedef struct entityframeqw_database_s
 }
 entityframeqw_database_t;
 
-entityframeqw_database_t *EntityFrameQW_AllocDatabase(mempool_t *pool);
+entityframeqw_database_t *EntityFrameQW_AllocDatabase(struct mempool_s *pool);
 void EntityFrameQW_FreeDatabase(entityframeqw_database_t *d);
 void EntityStateQW_ReadPlayerUpdate(void);
-void EntityFrameQW_CL_ReadFrame(qboolean delta);
+void EntityFrameQW_CL_ReadFrame(qbool delta);
 
 struct client_s;
 void EntityFrameCSQC_LostFrame(struct client_s *client, int framenum);
-qboolean EntityFrameCSQC_WriteFrame (sizebuf_t *msg, int maxsize, int numnumbers, const unsigned short *numbers, int framenum);
+qbool EntityFrameCSQC_WriteFrame (struct sizebuf_s *msg, int maxsize, int numnumbers, const unsigned short *numbers, int framenum);
 
 #endif
 

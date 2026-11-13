@@ -21,9 +21,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #include "quakedef.h"
 #include "loadtimes.h"
-#ifdef CONFIG_CD
 #include "cdaudio.h"
-#endif
 #include "cl_collision.h"
 #include "csprogs.h"
 #include "libcurl.h"
@@ -32,12 +30,13 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "menu.h"
 #endif
 #include "cl_video.h"
+#include "float.h"
 
 const char *svc_strings[128] =
 {
 	"svc_bad",
 	"svc_nop",
-	"svc_disconnect",
+	"svc_disconnect",	// (DP8) [string] null terminated parting message
 	"svc_updatestat",
 	"svc_version",		// [int] server version
 	"svc_setview",		// [short] entity number
@@ -167,37 +166,46 @@ const char *qw_svc_strings[128] =
 
 //=============================================================================
 
-cvar_t cl_worldmessage = {CVAR_READONLY, "cl_worldmessage", "", "title of current level"};
-cvar_t cl_worldname = {CVAR_READONLY, "cl_worldname", "", "name of current worldmodel"};
-cvar_t cl_worldnamenoextension = {CVAR_READONLY, "cl_worldnamenoextension", "", "name of current worldmodel without extension"};
-cvar_t cl_worldbasename = {CVAR_READONLY, "cl_worldbasename", "", "name of current worldmodel without maps/ prefix or extension"};
+cvar_t cl_worldmessage = {CF_CLIENT | CF_READONLY, "cl_worldmessage", "", "title of current level"};
+cvar_t cl_worldname = {CF_CLIENT | CF_READONLY, "cl_worldname", "", "name of current worldmodel"};
+cvar_t cl_worldnamenoextension = {CF_CLIENT | CF_READONLY, "cl_worldnamenoextension", "", "name of current worldmodel without extension"};
+cvar_t cl_worldbasename = {CF_CLIENT | CF_READONLY, "cl_worldbasename", "", "name of current worldmodel without maps/ prefix or extension"};
 
-cvar_t developer_networkentities = {0, "developer_networkentities", "0", "prints received entities, value is 0-10 (higher for more info, 10 being the most verbose)"};
-cvar_t cl_gameplayfix_soundsmovewithentities = {0, "cl_gameplayfix_soundsmovewithentities", "1", "causes sounds made by lifts, players, projectiles, and any other entities, to move with the entity, so for example a rocket noise follows the rocket rather than staying at the starting position"};
-cvar_t cl_sound_wizardhit = {0, "cl_sound_wizardhit", "wizard/hit.wav", "sound to play during TE_WIZSPIKE (empty cvar disables sound)"};
-cvar_t cl_sound_hknighthit = {0, "cl_sound_hknighthit", "hknight/hit.wav", "sound to play during TE_KNIGHTSPIKE (empty cvar disables sound)"};
-cvar_t cl_sound_tink1 = {0, "cl_sound_tink1", "weapons/tink1.wav", "sound to play with 80% chance during TE_SPIKE/TE_SUPERSPIKE (empty cvar disables sound)"};
-cvar_t cl_sound_ric1 = {0, "cl_sound_ric1", "weapons/ric1.wav", "sound to play with 5% chance during TE_SPIKE/TE_SUPERSPIKE (empty cvar disables sound)"};
-cvar_t cl_sound_ric2 = {0, "cl_sound_ric2", "weapons/ric2.wav", "sound to play with 5% chance during TE_SPIKE/TE_SUPERSPIKE (empty cvar disables sound)"};
-cvar_t cl_sound_ric3 = {0, "cl_sound_ric3", "weapons/ric3.wav", "sound to play with 10% chance during TE_SPIKE/TE_SUPERSPIKE (empty cvar disables sound)"};
-cvar_t cl_readpicture_force = {0, "cl_readpicture_force", "0", "when enabled, the low quality pictures read by ReadPicture() are preferred over the high quality pictures on the file system"};
+cvar_t developer_networkentities = {CF_CLIENT, "developer_networkentities", "0", "prints received entities, value is 0-10 (higher for more info, 10 being the most verbose)"};
+cvar_t cl_gameplayfix_soundsmovewithentities = {CF_CLIENT, "cl_gameplayfix_soundsmovewithentities", "1", "causes sounds made by lifts, players, projectiles, and any other entities, to move with the entity, so for example a rocket noise follows the rocket rather than staying at the starting position"};
+cvar_t cl_sound_wizardhit = {CF_CLIENT, "cl_sound_wizardhit", "wizard/hit.wav", "sound to play during TE_WIZSPIKE (empty cvar disables sound)"};
+cvar_t cl_sound_hknighthit = {CF_CLIENT, "cl_sound_hknighthit", "hknight/hit.wav", "sound to play during TE_KNIGHTSPIKE (empty cvar disables sound)"};
+cvar_t cl_sound_tink1 = {CF_CLIENT, "cl_sound_tink1", "weapons/tink1.wav", "sound to play with 80% chance during TE_SPIKE/TE_SUPERSPIKE (empty cvar disables sound)"};
+cvar_t cl_sound_ric1 = {CF_CLIENT, "cl_sound_ric1", "weapons/ric1.wav", "sound to play with 5% chance during TE_SPIKE/TE_SUPERSPIKE (empty cvar disables sound)"};
+cvar_t cl_sound_ric2 = {CF_CLIENT, "cl_sound_ric2", "weapons/ric2.wav", "sound to play with 5% chance during TE_SPIKE/TE_SUPERSPIKE (empty cvar disables sound)"};
+cvar_t cl_sound_ric3 = {CF_CLIENT, "cl_sound_ric3", "weapons/ric3.wav", "sound to play with 10% chance during TE_SPIKE/TE_SUPERSPIKE (empty cvar disables sound)"};
+cvar_t cl_readpicture_force = {CF_CLIENT, "cl_readpicture_force", "0", "when enabled, the low quality pictures read by ReadPicture() are preferred over the high quality pictures on the file system"};
 
 #define RIC_GUNSHOT		1
 #define RIC_GUNSHOTQUAD	2
-cvar_t cl_sound_ric_gunshot = {0, "cl_sound_ric_gunshot", "0", "specifies if and when the related cl_sound_ric and cl_sound_tink sounds apply to TE_GUNSHOT/TE_GUNSHOTQUAD, 0 = no sound, 1 = TE_GUNSHOT, 2 = TE_GUNSHOTQUAD, 3 = TE_GUNSHOT and TE_GUNSHOTQUAD"};
-cvar_t cl_sound_r_exp3 = {0, "cl_sound_r_exp3", "weapons/r_exp3.wav", "sound to play during TE_EXPLOSION and related effects (empty cvar disables sound)"};
-cvar_t cl_serverextension_download = {0, "cl_serverextension_download", "0", "indicates whether the server supports the download command"};
-cvar_t cl_joinbeforedownloadsfinish = {CVAR_SAVE, "cl_joinbeforedownloadsfinish", "1", "if non-zero the game will begin after the map is loaded before other downloads finish"};
-cvar_t cl_nettimesyncfactor = {CVAR_SAVE, "cl_nettimesyncfactor", "0", "rate at which client time adapts to match server time, 1 = instantly, 0.125 = slowly, 0 = not at all (bounding still applies)"};
-cvar_t cl_nettimesyncboundmode = {CVAR_SAVE, "cl_nettimesyncboundmode", "6", "method of restricting client time to valid values, 0 = no correction, 1 = tight bounding (jerky with packet loss), 2 = loose bounding (corrects it if out of bounds), 3 = leniant bounding (ignores temporary errors due to varying framerate), 4 = slow adjustment method from Quake3, 5 = slighttly nicer version of Quake3 method, 6 = bounding + Quake3"};
-cvar_t cl_nettimesyncboundtolerance = {CVAR_SAVE, "cl_nettimesyncboundtolerance", "0.25", "how much error is tolerated by bounding check, as a fraction of frametime, 0.25 = up to 25% margin of error tolerated, 1 = use only new time, 0 = use only old time (same effect as setting cl_nettimesyncfactor to 1)"};
-cvar_t cl_iplog_name = {CVAR_SAVE, "cl_iplog_name", "darkplaces_iplog.txt", "name of iplog file containing player addresses for iplog_list command and automatic ip logging when parsing status command"};
+cvar_t cl_sound_ric_gunshot = {CF_CLIENT, "cl_sound_ric_gunshot", "0", "specifies if and when the related cl_sound_ric and cl_sound_tink sounds apply to TE_GUNSHOT/TE_GUNSHOTQUAD, 0 = no sound, 1 = TE_GUNSHOT, 2 = TE_GUNSHOTQUAD, 3 = TE_GUNSHOT and TE_GUNSHOTQUAD"};
+cvar_t cl_sound_r_exp3 = {CF_CLIENT, "cl_sound_r_exp3", "weapons/r_exp3.wav", "sound to play during TE_EXPLOSION and related effects (empty cvar disables sound)"};
+cvar_t snd_cdautopause = {CF_CLIENT | CF_ARCHIVE, "snd_cdautopause", "1", "pause the CD track while the game is paused"};
 
-static qboolean QW_CL_CheckOrDownloadFile(const char *filename);
+cvar_t cl_serverextension_download = {CF_CLIENT, "cl_serverextension_download", "0", "indicates whether the server supports the download command"};
+cvar_t cl_joinbeforedownloadsfinish = {CF_CLIENT | CF_ARCHIVE, "cl_joinbeforedownloadsfinish", "1", "if non-zero the game will begin after the map is loaded before other downloads finish"};
+cvar_t cl_nettimesyncfactor = {CF_CLIENT | CF_ARCHIVE, "cl_nettimesyncfactor", "0", "rate at which client time adapts to match server time, 1 = instantly, 0.125 = slowly, 0 = not at all (only applied in bound modes 0, 1, 2, 3)"};
+cvar_t cl_nettimesyncboundmode = {CF_CLIENT | CF_ARCHIVE, "cl_nettimesyncboundmode", "6", "method of restricting client time to valid values, 0 = no correction, 1 = tight bounding (jerky with packet loss), 2 = loose bounding (corrects it if out of bounds), 3 = leniant bounding (ignores temporary errors due to varying framerate), 4 = slow adjustment method from Quake3, 5 = slightly nicer version of Quake3 method, 6 = tight bounding + mode 5, 7 = jitter compensated dynamic adjustment rate"};
+cvar_t cl_nettimesyncboundtolerance = {CF_CLIENT | CF_ARCHIVE, "cl_nettimesyncboundtolerance", "0.25", "how much error is tolerated by bounding check, as a fraction of frametime, 0.25 = up to 25% margin of error tolerated, 1 = use only new time, 0 = use only old time (same effect as setting cl_nettimesyncfactor to 1) (only affects bound modes 2 and 3)"};
+cvar_t cl_iplog_name = {CF_CLIENT | CF_ARCHIVE, "cl_iplog_name", "darkplaces_iplog.txt", "name of iplog file containing player addresses for iplog_list command and automatic ip logging when parsing status command"};
+
+static qbool QW_CL_CheckOrDownloadFile(const char *filename);
 static void QW_CL_RequestNextDownload(void);
-static void QW_CL_NextUpload(void);
-//static qboolean QW_CL_IsUploading(void);
-static void QW_CL_StopUpload(void);
+static void QW_CL_NextUpload_f(cmd_state_t *cmd);
+//static qbool QW_CL_IsUploading(void);
+static void QW_CL_StopUpload_f(cmd_state_t *cmd);
+
+static inline void CL_SetSignonStage_WithMsg(int signon_stage)
+{
+	cls.signon = signon_stage;
+	dpsnprintf(cl_connect_status, sizeof(cl_connect_status), "Connect: signon stage %i of %i", cls.signon, SIGNONS);
+	Con_DPrint(cl_connect_status);
+}
 
 /*
 ==================
@@ -273,8 +281,6 @@ static void CL_ParseStartSoundPacket(int largesoundindex)
 			sound_num = MSG_ReadByte(&cl_message);
 	}
 
-	channel = CHAN_NET2ENGINE(channel);
-
 	MSG_ReadVector(&cl_message, pos, cls.protocol);
 
 	if (sound_num < 0 || sound_num >= MAX_SOUNDS)
@@ -306,17 +312,17 @@ so the server doesn't disconnect.
 */
 
 static unsigned char olddata[NET_MAXMESSAGE];
-void CL_KeepaliveMessage (qboolean readmessages)
+void CL_KeepaliveMessage (qbool readmessages)
 {
 	static double lastdirtytime = 0;
-	static qboolean recursive = false;
+	static qbool recursive = false;
 	double dirtytime;
 	double deltatime;
 	static double countdownmsg = 0;
 	static double countdownupdate = 0;
 	sizebuf_t old;
 
-	qboolean thisrecursive;
+	qbool thisrecursive;
 
 	thisrecursive = recursive;
 	recursive = true;
@@ -335,10 +341,7 @@ void CL_KeepaliveMessage (qboolean readmessages)
 		if(cls.state != ca_dedicated)
 		{
 			if(countdownupdate <= 0) // check if time stepped backwards
-			{
-				SCR_UpdateLoadingScreenIfShown();
 				countdownupdate = 2;
-			}
 		}
 	}
 
@@ -367,7 +370,7 @@ void CL_KeepaliveMessage (qboolean readmessages)
 		unsigned char		buf[4];
 		countdownmsg = 5;
 		// write out a nop
-		// LordHavoc: must use unreliable because reliable could kill the sigon message!
+		// LadyHavoc: must use unreliable because reliable could kill the sigon message!
 		Con_Print("--> client to server keepalive\n");
 		memset(&msg, 0, sizeof(msg));
 		msg.data = buf;
@@ -381,11 +384,11 @@ void CL_KeepaliveMessage (qboolean readmessages)
 
 void CL_ParseEntityLump(char *entdata)
 {
-	qboolean loadedsky = false;
+	qbool loadedsky = false;
 	const char *data;
 	char key[128], value[MAX_INPUTLINE];
-	FOG_clear(); // LordHavoc: no fog until set
-	// LordHavoc: default to the map's sky (q3 shader parsing sets this)
+	FOG_clear(); // LadyHavoc: no fog until set
+	// LadyHavoc: default to the map's sky (q3 shader parsing sets this)
 	R_SetSkyBox(cl.worldmodel->brush.skybox);
 	data = entdata;
 	if (!data)
@@ -401,14 +404,14 @@ void CL_ParseEntityLump(char *entdata)
 		if (com_token[0] == '}')
 			break; // end of worldspawn
 		if (com_token[0] == '_')
-			strlcpy (key, com_token + 1, sizeof (key));
+			dp_strlcpy (key, com_token + 1, sizeof (key));
 		else
-			strlcpy (key, com_token, sizeof (key));
+			dp_strlcpy (key, com_token, sizeof (key));
 		while (key[strlen(key)-1] == ' ') // remove trailing spaces
 			key[strlen(key)-1] = 0;
 		if (!COM_ParseToken_Simple(&data, false, false, true))
 			return; // error
-		strlcpy (value, com_token, sizeof (value));
+		dp_strlcpy (value, com_token, sizeof (value));
 		if (!strcmp("sky", key))
 		{
 			loadedsky = true;
@@ -471,6 +474,7 @@ void CL_ParseEntityLump(char *entdata)
 		R_SetSkyBox("unit1_");
 }
 
+extern cvar_t con_chatsound_team_file;
 static const vec3_t defaultmins = {-4096, -4096, -4096};
 static const vec3_t defaultmaxs = {4096, 4096, 4096};
 static void CL_SetupWorldModel_Inner(void);
@@ -491,9 +495,9 @@ static void CL_SetupWorldModel_Inner(void)
 	// set up csqc world for collision culling
 	if (cl.worldmodel)
 	{
-		strlcpy(cl.worldname, cl.worldmodel->name, sizeof(cl.worldname));
+		dp_strlcpy(cl.worldname, cl.worldmodel->name, sizeof(cl.worldname));
 		FS_StripExtension(cl.worldname, cl.worldnamenoextension, sizeof(cl.worldnamenoextension));
-		strlcpy(cl.worldbasename, !strncmp(cl.worldnamenoextension, "maps/", 5) ? cl.worldnamenoextension + 5 : cl.worldnamenoextension, sizeof(cl.worldbasename));
+		dp_strlcpy(cl.worldbasename, !strncmp(cl.worldnamenoextension, "maps/", 5) ? cl.worldnamenoextension + 5 : cl.worldnamenoextension, sizeof(cl.worldbasename));
 		Cvar_SetQuick(&cl_worldmessage, cl.worldmessage);
 		Cvar_SetQuick(&cl_worldname, cl.worldname);
 		Cvar_SetQuick(&cl_worldnamenoextension, cl.worldnamenoextension);
@@ -510,7 +514,7 @@ static void CL_SetupWorldModel_Inner(void)
 	World_Start(&cl.world);
 
 	// load or reload .loc file for team chat messages
-	CL_Locs_Reload_f();
+	CL_Locs_Reload_f(cmd_local);
 
 	// make sure we send enough keepalives
 	CL_KeepaliveMessage(false);
@@ -522,7 +526,7 @@ static void CL_SetupWorldModel_Inner(void)
 	CL_KeepaliveMessage(false);
 
 	// load the team chat beep if possible
-	cl.foundtalk2wav = FS_FileExists("sound/misc/talk2.wav");
+	cl.foundteamchatsound = FS_FileExists(con_chatsound_team_file.string);
 
 	// check memory integrity
 	Mem_CheckSentinelsGlobal();
@@ -541,7 +545,7 @@ static void CL_SetupWorldModel_Inner(void)
 	}
 }
 
-static qboolean QW_CL_CheckOrDownloadFile(const char *filename)
+static qbool QW_CL_CheckOrDownloadFile(const char *filename)
 {
 	qfile_t *file;
 	char vabuf[1024];
@@ -565,7 +569,7 @@ static qboolean QW_CL_CheckOrDownloadFile(const char *filename)
 	if (!cls.netcon)
 		return true;
 
-	strlcpy(cls.qw_downloadname, filename, sizeof(cls.qw_downloadname));
+	dp_strlcpy(cls.qw_downloadname, filename, sizeof(cls.qw_downloadname));
 	Con_Printf("Downloading %s\n", filename);
 
 	if (!cls.qw_downloadmemory)
@@ -625,7 +629,7 @@ static void QW_CL_RequestNextDownload(void)
 		// if we're still in signon stages, request the next one
 		if (cls.signon != SIGNONS)
 		{
-			cls.signon = SIGNONS-1;
+			CL_SetSignonStage_WithMsg(SIGNONS - 1);
 			// we'll go to SIGNONS when the first entity update is received
 			MSG_WriteByte(&cls.netcon->message, qw_clc_stringcmd);
 			MSG_WriteString(&cls.netcon->message, va(vabuf, sizeof(vabuf), "begin %i", cl.qw_servercount));
@@ -842,7 +846,7 @@ static void QW_CL_ParseModelList(void)
 			Host_Error("Server sent too many model precaches");
 		if (strlen(str) >= MAX_QPATH)
 			Host_Error("Server sent a precache name of %i characters (max %i)", (int)strlen(str), MAX_QPATH - 1);
-		strlcpy(cl.model_name[nummodels], str, sizeof (cl.model_name[nummodels]));
+		dp_strlcpy(cl.model_name[nummodels], str, sizeof (cl.model_name[nummodels]));
 	}
 
 	n = MSG_ReadByte(&cl_message);
@@ -853,7 +857,7 @@ static void QW_CL_ParseModelList(void)
 		return;
 	}
 
-	cls.signon = 2;
+	CL_SetSignonStage_WithMsg(2);
 	cls.qw_downloadnumber = 0;
 	cls.qw_downloadtype = dl_model;
 	QW_CL_RequestNextDownload();
@@ -877,7 +881,7 @@ static void QW_CL_ParseSoundList(void)
 			Host_Error("Server sent too many sound precaches");
 		if (strlen(str) >= MAX_QPATH)
 			Host_Error("Server sent a precache name of %i characters (max %i)", (int)strlen(str), MAX_QPATH - 1);
-		strlcpy(cl.sound_name[numsounds], str, sizeof (cl.sound_name[numsounds]));
+		dp_strlcpy(cl.sound_name[numsounds], str, sizeof (cl.sound_name[numsounds]));
 	}
 
 	n = MSG_ReadByte(&cl_message);
@@ -889,31 +893,31 @@ static void QW_CL_ParseSoundList(void)
 		return;
 	}
 
-	cls.signon = 2;
+	CL_SetSignonStage_WithMsg(2);
 	cls.qw_downloadnumber = 0;
 	cls.qw_downloadtype = dl_sound;
 	QW_CL_RequestNextDownload();
 }
 
-static void QW_CL_Skins_f(void)
+static void QW_CL_Skins_f(cmd_state_t *cmd)
 {
 	cls.qw_downloadnumber = 0;
 	cls.qw_downloadtype = dl_skin;
 	QW_CL_RequestNextDownload();
 }
 
-static void QW_CL_Changing_f(void)
+static void QW_CL_Changing_f(cmd_state_t *cmd)
 {
 	if (cls.qw_downloadmemory)  // don't change when downloading
 		return;
 
 	S_StopAllSounds();
 	cl.intermission = 0;
-	cls.signon = 1;	// not active anymore, but not disconnected
+	CL_SetSignonStage_WithMsg(1); // not active anymore, but not disconnected
 	Con_Printf("\nChanging map...\n");
 }
 
-void QW_CL_NextUpload(void)
+void QW_CL_NextUpload_f(cmd_state_t *cmd)
 {
 	int r, percent, size;
 
@@ -940,7 +944,7 @@ void QW_CL_NextUpload(void)
 
 	Con_Printf("Upload completed\n");
 
-	QW_CL_StopUpload();
+	QW_CL_StopUpload_f(cmd);
 }
 
 void QW_CL_StartUpload(unsigned char *data, int size)
@@ -950,7 +954,7 @@ void QW_CL_StartUpload(unsigned char *data, int size)
 		return;
 
 	// abort existing upload if in progress
-	QW_CL_StopUpload();
+	QW_CL_StopUpload_f(cmd_local);
 
 	Con_DPrintf("Starting upload of %d bytes...\n", size);
 
@@ -959,17 +963,17 @@ void QW_CL_StartUpload(unsigned char *data, int size)
 	cls.qw_uploadsize = size;
 	cls.qw_uploadpos = 0;
 
-	QW_CL_NextUpload();
+	QW_CL_NextUpload_f(cmd_local);
 }
 
 #if 0
-qboolean QW_CL_IsUploading(void)
+qbool QW_CL_IsUploading(void)
 {
 	return cls.qw_uploaddata != NULL;
 }
 #endif
 
-void QW_CL_StopUpload(void)
+void QW_CL_StopUpload_f(cmd_state_t *cmd)
 {
 	if (cls.qw_uploaddata)
 		Mem_Free(cls.qw_uploaddata);
@@ -991,7 +995,7 @@ static void QW_CL_ProcessUserInfo(int slot)
 	InfoString_GetValue(cl.scores[slot].qw_userinfo, "team", cl.scores[slot].qw_team, sizeof(cl.scores[slot].qw_team));
 	InfoString_GetValue(cl.scores[slot].qw_userinfo, "skin", cl.scores[slot].qw_skin, sizeof(cl.scores[slot].qw_skin));
 	if (!cl.scores[slot].qw_skin[0])
-		strlcpy(cl.scores[slot].qw_skin, "base", sizeof(cl.scores[slot].qw_skin));
+		dp_strlcpy(cl.scores[slot].qw_skin, "base", sizeof(cl.scores[slot].qw_skin));
 	// TODO: skin cache
 }
 
@@ -1007,7 +1011,7 @@ static void QW_CL_UpdateUserInfo(void)
 		return;
 	}
 	cl.scores[slot].qw_userid = MSG_ReadLong(&cl_message);
-	strlcpy(cl.scores[slot].qw_userinfo, MSG_ReadString(&cl_message, cl_readstring, sizeof(cl_readstring)), sizeof(cl.scores[slot].qw_userinfo));
+	dp_strlcpy(cl.scores[slot].qw_userinfo, MSG_ReadString(&cl_message, cl_readstring, sizeof(cl_readstring)), sizeof(cl.scores[slot].qw_userinfo));
 
 	QW_CL_ProcessUserInfo(slot);
 }
@@ -1018,8 +1022,8 @@ static void QW_CL_SetInfo(void)
 	char key[2048];
 	char value[2048];
 	slot = MSG_ReadByte(&cl_message);
-	strlcpy(key, MSG_ReadString(&cl_message, cl_readstring, sizeof(cl_readstring)), sizeof(key));
-	strlcpy(value, MSG_ReadString(&cl_message, cl_readstring, sizeof(cl_readstring)), sizeof(value));
+	dp_strlcpy(key, MSG_ReadString(&cl_message, cl_readstring, sizeof(cl_readstring)), sizeof(key));
+	dp_strlcpy(value, MSG_ReadString(&cl_message, cl_readstring, sizeof(cl_readstring)), sizeof(value));
 	if (slot >= cl.maxclients)
 	{
 		Con_Printf("svc_setinfo >= cl.maxclients\n");
@@ -1035,8 +1039,8 @@ static void QW_CL_ServerInfo(void)
 	char key[2048];
 	char value[2048];
 	char temp[32];
-	strlcpy(key, MSG_ReadString(&cl_message, cl_readstring, sizeof(cl_readstring)), sizeof(key));
-	strlcpy(value, MSG_ReadString(&cl_message, cl_readstring, sizeof(cl_readstring)), sizeof(value));
+	dp_strlcpy(key, MSG_ReadString(&cl_message, cl_readstring, sizeof(cl_readstring)), sizeof(key));
+	dp_strlcpy(value, MSG_ReadString(&cl_message, cl_readstring, sizeof(cl_readstring)), sizeof(value));
 	Con_DPrintf("SERVERINFO: %s=%s\n", key, value);
 	InfoString_SetValue(cl.qw_serverinfo, sizeof(cl.qw_serverinfo), key, value);
 	InfoString_GetValue(cl.qw_serverinfo, "teamplay", temp, sizeof(temp));
@@ -1071,9 +1075,10 @@ static void CL_UpdateItemsAndWeapon(void)
 	// check for important changes
 
 	// set flash times
+	// UBSan: unsigned literals because left shifting by 31 causes signed overflow, although it works as expected on x86.
 	if (cl.olditems != cl.stats[STAT_ITEMS])
 		for (j = 0;j < 32;j++)
-			if ((cl.stats[STAT_ITEMS] & (1<<j)) && !(cl.olditems & (1<<j)))
+			if ((cl.stats[STAT_ITEMS] & (1u<<j)) && !(cl.olditems & (1u<<j)))
 				cl.item_gettime[j] = cl.time;
 	cl.olditems = cl.stats[STAT_ITEMS];
 
@@ -1088,15 +1093,15 @@ static void CL_UpdateItemsAndWeapon(void)
 #define LOADPROGRESSWEIGHT_WORLDMODEL      30.0
 #define LOADPROGRESSWEIGHT_WORLDMODEL_INIT  2.0
 
-static void CL_BeginDownloads_Inner(qboolean aborteddownload);
-static void CL_BeginDownloads(qboolean aborteddownload)
+static void CL_BeginDownloads_Inner(qbool aborteddownload);
+static void CL_BeginDownloads(qbool aborteddownload)
 {
 	double t = Sys_DirtyTime();
 	CL_BeginDownloads_Inner(aborteddownload);
 	if (developer_loadtimes.integer && loadtimes.map_start > 0)
 		Con_Printf("load times: begindownloads %.0f ms -> %.0f ms\n", (t - loadtimes.map_start) * 1000, (Sys_DirtyTime() - loadtimes.map_start) * 1000);
 }
-static void CL_BeginDownloads_Inner(qboolean aborteddownload)
+static void CL_BeginDownloads_Inner(qbool aborteddownload)
 {
 	char vabuf[1024];
 	// quakeworld works differently
@@ -1113,7 +1118,7 @@ static void CL_BeginDownloads_Inner(qboolean aborteddownload)
 	// if we got here...
 	// curl is done, so let's start with the business
 	if(!cl.loadbegun)
-		SCR_PushLoadingScreen(false, "Loading precaches", 1);
+		SCR_PushLoadingScreen("Loading precaches", 1);
 	cl.loadbegun = true;
 
 	// if already downloading something from the previous level, don't stop it
@@ -1135,9 +1140,9 @@ static void CL_BeginDownloads_Inner(qboolean aborteddownload)
 		{
 			Con_Printf("Downloading new CSQC code to dlcache/%s.%i.%i\n", csqc_progname.string, csqc_progsize.integer, csqc_progcrc.integer);
 			if(cl_serverextension_download.integer == 2 && FS_HasZlib())
-				Cmd_ForwardStringToServer(va(vabuf, sizeof(vabuf), "download %s deflate", csqc_progname.string));
+				CL_ForwardToServer(va(vabuf, sizeof(vabuf), "download %s deflate", csqc_progname.string));
 			else
-				Cmd_ForwardStringToServer(va(vabuf, sizeof(vabuf), "download %s", csqc_progname.string));
+				CL_ForwardToServer(va(vabuf, sizeof(vabuf), "download %s", csqc_progname.string));
 			return;
 		}
 	}
@@ -1148,7 +1153,7 @@ static void CL_BeginDownloads_Inner(qboolean aborteddownload)
 		if(cl.loadmodel_current == 1)
 		{
 			// worldmodel counts as 16 models (15 + world model setup), for better progress bar
-			SCR_PushLoadingScreen(false, "Loading precached models",
+			SCR_PushLoadingScreen("Loading precached models",
 				(
 					(cl.loadmodel_total - 1) * LOADPROGRESSWEIGHT_MODEL
 				+	LOADPROGRESSWEIGHT_WORLDMODEL
@@ -1160,11 +1165,10 @@ static void CL_BeginDownloads_Inner(qboolean aborteddownload)
 				+	cl.loadsound_total * LOADPROGRESSWEIGHT_SOUND
 				)
 			);
-			SCR_BeginLoadingPlaque(false);
 		}
 		for (;cl.loadmodel_current < cl.loadmodel_total;cl.loadmodel_current++)
 		{
-			SCR_PushLoadingScreen(false, cl.model_name[cl.loadmodel_current],
+			SCR_PushLoadingScreen(cl.model_name[cl.loadmodel_current],
 				(
 					(cl.loadmodel_current == 1) ? LOADPROGRESSWEIGHT_WORLDMODEL : LOADPROGRESSWEIGHT_MODEL
 				) / (
@@ -1178,7 +1182,7 @@ static void CL_BeginDownloads_Inner(qboolean aborteddownload)
 				SCR_PopLoadingScreen(false);
 				if(cl.loadmodel_current == 1)
 				{
-					SCR_PushLoadingScreen(false, cl.model_name[cl.loadmodel_current], 1.0 / cl.loadmodel_total);
+					SCR_PushLoadingScreen(cl.model_name[cl.loadmodel_current], 1.0 / cl.loadmodel_total);
 					SCR_PopLoadingScreen(false);
 				}
 				continue;
@@ -1201,7 +1205,7 @@ static void CL_BeginDownloads_Inner(qboolean aborteddownload)
 			if (cl.model_precache[cl.loadmodel_current] && cl.model_precache[cl.loadmodel_current]->Draw && cl.loadmodel_current == 1)
 			{
 				// we now have the worldmodel so we can set up the game world
-				SCR_PushLoadingScreen(true, "world model setup",
+				SCR_PushLoadingScreen("world model setup",
 					(
 						LOADPROGRESSWEIGHT_WORLDMODEL_INIT
 					) / (
@@ -1217,7 +1221,7 @@ static void CL_BeginDownloads_Inner(qboolean aborteddownload)
 					cl.loadfinished = true;
 					// now issue the spawn to move on to signon 2 like normal
 					if (cls.netcon)
-						Cmd_ForwardStringToServer("prespawn");
+						CL_ForwardToServer("prespawn");
 				}
 			}
 		}
@@ -1229,7 +1233,7 @@ static void CL_BeginDownloads_Inner(qboolean aborteddownload)
 	{
 		// loading sounds
 		if(cl.loadsound_current == 1)
-			SCR_PushLoadingScreen(false, "Loading precached sounds",
+			SCR_PushLoadingScreen("Loading precached sounds",
 				(
 					cl.loadsound_total * LOADPROGRESSWEIGHT_SOUND
 				) / (
@@ -1241,7 +1245,7 @@ static void CL_BeginDownloads_Inner(qboolean aborteddownload)
 			);
 		for (;cl.loadsound_current < cl.loadsound_total;cl.loadsound_current++)
 		{
-			SCR_PushLoadingScreen(false, cl.sound_name[cl.loadsound_current], 1.0 / cl.loadsound_total);
+			SCR_PushLoadingScreen(cl.sound_name[cl.loadsound_current], 1.0 / cl.loadsound_total);
 			if (cl.sound_precache[cl.loadsound_current] && S_IsSoundPrecached(cl.sound_precache[cl.loadsound_current]))
 			{
 				SCR_PopLoadingScreen(false);
@@ -1287,7 +1291,7 @@ static void CL_BeginDownloads_Inner(qboolean aborteddownload)
 						cl.loadfinished = true;
 						// now issue the spawn to move on to signon 2 like normal
 						if (cls.netcon)
-							Cmd_ForwardStringToServer("prespawn");
+							CL_ForwardToServer("prespawn");
 					}
 				}
 				aborteddownload = false;
@@ -1305,7 +1309,7 @@ static void CL_BeginDownloads_Inner(qboolean aborteddownload)
 				// regarding the * check: don't try to download submodels
 				if (cl_serverextension_download.integer && cls.netcon && cl.model_name[cl.downloadmodel_current][0] != '*' && !sv.active)
 				{
-					Cmd_ForwardStringToServer(va(vabuf, sizeof(vabuf), "download %s", cl.model_name[cl.downloadmodel_current]));
+					CL_ForwardToServer(va(vabuf, sizeof(vabuf), "download %s", cl.model_name[cl.downloadmodel_current]));
 					// we'll try loading again when the download finishes
 					return;
 				}
@@ -1336,7 +1340,7 @@ static void CL_BeginDownloads_Inner(qboolean aborteddownload)
 					cl.loadfinished = true;
 					// now issue the spawn to move on to signon 2 like normal
 					if (cls.netcon)
-						Cmd_ForwardStringToServer("prespawn");
+						CL_ForwardToServer("prespawn");
 				}
 			}
 		}
@@ -1362,10 +1366,9 @@ static void CL_BeginDownloads_Inner(qboolean aborteddownload)
 			dpsnprintf(soundname, sizeof(soundname), "sound/%s", cl.sound_name[cl.downloadsound_current]);
 			if (!FS_FileExists(soundname) && !FS_FileExists(cl.sound_name[cl.downloadsound_current]))
 			{
-				Con_Printf("Sound %s not found\n", soundname);
 				if (cl_serverextension_download.integer && cls.netcon && !sv.active)
 				{
-					Cmd_ForwardStringToServer(va(vabuf, sizeof(vabuf), "download %s", soundname));
+					CL_ForwardToServer(va(vabuf, sizeof(vabuf), "download %s", soundname));
 					// we'll try loading again when the download finishes
 					return;
 				}
@@ -1387,11 +1390,11 @@ static void CL_BeginDownloads_Inner(qboolean aborteddownload)
 
 		// now issue the spawn to move on to signon 2 like normal
 		if (cls.netcon)
-			Cmd_ForwardStringToServer("prespawn");
+			CL_ForwardToServer("prespawn");
 	}
 }
 
-static void CL_BeginDownloads_f(void)
+static void CL_BeginDownloads_f(cmd_state_t *cmd)
 {
 	// prevent cl_begindownloads from being issued multiple times in one match
 	// to prevent accidentally cancelled downloads
@@ -1475,7 +1478,7 @@ static void CL_StopDownload(int size, int crc)
 				Con_Printf("Downloaded \"%s\" (%i bytes, %i CRC)\n", cls.qw_downloadname, size, crc);
 				FS_WriteFile(cls.qw_downloadname, cls.qw_downloadmemory, cls.qw_downloadmemorycursize);
 				extension = FS_FileExtension(cls.qw_downloadname);
-				if (!strcasecmp(extension, "pak") || !strcasecmp(extension, "pk3"))
+				if (!strcasecmp(extension, "pak") || !strcasecmp(extension, "pk3") || !strcasecmp(extension, "dpk"))
 					FS_Rescan();
 			}
 		}
@@ -1534,11 +1537,11 @@ static void CL_ParseDownload(void)
 	cls.qw_downloadspeedcount += size;
 }
 
-static void CL_DownloadBegin_f(void)
+static void CL_DownloadBegin_f(cmd_state_t *cmd)
 {
-	int size = atoi(Cmd_Argv(1));
+	int size = atoi(Cmd_Argv(cmd, 1));
 
-	if (size < 0 || size > 1<<30 || FS_CheckNastyPath(Cmd_Argv(2), false))
+	if (size < 0 || size > 1<<30 || FS_CheckNastyPath(Cmd_Argv(cmd, 2), false))
 	{
 		Con_Printf("cl_downloadbegin: received bogus information\n");
 		CL_StopDownload(0, 0);
@@ -1551,23 +1554,23 @@ static void CL_DownloadBegin_f(void)
 	CL_StopDownload(0, 0);
 
 	// we're really beginning a download now, so initialize stuff
-	strlcpy(cls.qw_downloadname, Cmd_Argv(2), sizeof(cls.qw_downloadname));
+	dp_strlcpy(cls.qw_downloadname, Cmd_Argv(cmd, 2), sizeof(cls.qw_downloadname));
 	cls.qw_downloadmemorymaxsize = size;
 	cls.qw_downloadmemory = (unsigned char *) Mem_Alloc(cls.permanentmempool, cls.qw_downloadmemorymaxsize);
 	cls.qw_downloadnumber++;
 
 	cls.qw_download_deflate = false;
-	if(Cmd_Argc() >= 4)
+	if(Cmd_Argc(cmd) >= 4)
 	{
-		if(!strcmp(Cmd_Argv(3), "deflate"))
+		if(!strcmp(Cmd_Argv(cmd, 3), "deflate"))
 			cls.qw_download_deflate = true;
 		// check further encodings here
 	}
 
-	Cmd_ForwardStringToServer("sv_startdownload");
+	CL_ForwardToServer("sv_startdownload");
 }
 
-static void CL_StopDownload_f(void)
+static void CL_StopDownload_f(cmd_state_t *cmd)
 {
 	Curl_CancelAll();
 	if (cls.qw_downloadname[0])
@@ -1578,17 +1581,19 @@ static void CL_StopDownload_f(void)
 	CL_BeginDownloads(true);
 }
 
-static void CL_DownloadFinished_f(void)
+static void CL_DownloadFinished_f(cmd_state_t *cmd)
 {
-	if (Cmd_Argc() < 3)
+	if (Cmd_Argc(cmd) < 3)
 	{
 		Con_Printf("Malformed cl_downloadfinished command\n");
 		return;
 	}
-	CL_StopDownload(atoi(Cmd_Argv(1)), atoi(Cmd_Argv(2)));
+	CL_StopDownload(atoi(Cmd_Argv(cmd, 1)), atoi(Cmd_Argv(cmd, 2)));
 	CL_BeginDownloads(false);
 }
 
+extern cvar_t cl_topcolor;
+extern cvar_t cl_bottomcolor;
 static void CL_SendPlayerInfo(void)
 {
 	char vabuf[1024];
@@ -1596,7 +1601,7 @@ static void CL_SendPlayerInfo(void)
 	MSG_WriteString (&cls.netcon->message, va(vabuf, sizeof(vabuf), "name \"%s\"", cl_name.string));
 
 	MSG_WriteByte (&cls.netcon->message, clc_stringcmd);
-	MSG_WriteString (&cls.netcon->message, va(vabuf, sizeof(vabuf), "color %i %i", cl_color.integer >> 4, cl_color.integer & 15));
+	MSG_WriteString (&cls.netcon->message, va(vabuf, sizeof(vabuf), "color %i %i", cl_topcolor.integer, cl_bottomcolor.integer));
 
 	MSG_WriteByte (&cls.netcon->message, clc_stringcmd);
 	MSG_WriteString (&cls.netcon->message, va(vabuf, sizeof(vabuf), "rate %i", cl_rate.integer));
@@ -1628,8 +1633,10 @@ CL_SignonReply
 An svc_signonnum has been received, perform a client side setup
 =====================
 */
-static void CL_SignonReply (void)
+static void CL_SignonReply(int signon_stage)
 {
+	CL_SetSignonStage_WithMsg(signon_stage);
+
 	Con_DPrintf("CL_SignonReply: %i\n", cls.signon);
 	if (developer_loadtimes.integer && loadtimes.map_start > 0)
 		Con_Printf("load times: signon %i at %.0f ms (models so far %.0f ms / %d, csqc %.0f, world %.0f; reliable %d bytes in %d packets)\n", cls.signon, (Sys_DirtyTime() - loadtimes.map_start) * 1000,
@@ -1644,26 +1651,23 @@ static void CL_SignonReply (void)
 			// (so that the server can see the player name while downloading)
 			CL_SendPlayerInfo();
 
-			// execute cl_begindownloads next frame
-			// (after any commands added by svc_stufftext have been executed)
-			// when done with downloads the "prespawn" will be sent
-			Cbuf_AddText("\ncl_begindownloads\n");
-
 			//MSG_WriteByte (&cls.netcon->message, clc_stringcmd);
 			//MSG_WriteString (&cls.netcon->message, "prespawn");
 		}
-		else // playing a demo...  make sure loading occurs as soon as possible
-			CL_BeginDownloads(false);
+		// execute cl_begindownloads next frame
+		// (after any commands added by svc_stufftext have been executed)
+		// when done with downloads the "prespawn" will be sent
+		Cbuf_AddText(cmd_local, "\ncl_begindownloads\n");
 		break;
 
 	case 2:
 		if (cls.netcon)
 		{
-			// LordHavoc: quake sent the player info here but due to downloads
+			// LadyHavoc: quake sent the player info here but due to downloads
 			// it is sent earlier instead
 			// CL_SendPlayerInfo();
 
-			// LordHavoc: changed to begin a loading stage and issue this when done
+			// LadyHavoc: changed to begin a loading stage and issue this when done
 			MSG_WriteByte (&cls.netcon->message, clc_stringcmd);
 			MSG_WriteString (&cls.netcon->message, "spawn");
 		}
@@ -1686,9 +1690,6 @@ static void CL_SignonReply (void)
 		S_PurgeUnused();
 
 		Con_ClearNotify();
-		LoadTimes_Report();
-		Host_PreloadGameReady();
-		if (COM_CheckParm("-profilegameonly"))
 			Sys_AllowProfiling(true);
 		break;
 	}
@@ -1701,7 +1702,7 @@ CL_ParseServerInfo
 */
 static void CL_ParseServerInfo (void)
 {
-	char *str;
+	const char *str;
 	int i;
 	protocolversion_t protocol;
 	int nummodels, numsounds;
@@ -1720,8 +1721,11 @@ static void CL_ParseServerInfo (void)
 	{
 		SCR_BeginLoadingPlaque(false);
 		S_StopAllSounds();
+		// prevent dlcache assets from the previous map from interfering with this one
+		FS_UnloadPacks_dlcache();
 		// free q3 shaders so that any newly downloaded shaders will be active
-		Mod_FreeQ3Shaders();
+		// bones_was_here: we free the q3 shaders later in CL_SignonReply
+		//Mod_FreeQ3Shaders();
 	}
 
 	// check memory integrity
@@ -1747,22 +1751,19 @@ static void CL_ParseServerInfo (void)
 	if (protocol == PROTOCOL_QUAKEDP && cls.demoplayback && gamemode == GAME_NEHAHRA)
 		protocol = PROTOCOL_NEHAHRAMOVIE;
 	cls.protocol = protocol;
-	Con_DPrintf("Server protocol is %s\n", Protocol_NameForEnum(cls.protocol));
+	Con_Printf("Server protocol is %s\n", Protocol_NameForEnum(cls.protocol));
 
 	cl.num_entities = 1;
 
 	if (protocol == PROTOCOL_QUAKEWORLD)
 	{
-		char gamedir[1][MAX_QPATH];
-
 		cl.qw_servercount = MSG_ReadLong(&cl_message);
 
 		str = MSG_ReadString(&cl_message, cl_readstring, sizeof(cl_readstring));
 		Con_Printf("server gamedir is %s\n", str);
-		strlcpy(gamedir[0], str, sizeof(gamedir[0]));
 
 		// change gamedir if needed
-		if (!FS_ChangeGameDirs(1, gamedir, true, false))
+		if (!FS_ChangeGameDirs(1, &str, false))
 			Host_Error("CL_ParseServerInfo: unable to switch to server specified gamedir");
 
 		cl.gametype = GAME_DEATHMATCH;
@@ -1777,7 +1778,7 @@ static void CL_ParseServerInfo (void)
 
 		// get the full level name
 		str = MSG_ReadString(&cl_message, cl_readstring, sizeof(cl_readstring));
-		strlcpy (cl.worldmessage, str, sizeof(cl.worldmessage));
+		dp_strlcpy (cl.worldmessage, str, sizeof(cl.worldmessage));
 
 		// get the movevars that are defined in the qw protocol
 		cl.movevars_gravity            = MSG_ReadFloat(&cl_message);
@@ -1817,16 +1818,16 @@ static void CL_ParseServerInfo (void)
 		cl.loadfinished = false;
 
 		cls.state = ca_connected;
-		cls.signon = 1;
+		CL_SetSignonStage_WithMsg(1);
 
 		// note: on QW protocol we can't set up the gameworld until after
 		// downloads finish...
 		// (we don't even know the name of the map yet)
 		// this also means cl_autodemo does not work on QW protocol...
 
-		strlcpy(cl.worldname, "", sizeof(cl.worldname));
-		strlcpy(cl.worldnamenoextension, "", sizeof(cl.worldnamenoextension));
-		strlcpy(cl.worldbasename, "qw", sizeof(cl.worldbasename));
+		dp_strlcpy(cl.worldname, "", sizeof(cl.worldname));
+		dp_strlcpy(cl.worldnamenoextension, "", sizeof(cl.worldnamenoextension));
+		dp_strlcpy(cl.worldbasename, "qw", sizeof(cl.worldbasename));
 		Cvar_SetQuick(&cl_worldname, cl.worldname);
 		Cvar_SetQuick(&cl_worldnamenoextension, cl.worldnamenoextension);
 		Cvar_SetQuick(&cl_worldbasename, cl.worldbasename);
@@ -1854,7 +1855,7 @@ static void CL_ParseServerInfo (void)
 
 	// parse signon message
 		str = MSG_ReadString(&cl_message, cl_readstring, sizeof(cl_readstring));
-		strlcpy (cl.worldmessage, str, sizeof(cl.worldmessage));
+		dp_strlcpy (cl.worldmessage, str, sizeof(cl.worldmessage));
 
 	// seperate the printfs so the server message can have a color
 		if (cls.protocol != PROTOCOL_NEHAHRAMOVIE) // no messages when playing the Nehahra movie
@@ -1873,7 +1874,7 @@ static void CL_ParseServerInfo (void)
 				Host_Error ("Server sent too many model precaches");
 			if (strlen(str) >= MAX_QPATH)
 				Host_Error ("Server sent a precache name of %i characters (max %i)", (int)strlen(str), MAX_QPATH - 1);
-			strlcpy (cl.model_name[nummodels], str, sizeof (cl.model_name[nummodels]));
+			dp_strlcpy (cl.model_name[nummodels], str, sizeof (cl.model_name[nummodels]));
 		}
 		// parse sound precache list
 		for (numsounds=1 ; ; numsounds++)
@@ -1885,13 +1886,13 @@ static void CL_ParseServerInfo (void)
 				Host_Error("Server sent too many sound precaches");
 			if (strlen(str) >= MAX_QPATH)
 				Host_Error("Server sent a precache name of %i characters (max %i)", (int)strlen(str), MAX_QPATH - 1);
-			strlcpy (cl.sound_name[numsounds], str, sizeof (cl.sound_name[numsounds]));
+			dp_strlcpy (cl.sound_name[numsounds], str, sizeof (cl.sound_name[numsounds]));
 		}
 
 		// set the base name for level-specific things...  this gets updated again by CL_SetupWorldModel later
-		strlcpy(cl.worldname, cl.model_name[1], sizeof(cl.worldname));
+		dp_strlcpy(cl.worldname, cl.model_name[1], sizeof(cl.worldname));
 		FS_StripExtension(cl.worldname, cl.worldnamenoextension, sizeof(cl.worldnamenoextension));
-		strlcpy(cl.worldbasename, !strncmp(cl.worldnamenoextension, "maps/", 5) ? cl.worldnamenoextension + 5 : cl.worldnamenoextension, sizeof(cl.worldbasename));
+		dp_strlcpy(cl.worldbasename, !strncmp(cl.worldnamenoextension, "maps/", 5) ? cl.worldnamenoextension + 5 : cl.worldnamenoextension, sizeof(cl.worldbasename));
 		Cvar_SetQuick(&cl_worldmessage, cl.worldmessage);
 		Cvar_SetQuick(&cl_worldname, cl.worldname);
 		Cvar_SetQuick(&cl_worldnamenoextension, cl.worldnamenoextension);
@@ -1952,11 +1953,12 @@ static void CL_ParseServerInfo (void)
 			if (cls.demorecording)
 			{
 				// finish the previous level's demo file
-				CL_Stop_f();
+				CL_Stop_f(cmd_local);
 			}
 
 			// start a new demo file
-			dpsnprintf (demofile, sizeof(demofile), "%s_%s.dem", Sys_TimeString (cl_autodemo_nameformat.string), cl.worldbasename);
+			Sys_TimeString(vabuf, sizeof(vabuf), cl_autodemo_nameformat.string);
+			dpsnprintf (demofile, sizeof(demofile), "%s_%s.dem", vabuf, cl.worldbasename);
 
 			Con_Printf ("Auto-recording to %s.\n", demofile);
 
@@ -1973,12 +1975,12 @@ static void CL_ParseServerInfo (void)
 				cls.forcetrack = -1;
 				FS_Printf (cls.demofile, "%i\n", cls.forcetrack);
 				cls.demorecording = true;
-				strlcpy(cls.demoname, demofile, sizeof(cls.demoname));
+				dp_strlcpy(cls.demoname, demofile, sizeof(cls.demoname));
 				cls.demo_lastcsprogssize = -1;
 				cls.demo_lastcsprogscrc = -1;
 			}
 			else
-				Con_Print ("ERROR: couldn't open.\n");
+				Con_Print(CON_ERROR "ERROR: couldn't open.\n");
 		}
 	}
 	cl.islocalgame = NetConn_IsLocalGame();
@@ -1986,7 +1988,7 @@ static void CL_ParseServerInfo (void)
 
 void CL_ValidateState(entity_state_t *s)
 {
-	dp_model_t *model;
+	model_t *model;
 
 	if (!s->active)
 		return;
@@ -2100,11 +2102,7 @@ void CL_MoveLerpEntityStates(entity_t *ent)
 	{
 		// not a monster
 		ent->persistent.lerpstarttime = ent->state_previous.time;
-		// no lerp if it's singleplayer
-		if (cl.islocalgame && !sv_fixedframeratesingleplayer.integer)
-			ent->persistent.lerpdeltatime = 0;
-		else
-			ent->persistent.lerpdeltatime = bound(0, ent->state_current.time - ent->state_previous.time, 0.1);
+		ent->persistent.lerpdeltatime = bound(0, ent->state_current.time - ent->state_previous.time, 0.1);
 		VectorCopy(ent->persistent.neworigin, ent->persistent.oldorigin);
 		VectorCopy(ent->persistent.newangles, ent->persistent.oldangles);
 		VectorCopy(ent->state_current.origin, ent->persistent.neworigin);
@@ -2234,7 +2232,7 @@ static void CL_ParseClientdata (void)
 		}
 	}
 
-	// LordHavoc: hipnotic demos don't have this bit set but should
+	// LadyHavoc: hipnotic demos don't have this bit set but should
 	if (bits & SU_ITEMS || cls.protocol == PROTOCOL_QUAKE || cls.protocol == PROTOCOL_QUAKEDP || cls.protocol == PROTOCOL_NEHAHRAMOVIE || cls.protocol == PROTOCOL_NEHAHRABJP || cls.protocol == PROTOCOL_NEHAHRABJP2 || cls.protocol == PROTOCOL_NEHAHRABJP3 || cls.protocol == PROTOCOL_DARKPLACES1 || cls.protocol == PROTOCOL_DARKPLACES2 || cls.protocol == PROTOCOL_DARKPLACES3 || cls.protocol == PROTOCOL_DARKPLACES4 || cls.protocol == PROTOCOL_DARKPLACES5)
 		cl.stats[STAT_ITEMS] = MSG_ReadLong(&cl_message);
 
@@ -2337,7 +2335,7 @@ static void CL_ParseStaticSound (int large)
 	int			sound_num, vol, atten;
 
 	MSG_ReadVector(&cl_message, org, cls.protocol);
-	if (large || cls.protocol == PROTOCOL_NEHAHRABJP2)
+	if (large)
 		sound_num = (unsigned short) MSG_ReadShort(&cl_message);
 	else
 		sound_num = MSG_ReadByte(&cl_message);
@@ -2365,7 +2363,7 @@ static void CL_ParseEffect (void)
 	framecount = MSG_ReadByte(&cl_message);
 	framerate = MSG_ReadByte(&cl_message);
 
-	CL_Effect(org, modelindex, startframe, framecount, framerate);
+	CL_Effect(org, CL_GetModelByIndex(modelindex), startframe, framecount, framerate);
 }
 
 static void CL_ParseEffect2 (void)
@@ -2379,10 +2377,10 @@ static void CL_ParseEffect2 (void)
 	framecount = MSG_ReadByte(&cl_message);
 	framerate = MSG_ReadByte(&cl_message);
 
-	CL_Effect(org, modelindex, startframe, framecount, framerate);
+	CL_Effect(org, CL_GetModelByIndex(modelindex), startframe, framecount, framerate);
 }
 
-void CL_NewBeam (int ent, vec3_t start, vec3_t end, dp_model_t *m, int lightning)
+void CL_NewBeam (int ent, vec3_t start, vec3_t end, model_t *m, int lightning)
 {
 	int i;
 	beam_t *b = NULL;
@@ -2418,10 +2416,10 @@ void CL_NewBeam (int ent, vec3_t start, vec3_t end, dp_model_t *m, int lightning
 		VectorCopy (end, b->end);
 	}
 	else
-		Con_Print("beam list overflow!\n");
+		Con_DPrint("beam list overflow!\n");
 }
 
-static void CL_ParseBeam (dp_model_t *m, int lightning)
+static void CL_ParseBeam (model_t *m, int lightning)
 {
 	int ent;
 	vec3_t start, end;
@@ -2516,7 +2514,7 @@ static void CL_ParseTempEntity(void)
 			CL_FindNonSolidLocation(pos, pos, 10);
 			CL_ParticleEffect(EFFECT_TE_EXPLOSION, 1, pos, pos, vec3_origin, vec3_origin, NULL, 0);
 			S_StartSound(-1, 0, cl.sfx_r_exp3, pos, 1, 1);
-			CL_Effect(pos, cl.qw_modelindex_s_explod, 0, 6, 10);
+			CL_Effect(pos, CL_GetModelByIndex(cl.qw_modelindex_s_explod), 0, 6, 10);
 			break;
 
 		case QW_TE_TAREXPLOSION:
@@ -2687,7 +2685,7 @@ static void CL_ParseTempEntity(void)
 					S_StartSound(-1, 0, cl.sfx_ric3, pos, 1, 1);
 			}
 			break;
-			// LordHavoc: added for improved blood splatters
+			// LadyHavoc: added for improved blood splatters
 		case TE_BLOOD:
 			// blood puff
 			MSG_ReadVector(&cl_message, pos, cls.protocol);
@@ -2713,7 +2711,7 @@ static void CL_ParseTempEntity(void)
 			CL_FindNonSolidLocation(pos, pos, 4);
 			CL_ParticleEffect(EFFECT_TE_PLASMABURN, 1, pos, pos, vec3_origin, vec3_origin, NULL, 0);
 			break;
-			// LordHavoc: added for improved gore
+			// LadyHavoc: added for improved gore
 		case TE_BLOODSHOWER:
 			// vaporized body
 			MSG_ReadVector(&cl_message, pos, cls.protocol); // mins
@@ -2830,7 +2828,7 @@ static void CL_ParseTempEntity(void)
 			color[2] = MSG_ReadCoord(&cl_message, cls.protocol) * (2.0f / 1.0f);
 			CL_ParticleExplosion(pos);
 			Matrix4x4_CreateTranslate(&tempmatrix, pos[0], pos[1], pos[2]);
-			CL_AllocLightFlash(NULL, &tempmatrix, 350, color[0], color[1], color[2], 700, 0.5, 0, -1, true, 1, 0.25, 0.25, 1, 1, LIGHTFLAG_NORMALMODE | LIGHTFLAG_REALTIMEMODE);
+			CL_AllocLightFlash(NULL, &tempmatrix, 350, color[0], color[1], color[2], 700, 0.5, NULL, -1, true, 1, 0.25, 0.25, 1, 1, LIGHTFLAG_NORMALMODE | LIGHTFLAG_REALTIMEMODE);
 			S_StartSound(-1, 0, cl.sfx_r_exp3, pos, 1, 1);
 			break;
 
@@ -2843,7 +2841,7 @@ static void CL_ParseTempEntity(void)
 			color[1] = MSG_ReadByte(&cl_message) * (2.0f / 255.0f);
 			color[2] = MSG_ReadByte(&cl_message) * (2.0f / 255.0f);
 			Matrix4x4_CreateTranslate(&tempmatrix, pos[0], pos[1], pos[2]);
-			CL_AllocLightFlash(NULL, &tempmatrix, 350, color[0], color[1], color[2], 700, 0.5, 0, -1, true, 1, 0.25, 0.25, 1, 1, LIGHTFLAG_NORMALMODE | LIGHTFLAG_REALTIMEMODE);
+			CL_AllocLightFlash(NULL, &tempmatrix, 350, color[0], color[1], color[2], 700, 0.5, NULL, -1, true, 1, 0.25, 0.25, 1, 1, LIGHTFLAG_NORMALMODE | LIGHTFLAG_REALTIMEMODE);
 			S_StartSound(-1, 0, cl.sfx_r_exp3, pos, 1, 1);
 			break;
 
@@ -2870,7 +2868,7 @@ static void CL_ParseTempEntity(void)
 			color[1] = MSG_ReadByte(&cl_message) * (2.0f / 255.0f);
 			color[2] = MSG_ReadByte(&cl_message) * (2.0f / 255.0f);
 			Matrix4x4_CreateTranslate(&tempmatrix, pos[0], pos[1], pos[2]);
-			CL_AllocLightFlash(NULL, &tempmatrix, radius, color[0], color[1], color[2], radius / velspeed, velspeed, 0, -1, true, 1, 0.25, 1, 1, 1, LIGHTFLAG_NORMALMODE | LIGHTFLAG_REALTIMEMODE);
+			CL_AllocLightFlash(NULL, &tempmatrix, radius, color[0], color[1], color[2], radius / velspeed, velspeed, NULL, -1, true, 1, 0.25, 1, 1, 1, LIGHTFLAG_NORMALMODE | LIGHTFLAG_REALTIMEMODE);
 			break;
 
 		case TE_FLAMEJET:
@@ -2902,7 +2900,7 @@ static void CL_ParseTempEntity(void)
 			break;
 	// PGM 01/21/97
 
-	// LordHavoc: for compatibility with the Nehahra movie...
+	// LadyHavoc: for compatibility with the Nehahra movie...
 		case TE_LIGHTNING4NEH:
 			CL_ParseBeam(Mod_ForName(MSG_ReadString(&cl_message, cl_readstring, sizeof(cl_readstring)), true, false, NULL), false);
 			break;
@@ -2931,7 +2929,7 @@ static void CL_ParseTempEntity(void)
 			color[1] = tempcolor[1] * (2.0f / 255.0f);
 			color[2] = tempcolor[2] * (2.0f / 255.0f);
 			Matrix4x4_CreateTranslate(&tempmatrix, pos[0], pos[1], pos[2]);
-			CL_AllocLightFlash(NULL, &tempmatrix, 350, color[0], color[1], color[2], 700, 0.5, 0, -1, true, 1, 0.25, 0.25, 1, 1, LIGHTFLAG_NORMALMODE | LIGHTFLAG_REALTIMEMODE);
+			CL_AllocLightFlash(NULL, &tempmatrix, 350, color[0], color[1], color[2], 700, 0.5, NULL, -1, true, 1, 0.25, 0.25, 1, 1, LIGHTFLAG_NORMALMODE | LIGHTFLAG_REALTIMEMODE);
 			S_StartSound(-1, 0, cl.sfx_r_exp3, pos, 1, 1);
 			break;
 
@@ -3014,13 +3012,13 @@ typedef struct cl_iplog_item_s
 }
 cl_iplog_item_t;
 
-static qboolean cl_iplog_loaded = false;
+static qbool cl_iplog_loaded = false;
 static int cl_iplog_numitems = 0;
 static int cl_iplog_maxitems = 0;
 static cl_iplog_item_t *cl_iplog_items;
 
 static void CL_IPLog_Load(void);
-static void CL_IPLog_Add(const char *address, const char *name, qboolean checkexisting, qboolean addtofile)
+static void CL_IPLog_Add(const char *address, const char *name, qbool checkexisting, qbool addtofile)
 {
 	int i;
 	size_t sz_name, sz_address;
@@ -3060,10 +3058,10 @@ static void CL_IPLog_Add(const char *address, const char *name, qboolean checkex
 	sz_name = strlen(name) + 1;
 	cl_iplog_items[cl_iplog_numitems].address = (char *) Mem_Alloc(cls.permanentmempool, sz_address);
 	cl_iplog_items[cl_iplog_numitems].name = (char *) Mem_Alloc(cls.permanentmempool, sz_name);
-	strlcpy(cl_iplog_items[cl_iplog_numitems].address, address, sz_address);
+	dp_strlcpy(cl_iplog_items[cl_iplog_numitems].address, address, sz_address);
 	// TODO: maybe it would be better to strip weird characters from name when
 	// copying it here rather than using a straight strcpy?
-	strlcpy(cl_iplog_items[cl_iplog_numitems].name, name, sz_name);
+	dp_strlcpy(cl_iplog_items[cl_iplog_numitems].name, name, sz_name);
 	cl_iplog_numitems++;
 	if (addtofile)
 	{
@@ -3126,18 +3124,18 @@ static void CL_IPLog_Load(void)
 	}
 }
 
-static void CL_IPLog_List_f(void)
+static void CL_IPLog_List_f(cmd_state_t *cmd)
 {
 	int i, j;
 	const char *addressprefix;
-	if (Cmd_Argc() > 2)
+	if (Cmd_Argc(cmd) > 2)
 	{
-		Con_Printf("usage: %s 123.456.789.\n", Cmd_Argv(0));
+		Con_Printf("usage: %s 123.456.789.\n", Cmd_Argv(cmd, 0));
 		return;
 	}
 	addressprefix = "";
-	if (Cmd_Argc() >= 2)
-		addressprefix = Cmd_Argv(1);
+	if (Cmd_Argc(cmd) >= 2)
+		addressprefix = Cmd_Argv(cmd, 1);
 	if (!cl_iplog_loaded)
 		CL_IPLog_Load();
 	if (addressprefix && addressprefix[0])
@@ -3168,7 +3166,7 @@ static void CL_IPLog_List_f(void)
 }
 
 // look for anything interesting like player IP addresses or ping reports
-static qboolean CL_ExaminePrintString(const char *text)
+static qbool CL_ExaminePrintString(const char *text)
 {
 	int len;
 	const char *t;
@@ -3200,7 +3198,7 @@ static qboolean CL_ExaminePrintString(const char *text)
 	if (cl.parsingtextmode == CL_PARSETEXTMODE_PING)
 	{
 		// if anything goes wrong, we'll assume this is not a ping report
-		qboolean expected = cl.parsingtextexpectingpingforscores != 0;
+		qbool expected = cl.parsingtextexpectingpingforscores != 0;
 		cl.parsingtextexpectingpingforscores = 0;
 		cl.parsingtextmode = CL_PARSETEXTMODE_NONE;
 		t = text;
@@ -3311,14 +3309,14 @@ static qboolean CL_ExaminePrintString(const char *text)
 	return true;
 }
 
-extern cvar_t slowmo;
+extern cvar_t host_timescale;
 extern cvar_t cl_lerpexcess;
 static void CL_NetworkTimeReceived(double newtime)
 {
-	double timehigh;
+	cl.opt_inputs_since_update = 0;
 	cl.mtime[1] = cl.mtime[0];
 	cl.mtime[0] = newtime;
-	if (cl_nolerp.integer || cls.timedemo || (cl.islocalgame && !sv_fixedframeratesingleplayer.integer) || cl.mtime[1] == cl.mtime[0] || cls.signon < SIGNONS)
+	if (cls.timedemo || cl.mtime[1] == cl.mtime[0] || cls.signon < SIGNONS)
 		cl.time = cl.mtime[1] = newtime;
 	else if (cls.demoplayback)
 	{
@@ -3330,7 +3328,9 @@ static void CL_NetworkTimeReceived(double newtime)
 	}
 	else if (cls.protocol != PROTOCOL_QUAKEWORLD)
 	{
+		double timehigh = 0; // hush compiler warning
 		cl.mtime[1] = max(cl.mtime[1], cl.mtime[0] - 0.1);
+
 		if (developer_extra.integer && vid_activewindow)
 		{
 			if (cl.time < cl.mtime[1] - (cl.mtime[0] - cl.mtime[1]))
@@ -3338,22 +3338,36 @@ static void CL_NetworkTimeReceived(double newtime)
 			else if (cl.time > cl.mtime[0] + (cl.mtime[0] - cl.mtime[1]))
 				Con_DPrintf("--- cl.time > cl.mtime[0] (%f > %f ... %f)\n", cl.time, cl.mtime[1], cl.mtime[0]);
 		}
-		cl.time += (cl.mtime[1] - cl.time) * bound(0, cl_nettimesyncfactor.value, 1);
-		timehigh = cl.mtime[1] + (cl.mtime[0] - cl.mtime[1]) * cl_nettimesyncboundtolerance.value;
-		if (cl_nettimesyncboundmode.integer == 1)
-			cl.time = bound(cl.mtime[1], cl.time, cl.mtime[0]);
-		else if (cl_nettimesyncboundmode.integer == 2)
+
+selectmode:
+		switch (cl_nettimesyncboundmode.integer)
 		{
-			if (cl.time < cl.mtime[1] || cl.time > timehigh)
-				cl.time = cl.mtime[1];
-		}
-		else if (cl_nettimesyncboundmode.integer == 3)
-		{
-			if ((cl.time < cl.mtime[1] && cl.oldtime < cl.mtime[1]) || (cl.time > timehigh && cl.oldtime > timehigh))
-				cl.time = cl.mtime[1];
-		}
-		else if (cl_nettimesyncboundmode.integer == 4)
-		{
+		default:
+			Cvar_SetQuick(&cl_nettimesyncboundmode, cl_nettimesyncboundmode.defstring);
+			goto selectmode;
+		case 1:
+		case 2:
+		case 3:
+			// doesn't make sense for modes > 3
+			cl.time += (cl.mtime[1] - cl.time) * bound(0, cl_nettimesyncfactor.value, 1);
+			timehigh = cl.mtime[1] + (cl.mtime[0] - cl.mtime[1]) * cl_nettimesyncboundtolerance.value;
+			switch (cl_nettimesyncboundmode.integer)
+			{
+			case 1:
+				cl.time = bound(cl.mtime[1], cl.time, cl.mtime[0]);
+				break;
+			case 2:
+				if (cl.time < cl.mtime[1] || cl.time > timehigh)
+					cl.time = cl.mtime[1];
+				break;
+			case 3:
+				if ((cl.time < cl.mtime[1] && cl.oldtime < cl.mtime[1]) || (cl.time > timehigh && cl.oldtime > timehigh))
+					cl.time = cl.mtime[1];
+				break;
+			}
+			break;
+
+		case 4:
 			if (fabs(cl.time - cl.mtime[1]) > 0.5)
 				cl.time = cl.mtime[1]; // reset
 			else if (fabs(cl.time - cl.mtime[1]) > 0.1)
@@ -3362,20 +3376,44 @@ static void CL_NetworkTimeReceived(double newtime)
 				cl.time -= 0.002 * cl.movevars_timescale; // fall into the past by 2ms
 			else
 				cl.time += 0.001 * cl.movevars_timescale; // creep forward 1ms
-		}
-		else if (cl_nettimesyncboundmode.integer == 5)
-		{
+			break;
+
+		case 5:
 			if (fabs(cl.time - cl.mtime[1]) > 0.5)
 				cl.time = cl.mtime[1]; // reset
 			else if (fabs(cl.time - cl.mtime[1]) > 0.1)
 				cl.time += 0.5 * (cl.mtime[1] - cl.time); // fast
 			else
 				cl.time = bound(cl.time - 0.002 * cl.movevars_timescale, cl.mtime[1], cl.time + 0.001 * cl.movevars_timescale);
-		}
-		else if (cl_nettimesyncboundmode.integer == 6)
-		{
+			break;
+
+		case 6:
 			cl.time = bound(cl.mtime[1], cl.time, cl.mtime[0]);
 			cl.time = bound(cl.time - 0.002 * cl.movevars_timescale, cl.mtime[1], cl.time + 0.001 * cl.movevars_timescale);
+			break;
+
+		case 7:
+			/* bones_was_here: this aims to prevent disturbances in the force from affecting cl.time
+			 * the rolling harmonic mean gives large time error outliers low significance
+			 * correction rate is dynamic and gradual (max 10% of mean error per tic)
+			 * time is correct within a few server frames of connect/map start
+			 * can achieve microsecond accuracy when cl.realframetime is a multiple of sv.frametime
+			 * prevents 0ms move frame times with uncapped fps
+			 * smoothest mode esp. for vsynced clients on servers with aggressive inputtimeout
+			 */
+			{
+				unsigned char i;
+				float error;
+				// in event of packet loss, cl.mtime[1] could be very old, so avoid if possible
+				double target = cl.movevars_ticrate ? cl.mtime[0] - cl.movevars_ticrate : cl.mtime[1];
+				cl.ts_error_stor[cl.ts_error_num] = 1.0f / max(fabs(cl.time - target), FLT_MIN);
+				cl.ts_error_num = (cl.ts_error_num + 1) % NUM_TS_ERRORS;
+				for (i = 0, error = 0.0f; i < NUM_TS_ERRORS; i++)
+					error += cl.ts_error_stor[i];
+				error = 0.1f / (error / NUM_TS_ERRORS);
+				cl.time = bound(cl.time - error, target, cl.time + error);
+			}
+			break;
 		}
 	}
 	// this packet probably contains a player entity update, so we will need
@@ -3393,8 +3431,10 @@ static void CL_NetworkTimeReceived(double newtime)
 	// update the csqc's server timestamps, critical for proper sync
 	CSQC_UpdateNetworkTimes(cl.mtime[0], cl.mtime[1]);
 
+#ifdef USEODE
 	if (cl.mtime[0] > cl.mtime[1])
 		World_Physics_Frame(&cl.world, cl.mtime[0] - cl.mtime[1], cl.movevars_gravity);
+#endif
 
 	// only lerp entities that also get an update in this frame, when lerp excess is used
 	if(cl_lerpexcess.value > 0)
@@ -3427,17 +3467,18 @@ void CL_ParseServerMessage(void)
 	unsigned char		cmdlog[32];
 	const char		*cmdlogname[32], *temp;
 	int			cmdindex, cmdcount = 0;
-	qboolean	qwplayerupdatereceived;
-	qboolean	strip_pqc;
+	qbool	qwplayerupdatereceived;
+	qbool	strip_pqc;
 	char vabuf[1024];
+	size_t cl_readstring_len;
 
-	// LordHavoc: moved demo message writing from before the packet parse to
+	// LadyHavoc: moved demo message writing from before the packet parse to
 	// after the packet parse so that CL_Stop_f can be called by cl_autodemo
 	// code in CL_ParseServerinfo
 	//if (cls.demorecording)
 	//	CL_WriteDemoMessage (&cl_message);
 
-	cl.last_received_message = realtime;
+	cl.last_received_message = host.realtime;
 
 	CL_KeepaliveMessage(false);
 
@@ -3445,7 +3486,7 @@ void CL_ParseServerMessage(void)
 // if recording demos, copy the message out
 //
 	if (cl_shownet.integer == 1)
-		Con_Printf("%f %i\n", realtime, cl_message.cursize);
+		Con_Printf("%f %i\n", host.realtime, cl_message.cursize);
 	else if (cl_shownet.integer == 2)
 		Con_Print("------------------\n");
 
@@ -3458,7 +3499,7 @@ void CL_ParseServerMessage(void)
 
 	if (cls.protocol == PROTOCOL_QUAKEWORLD)
 	{
-		CL_NetworkTimeReceived(realtime); // qw has no clock
+		CL_NetworkTimeReceived(host.realtime); // qw has no clock
 
 		// kill all qw nails
 		cl.qw_num_nails = 0;
@@ -3491,7 +3532,7 @@ void CL_ParseServerMessage(void)
 			cmdlogname[cmdindex] = qw_svc_strings[cmd];
 			if (!cmdlogname[cmdindex])
 			{
-				// LordHavoc: fix for bizarre problem in MSVC that I do not understand (if I assign the string pointer directly it ends up storing a NULL pointer)
+				// LadyHavoc: fix for bizarre problem in MSVC that I do not understand (if I assign the string pointer directly it ends up storing a NULL pointer)
 				const char *d = "<unknown>";
 				cmdlogname[cmdindex] = d;
 			}
@@ -3503,7 +3544,7 @@ void CL_ParseServerMessage(void)
 				{
 					char description[32*64], logtemp[64];
 					int count;
-					strlcpy(description, "packet dump: ", sizeof(description));
+					dp_strlcpy(description, "packet dump: ", sizeof(description));
 					i = cmdcount - 32;
 					if (i < 0)
 						i = 0;
@@ -3512,7 +3553,7 @@ void CL_ParseServerMessage(void)
 					while(count > 0)
 					{
 						dpsnprintf(logtemp, sizeof(logtemp), "%3i:%s ", cmdlog[i], cmdlogname[i]);
-						strlcat(description, logtemp, sizeof(description));
+						dp_strlcat(description, logtemp, sizeof(description));
 						count--;
 						i++;
 						i &= 31;
@@ -3528,31 +3569,36 @@ void CL_ParseServerMessage(void)
 				break;
 
 			case qw_svc_disconnect:
-				Con_Printf("Server disconnected\n");
 				if (cls.demonum != -1)
 					CL_NextDemo();
 				else
-					CL_Disconnect();
-				return;
+					CL_DisconnectEx(true, "Server disconnected");
+				break;
 
 			case qw_svc_print:
 				i = MSG_ReadByte(&cl_message);
-				temp = MSG_ReadString(&cl_message, cl_readstring, sizeof(cl_readstring));
+				cl_readstring_len = MSG_ReadString_len(&cl_message, cl_readstring, sizeof(cl_readstring));
+				temp = cl_readstring;
 				if (CL_ExaminePrintString(temp)) // look for anything interesting like player IP addresses or ping reports
 				{
 					if (i == 3) // chat
-						CSQC_AddPrintText(va(vabuf, sizeof(vabuf), "\1%s", temp));	//[515]: csqc
+					{
+						cl_readstring_len = dpsnprintf(vabuf, sizeof(vabuf), "\1%s", temp);
+						CSQC_AddPrintText(vabuf, cl_readstring_len);	//[515]: csqc
+					}
 					else
-						CSQC_AddPrintText(temp);
+						CSQC_AddPrintText(temp, cl_readstring_len);
 				}
 				break;
 
 			case qw_svc_centerprint:
-				CL_VM_Parse_CenterPrint(MSG_ReadString(&cl_message, cl_readstring, sizeof(cl_readstring)));	//[515]: csqc
+				cl_readstring_len = MSG_ReadString_len(&cl_message, cl_readstring, sizeof(cl_readstring));
+				CL_VM_Parse_CenterPrint(cl_readstring, cl_readstring_len);	//[515]: csqc
 				break;
 
 			case qw_svc_stufftext:
-				CL_VM_Parse_StuffCmd(MSG_ReadString(&cl_message, cl_readstring, sizeof(cl_readstring)));	//[515]: csqc
+				cl_readstring_len = MSG_ReadString_len(&cl_message, cl_readstring, sizeof(cl_readstring));
+				CL_VM_Parse_StuffCmd(cl_readstring, cl_readstring_len);	//[515]: csqc
 				break;
 
 			case qw_svc_damage:
@@ -3585,7 +3631,7 @@ void CL_ParseServerMessage(void)
 					Con_Printf ("svc_lightstyle >= MAX_LIGHTSTYLES");
 					break;
 				}
-				strlcpy (cl.lightstyle[i].map,  MSG_ReadString(&cl_message, cl_readstring, sizeof(cl_readstring)), sizeof (cl.lightstyle[i].map));
+				dp_strlcpy (cl.lightstyle[i].map,  MSG_ReadString(&cl_message, cl_readstring, sizeof(cl_readstring)), sizeof (cl.lightstyle[i].map));
 				cl.lightstyle[i].map[MAX_STYLESTRING - 1] = 0;
 				cl.lightstyle[i].length = (int)strlen(cl.lightstyle[i].map);
 				break;
@@ -3672,12 +3718,10 @@ void CL_ParseServerMessage(void)
 
 			case qw_svc_cdtrack:
 				cl.cdtrack = cl.looptrack = MSG_ReadByte(&cl_message);
-#ifdef CONFIG_CD
 				if ( (cls.demoplayback || cls.demorecording) && (cls.forcetrack != -1) )
 					CDAudio_Play ((unsigned char)cls.forcetrack, true);
 				else
 					CDAudio_Play ((unsigned char)cl.cdtrack, true);
-#endif
 				break;
 
 			case qw_svc_intermission:
@@ -3697,7 +3741,7 @@ void CL_ParseServerMessage(void)
 				break;
 
 			case qw_svc_sellscreen:
-				Cmd_ExecuteString ("help", src_command, true);
+				Cmd_ExecuteString(cmd_local, "help", 4, src_local, true);
 				break;
 
 			case qw_svc_smallkick:
@@ -3768,20 +3812,14 @@ void CL_ParseServerMessage(void)
 				EntityFrameQW_CL_ReadFrame(false);
 				// first update is the final signon stage
 				if (cls.signon == SIGNONS - 1)
-				{
-					cls.signon = SIGNONS;
-					CL_SignonReply ();
-				}
+					CL_SignonReply(SIGNONS);
 				break;
 
 			case qw_svc_deltapacketentities:
 				EntityFrameQW_CL_ReadFrame(true);
 				// first update is the final signon stage
 				if (cls.signon == SIGNONS - 1)
-				{
-					cls.signon = SIGNONS;
-					CL_SignonReply ();
-				}
+					CL_SignonReply(SIGNONS);
 				break;
 
 			case qw_svc_maxspeed:
@@ -3796,12 +3834,10 @@ void CL_ParseServerMessage(void)
 
 			case qw_svc_setpause:
 				cl.paused = MSG_ReadByte(&cl_message) != 0;
-#ifdef CONFIG_CD
-				if (cl.paused)
+				if (cl.paused && snd_cdautopause.integer)
 					CDAudio_Pause ();
-				else
+				else if (bgmvolume.value > 0.0f)
 					CDAudio_Resume ();
-#endif
 				S_PauseGameSounds (cl.paused);
 				break;
 			}
@@ -3838,16 +3874,13 @@ void CL_ParseServerMessage(void)
 			// if the high bit of the command byte is set, it is a fast update
 			if (cmd & 128)
 			{
-				// LordHavoc: fix for bizarre problem in MSVC that I do not understand (if I assign the string pointer directly it ends up storing a NULL pointer)
+				// LadyHavoc: fix for bizarre problem in MSVC that I do not understand (if I assign the string pointer directly it ends up storing a NULL pointer)
 				temp = "entity";
 				cmdlogname[cmdindex] = temp;
 				SHOWNET("fast update");
 				if (cls.signon == SIGNONS - 1)
-				{
 					// first update is the final signon stage
-					cls.signon = SIGNONS;
-					CL_SignonReply ();
-				}
+					CL_SignonReply(SIGNONS);
 				EntityFrameQuake_ReadEntity (cmd&127);
 				continue;
 			}
@@ -3856,7 +3889,7 @@ void CL_ParseServerMessage(void)
 			cmdlogname[cmdindex] = svc_strings[cmd];
 			if (!cmdlogname[cmdindex])
 			{
-				// LordHavoc: fix for bizarre problem in MSVC that I do not understand (if I assign the string pointer directly it ends up storing a NULL pointer)
+				// LadyHavoc: fix for bizarre problem in MSVC that I do not understand (if I assign the string pointer directly it ends up storing a NULL pointer)
 				const char *d = "<unknown>";
 				cmdlogname[cmdindex] = d;
 			}
@@ -3868,7 +3901,7 @@ void CL_ParseServerMessage(void)
 				{
 					char description[32*64], tempdesc[64];
 					int count;
-					strlcpy (description, "packet dump: ", sizeof(description));
+					dp_strlcpy (description, "packet dump: ", sizeof(description));
 					i = cmdcount - 32;
 					if (i < 0)
 						i = 0;
@@ -3877,7 +3910,7 @@ void CL_ParseServerMessage(void)
 					while(count > 0)
 					{
 						dpsnprintf (tempdesc, sizeof (tempdesc), "%3i:%s ", cmdlog[i], cmdlogname[i]);
-						strlcat (description, tempdesc, sizeof (description));
+						dp_strlcat (description, tempdesc, sizeof (description));
 						count--;
 						i++;
 						i &= 31;
@@ -3913,25 +3946,27 @@ void CL_ParseServerMessage(void)
 				break;
 
 			case svc_disconnect:
-				Con_Printf ("Server disconnected\n");
 				if (cls.demonum != -1)
-					CL_NextDemo ();
+					CL_NextDemo();
 				else
-					CL_Disconnect ();
+					CL_DisconnectEx(true, cls.protocol == PROTOCOL_DARKPLACES8 ? MSG_ReadString(&cl_message, cl_readstring, sizeof(cl_readstring)) : "Server disconnected");
 				break;
 
 			case svc_print:
-				temp = MSG_ReadString(&cl_message, cl_readstring, sizeof(cl_readstring));
+				cl_readstring_len = MSG_ReadString_len(&cl_message, cl_readstring, sizeof(cl_readstring));
+				temp = cl_readstring;
 				if (CL_ExaminePrintString(temp)) // look for anything interesting like player IP addresses or ping reports
-					CSQC_AddPrintText(temp);	//[515]: csqc
+					CSQC_AddPrintText(temp, cl_readstring_len);	//[515]: csqc
 				break;
 
 			case svc_centerprint:
-				CL_VM_Parse_CenterPrint(MSG_ReadString(&cl_message, cl_readstring, sizeof(cl_readstring)));	//[515]: csqc
+				cl_readstring_len = MSG_ReadString_len(&cl_message, cl_readstring, sizeof(cl_readstring));
+				CL_VM_Parse_CenterPrint(cl_readstring, cl_readstring_len);	//[515]: csqc
 				break;
 
 			case svc_stufftext:
-				temp = MSG_ReadString(&cl_message, cl_readstring, sizeof(cl_readstring));
+				cl_readstring_len = MSG_ReadString_len(&cl_message, cl_readstring, sizeof(cl_readstring));
+				temp = cl_readstring;
 				/* if(utf8_enable.integer)
 				{
 					strip_pqc = true;
@@ -3962,11 +3997,15 @@ void CL_ParseServerMessage(void)
 					if(*temp == 0x01)
 					{
 						++temp;
+						--cl_readstring_len;
 						while(*temp >= 0x01 && *temp <= 0x1F)
+						{
 							++temp;
+							--cl_readstring_len;
+						}
 					}
 				}
-				CL_VM_Parse_StuffCmd(temp);	//[515]: csqc
+				CL_VM_Parse_StuffCmd(temp, cl_readstring_len);	//[515]: csqc
 				break;
 
 			case svc_damage:
@@ -3996,7 +4035,7 @@ void CL_ParseServerMessage(void)
 					Host_Error("svc_setview >= MAX_EDICTS");
 				if (cl.viewentity >= cl.max_entities)
 					CL_ExpandEntities(cl.viewentity);
-				// LordHavoc: assume first setview recieved is the real player entity
+				// LadyHavoc: assume first setview recieved is the real player entity
 				if (!cl.realplayerentity)
 					cl.realplayerentity = cl.viewentity;
 				// update cl.playerentity to this one if it is a valid player
@@ -4011,13 +4050,13 @@ void CL_ParseServerMessage(void)
 					Con_Printf ("svc_lightstyle >= MAX_LIGHTSTYLES");
 					break;
 				}
-				strlcpy (cl.lightstyle[i].map,  MSG_ReadString(&cl_message, cl_readstring, sizeof(cl_readstring)), sizeof (cl.lightstyle[i].map));
+				dp_strlcpy (cl.lightstyle[i].map,  MSG_ReadString(&cl_message, cl_readstring, sizeof(cl_readstring)), sizeof (cl.lightstyle[i].map));
 				cl.lightstyle[i].map[MAX_STYLESTRING - 1] = 0;
 				cl.lightstyle[i].length = (int)strlen(cl.lightstyle[i].map);
 				break;
 
 			case svc_sound:
-				CL_ParseStartSoundPacket(false);
+				CL_ParseStartSoundPacket(cls.protocol == PROTOCOL_NEHAHRABJP2 || cls.protocol == PROTOCOL_NEHAHRABJP3 ? true : false);
 				break;
 
 			case svc_precache:
@@ -4035,7 +4074,7 @@ void CL_ParseServerMessage(void)
 					{
 						if (i >= 1 && i < MAX_MODELS)
 						{
-							dp_model_t *model = Mod_ForName(s, false, false, s[0] == '*' ? cl.model_name[1] : NULL);
+							model_t *model = Mod_ForName(s, false, false, s[0] == '*' ? cl.model_name[1] : NULL);
 							if (!model)
 								Con_DPrintf("svc_precache: Mod_ForName(\"%s\") failed\n", s);
 							cl.model_precache[i] = model;
@@ -4068,7 +4107,7 @@ void CL_ParseServerMessage(void)
 				i = MSG_ReadByte(&cl_message);
 				if (i >= cl.maxclients)
 					Host_Error ("CL_ParseServerMessage: svc_updatename >= cl.maxclients");
-				strlcpy (cl.scores[i].name, MSG_ReadString(&cl_message, cl_readstring, sizeof(cl_readstring)), sizeof (cl.scores[i].name));
+				dp_strlcpy (cl.scores[i].name, MSG_ReadString(&cl_message, cl_readstring, sizeof(cl_readstring)), sizeof (cl.scores[i].name));
 				break;
 
 			case svc_updatefrags:
@@ -4126,23 +4165,20 @@ void CL_ParseServerMessage(void)
 
 			case svc_setpause:
 				cl.paused = MSG_ReadByte(&cl_message) != 0;
-#ifdef CONFIG_CD
-				if (cl.paused)
+				if (cl.paused && snd_cdautopause.integer)
 					CDAudio_Pause ();
-				else
+				else if (bgmvolume.value > 0.0f)
 					CDAudio_Resume ();
-#endif
 				S_PauseGameSounds (cl.paused);
 				break;
 
 			case svc_signonnum:
 				i = MSG_ReadByte(&cl_message);
-				// LordHavoc: it's rude to kick off the client if they missed the
+				// LadyHavoc: it's rude to kick off the client if they missed the
 				// reconnect somehow, so allow signon 1 even if at signon 1
 				if (i <= cls.signon && i != 1)
 					Host_Error ("Received signon %i when at %i", i, cls.signon);
-				cls.signon = i;
-				CL_SignonReply ();
+				CL_SignonReply(i);
 				break;
 
 			case svc_killedmonster:
@@ -4168,7 +4204,7 @@ void CL_ParseServerMessage(void)
 				break;
 
 			case svc_spawnstaticsound:
-				CL_ParseStaticSound (false);
+				CL_ParseStaticSound (cls.protocol == PROTOCOL_NEHAHRABJP2 || cls.protocol == PROTOCOL_NEHAHRABJP3 ? true : false);
 				break;
 
 			case svc_spawnstaticsound2:
@@ -4178,12 +4214,10 @@ void CL_ParseServerMessage(void)
 			case svc_cdtrack:
 				cl.cdtrack = MSG_ReadByte(&cl_message);
 				cl.looptrack = MSG_ReadByte(&cl_message);
-#ifdef CONFIG_CD
 				if ( (cls.demoplayback || cls.demorecording) && (cls.forcetrack != -1) )
 					CDAudio_Play ((unsigned char)cls.forcetrack, true);
 				else
 					CDAudio_Play ((unsigned char)cl.cdtrack, true);
-#endif
 				break;
 
 			case svc_intermission:
@@ -4210,7 +4244,7 @@ void CL_ParseServerMessage(void)
 				break;
 
 			case svc_sellscreen:
-				Cmd_ExecuteString ("help", src_command, true);
+				Cmd_ExecuteString(cmd_local, "help", 4, src_local, true);
 				break;
 			case svc_hidelmp:
 				if (gamemode == GAME_TENEBRAE)
@@ -4248,11 +4282,8 @@ void CL_ParseServerMessage(void)
 				break;
 			case svc_entities:
 				if (cls.signon == SIGNONS - 1)
-				{
 					// first update is the final signon stage
-					cls.signon = SIGNONS;
-					CL_SignonReply ();
-				}
+					CL_SignonReply(SIGNONS);
 				if (cls.protocol == PROTOCOL_DARKPLACES1 || cls.protocol == PROTOCOL_DARKPLACES2 || cls.protocol == PROTOCOL_DARKPLACES3)
 					EntityFrame_CL_ReadFrame();
 				else if (cls.protocol == PROTOCOL_DARKPLACES4)
@@ -4292,7 +4323,7 @@ void CL_ParseServerMessage(void)
 
 	parsingerror = false;
 
-	// LordHavoc: this was at the start of the function before cl_autodemo was
+	// LadyHavoc: this was at the start of the function before cl_autodemo was
 	// implemented
 	if (cls.demorecording)
 	{
@@ -4313,7 +4344,7 @@ void CL_Parse_DumpPacket(void)
 void CL_Parse_ErrorCleanUp(void)
 {
 	CL_StopDownload(0, 0);
-	QW_CL_StopUpload();
+	QW_CL_StopUpload_f(cmd_local);
 }
 
 void CL_Parse_Init(void)
@@ -4334,6 +4365,7 @@ void CL_Parse_Init(void)
 	Cvar_RegisterVariable(&cl_sound_ric3);
 	Cvar_RegisterVariable(&cl_sound_ric_gunshot);
 	Cvar_RegisterVariable(&cl_sound_r_exp3);
+	Cvar_RegisterVariable(&snd_cdautopause);
 
 	Cvar_RegisterVariable(&cl_joinbeforedownloadsfinish);
 
@@ -4346,15 +4378,15 @@ void CL_Parse_Init(void)
 	Cvar_RegisterVariable(&cl_iplog_name);
 	Cvar_RegisterVariable(&cl_readpicture_force);
 
-	Cmd_AddCommand("nextul", QW_CL_NextUpload, "sends next fragment of current upload buffer (screenshot for example)");
-	Cmd_AddCommand("stopul", QW_CL_StopUpload, "aborts current upload (screenshot for example)");
-	Cmd_AddCommand("skins", QW_CL_Skins_f, "downloads missing qw skins from server");
-	Cmd_AddCommand("changing", QW_CL_Changing_f, "sent by qw servers to tell client to wait for level change");
-	Cmd_AddCommand("cl_begindownloads", CL_BeginDownloads_f, "used internally by darkplaces client while connecting (causes loading of models and sounds or triggers downloads for missing ones)");
-	Cmd_AddCommand("cl_downloadbegin", CL_DownloadBegin_f, "(networking) informs client of download file information, client replies with sv_startsoundload to begin the transfer");
-	Cmd_AddCommand("stopdownload", CL_StopDownload_f, "terminates a download");
-	Cmd_AddCommand("cl_downloadfinished", CL_DownloadFinished_f, "signals that a download has finished and provides the client with file size and crc to check its integrity");
-	Cmd_AddCommand("iplog_list", CL_IPLog_List_f, "lists names of players whose IP address begins with the supplied text (example: iplog_list 123.456.789)");
+	Cmd_AddCommand(CF_CLIENT, "nextul", QW_CL_NextUpload_f, "sends next fragment of current upload buffer (screenshot for example)");
+	Cmd_AddCommand(CF_CLIENT, "stopul", QW_CL_StopUpload_f, "aborts current upload (screenshot for example)");
+	Cmd_AddCommand(CF_CLIENT | CF_CLIENT_FROM_SERVER, "skins", QW_CL_Skins_f, "downloads missing qw skins from server");
+	Cmd_AddCommand(CF_CLIENT, "changing", QW_CL_Changing_f, "sent by qw servers to tell client to wait for level change");
+	Cmd_AddCommand(CF_CLIENT, "cl_begindownloads", CL_BeginDownloads_f, "used internally by darkplaces client while connecting (causes loading of models and sounds or triggers downloads for missing ones)");
+	Cmd_AddCommand(CF_CLIENT | CF_CLIENT_FROM_SERVER, "cl_downloadbegin", CL_DownloadBegin_f, "(networking) informs client of download file information, client replies with sv_startsoundload to begin the transfer");
+	Cmd_AddCommand(CF_CLIENT | CF_CLIENT_FROM_SERVER, "stopdownload", CL_StopDownload_f, "terminates a download");
+	Cmd_AddCommand(CF_CLIENT | CF_CLIENT_FROM_SERVER, "cl_downloadfinished", CL_DownloadFinished_f, "signals that a download has finished and provides the client with file size and crc to check its integrity");
+	Cmd_AddCommand(CF_CLIENT, "iplog_list", CL_IPLog_List_f, "lists names of players whose IP address begins with the supplied text (example: iplog_list 123.456.789)");
 }
 
 void CL_Parse_Shutdown(void)

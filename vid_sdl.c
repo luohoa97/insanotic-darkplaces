@@ -23,7 +23,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "quakedef.h"
 #include "cl_lua.h"
 #include "image.h"
-#include "dpsoftrast.h"
 #include "utf8lib.h"
 
 #ifndef __IPHONEOS__
@@ -32,17 +31,20 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include <IOKit/hidsystem/IOHIDLib.h>
 #include <IOKit/hidsystem/IOHIDParameter.h>
 #include <IOKit/hidsystem/event_status_driver.h>
-static cvar_t apple_mouse_noaccel = {CVAR_SAVE, "apple_mouse_noaccel", "1", "disables mouse acceleration while DarkPlaces is active"};
-static qboolean vid_usingnoaccel;
+#if (MAC_OS_X_VERSION_MIN_REQUIRED < 120000)
+	#define IOMainPort IOMasterPort
+#endif
+static cvar_t apple_mouse_noaccel = {CF_CLIENT | CF_ARCHIVE, "apple_mouse_noaccel", "1", "disables mouse acceleration while DarkPlaces is active"};
+static qbool vid_usingnoaccel;
 static double originalMouseSpeed = -1.0;
-io_connect_t IN_GetIOHandle(void)
+static io_connect_t IN_GetIOHandle(void)
 {
 	io_connect_t iohandle = MACH_PORT_NULL;
 	kern_return_t status;
 	io_service_t iohidsystem = MACH_PORT_NULL;
 	mach_port_t masterport;
 
-	status = IOMasterPort(MACH_PORT_NULL, &masterport);
+	status = IOMainPort(MACH_PORT_NULL, &masterport);
 	if(status != KERN_SUCCESS)
 		return 0;
 
@@ -58,72 +60,39 @@ io_connect_t IN_GetIOHandle(void)
 #endif
 #endif
 
-#ifdef WIN32
-#define SDL_R_RESTART
-#endif
 
 // Tell startup code that we have a client
 int cl_available = true;
 
-qboolean vid_supportrefreshrate = false;
+qbool vid_supportrefreshrate = false;
 
-static qboolean vid_usingmouse = false;
-static qboolean vid_usingmouse_relativeworks = false; // SDL2 workaround for unimplemented RelativeMouse mode
-static qboolean vid_usinghidecursor = false;
-static qboolean vid_hasfocus = false;
-static qboolean vid_isfullscreen;
-#if SDL_MAJOR_VERSION != 1
-static qboolean vid_usingvsync = false;
-#endif
+static qbool vid_usingmouse = false;
+static qbool vid_usingmouse_relativeworks = false; // SDL2 workaround for unimplemented RelativeMouse mode
+static qbool vid_usinghidecursor = false;
+static qbool vid_hasfocus = false;
+static qbool vid_wmborder_waiting, vid_wmborderless;
 static SDL_Joystick *vid_sdljoystick = NULL;
+static SDL_GameController *vid_sdlgamecontroller = NULL;
+static cvar_t joy_sdl2_trigger_deadzone = {CF_ARCHIVE | CF_CLIENT, "joy_sdl2_trigger_deadzone", "0.5", "deadzone for triggers to be registered as key presses"};
 // GAME_STEELSTORM specific
 static cvar_t *steelstorm_showing_map = NULL; // detect but do not create the cvar
 static cvar_t *steelstorm_showing_mousecursor = NULL; // detect but do not create the cvar
 
-static int win_half_width = 50;
-static int win_half_height = 50;
-static int video_bpp;
-
-#if SDL_MAJOR_VERSION == 1
-static SDL_Surface *video_screen;
-static int video_flags;
-#else
 static SDL_GLContext context;
 static SDL_Window *window;
-static int window_flags;
-#endif
-static SDL_Surface *vid_softsurface;
-static vid_mode_t desktop_mode;
 
-/////////////////////////
 // Input handling
-////
-//TODO: Add error checking
 
 #ifndef SDLK_PERCENT
 #define SDLK_PERCENT '%'
-#if SDL_MAJOR_VERSION == 1
-#define SDLK_PRINTSCREEN SDLK_PRINT
-#define SDLK_SCROLLLOCK SDLK_SCROLLOCK
-#define SDLK_NUMLOCKCLEAR SDLK_NUMLOCK
-#define SDLK_KP_1 SDLK_KP1
-#define SDLK_KP_2 SDLK_KP2
-#define SDLK_KP_3 SDLK_KP3
-#define SDLK_KP_4 SDLK_KP4
-#define SDLK_KP_5 SDLK_KP5
-#define SDLK_KP_6 SDLK_KP6
-#define SDLK_KP_7 SDLK_KP7
-#define SDLK_KP_8 SDLK_KP8
-#define SDLK_KP_9 SDLK_KP9
-#define SDLK_KP_0 SDLK_KP0
-#endif
 #endif
 
 static int MapKey( unsigned int sdlkey )
 {
 	switch(sdlkey)
 	{
-	default: return 0;
+	// sdlkey can be Unicode codepoint for non-ascii keys, which are valid
+	default:                      return sdlkey & SDLK_SCANCODE_MASK ? 0 : sdlkey;
 //	case SDLK_UNKNOWN:            return K_UNKNOWN;
 	case SDLK_RETURN:             return K_ENTER;
 	case SDLK_ESCAPE:             return K_ESCAPE;
@@ -339,7 +308,6 @@ static int MapKey( unsigned int sdlkey )
 	case SDLK_RALT:               return K_ALT;
 //	case SDLK_RGUI:               return K_RGUI;
 //	case SDLK_MODE:               return K_MODE;
-#if SDL_MAJOR_VERSION != 1
 //	case SDLK_AUDIONEXT:          return K_AUDIONEXT;
 //	case SDLK_AUDIOPREV:          return K_AUDIOPREV;
 //	case SDLK_AUDIOSTOP:          return K_AUDIOSTOP;
@@ -365,22 +333,16 @@ static int MapKey( unsigned int sdlkey )
 //	case SDLK_KBDILLUMUP:         return K_KBDILLUMUP;
 //	case SDLK_EJECT:              return K_EJECT;
 //	case SDLK_SLEEP:              return K_SLEEP;
-#endif
 	}
 }
 
-qboolean VID_HasScreenKeyboardSupport(void)
+qbool VID_HasScreenKeyboardSupport(void)
 {
-#if SDL_MAJOR_VERSION != 1
 	return SDL_HasScreenKeyboardSupport() != SDL_FALSE;
-#else
-	return false;
-#endif
 }
 
-void VID_ShowKeyboard(qboolean show)
+void VID_ShowKeyboard(qbool show)
 {
-#if SDL_MAJOR_VERSION != 1
 	if (!SDL_HasScreenKeyboardSupport())
 		return;
 
@@ -394,36 +356,27 @@ void VID_ShowKeyboard(qboolean show)
 		if (SDL_IsTextInputActive())
 			SDL_StopTextInput();
 	}
-#endif
 }
 
-qboolean VID_ShowingKeyboard(void)
+qbool VID_ShowingKeyboard(void)
 {
-#if SDL_MAJOR_VERSION != 1
 	return SDL_IsTextInputActive() != 0;
-#else
-	return false;
-#endif
 }
 
-void VID_SetMouse(qboolean fullscreengrab, qboolean relative, qboolean hidecursor)
+static void VID_SetMouse(qbool relative, qbool hidecursor)
 {
 #ifndef DP_MOBILETOUCH
 #ifdef MACOSX
 	if(relative)
 		if(vid_usingmouse && (vid_usingnoaccel != !!apple_mouse_noaccel.integer))
-			VID_SetMouse(false, false, false); // ungrab first!
+			VID_SetMouse(false, false); // ungrab first!
 #endif
 	if (vid_usingmouse != relative)
 	{
 		vid_usingmouse = relative;
 		cl_ignoremousemoves = 2;
-#if SDL_MAJOR_VERSION == 1
-		SDL_WM_GrabInput( relative ? SDL_GRAB_ON : SDL_GRAB_OFF );
-#else
 		vid_usingmouse_relativeworks = SDL_SetRelativeMouseMode(relative ? SDL_TRUE : SDL_FALSE) == 0;
-//		Con_Printf("VID_SetMouse(%i, %i, %i) relativeworks = %i\n", (int)fullscreengrab, (int)relative, (int)hidecursor, (int)vid_usingmouse_relativeworks);
-#endif
+//		Con_Printf("VID_SetMouse(%i, %i) relativeworks = %i\n", (int)relative, (int)hidecursor, (int)vid_usingmouse_relativeworks);
 #ifdef MACOSX
 		if(relative)
 		{
@@ -496,8 +449,8 @@ float multitouch[MAXFINGERS][3];
 // anyone polling once per frame (a quick tap on a button): its release is
 // held back until it has been reported once. multitouch_seen: reported at
 // least once; multitouch_release: lifted, waiting to be reported.
-static qboolean multitouch_seen[MAXFINGERS];
-static qboolean multitouch_release[MAXFINGERS];
+static qbool multitouch_seen[MAXFINGERS];
+static qbool multitouch_release[MAXFINGERS];
 
 static void VID_FlushTouchReleases(void)
 {
@@ -521,14 +474,14 @@ static void VID_ReleaseAllTouches(void)
 	}
 }
 // last input came from a finger (true) or from keyboard / mouse (false)
-static qboolean vid_input_touch;
+static qbool vid_input_touch;
 
 // Insanotic: on a phone or tablet the engine starts in touch-screen mode
 // (vid_touchscreen 1: no mouse grab, finger-sized menu). A real mouse
 // (a Bluetooth or USB one; fingers arrive as SDL_TOUCH_MOUSEID) switches
 // to mouse mode, so the game captures it for aiming like on a PC; the next
 // finger on the screen switches back.
-static void VID_MouseOrFinger(qboolean real_mouse)
+static void VID_MouseOrFinger(qbool real_mouse)
 {
 #ifdef DP_MOBILETOUCH
 	if (real_mouse && vid_touchscreen.integer)
@@ -548,14 +501,14 @@ static int vid_touchmouse_hint = -1;
 int multitouchs[MAXFINGERS];
 
 // modified heavily by ELUAN
-static qboolean VID_TouchscreenArea(int corner, float px, float py, float pwidth, float pheight, const char *icon, float textheight, const char *text, float *resultmove, qboolean *resultbutton, keynum_t key, const char *typedtext, float deadzone, float oversizepixels_x, float oversizepixels_y, qboolean iamexclusive)
+static qbool VID_TouchscreenArea(int corner, float px, float py, float pwidth, float pheight, const char *icon, float textheight, const char *text, float *resultmove, qbool *resultbutton, keynum_t key, const char *typedtext, float deadzone, float oversizepixels_x, float oversizepixels_y, qbool iamexclusive)
 {
 	int finger;
 	float fx, fy, fwidth, fheight;
 	float overfx, overfy, overfwidth, overfheight;
 	float rel[3];
 	float sqsum;
-	qboolean button = false;
+	qbool button = false;
 	VectorClear(rel);
 	if (pwidth > 0 && pheight > 0)
 	{
@@ -661,11 +614,11 @@ static qboolean VID_TouchscreenArea(int corner, float px, float py, float pwidth
 
 // ELUAN:
 // not reentrant, but we only need one mouse cursor anyway...
-static void VID_TouchscreenCursor(float px, float py, float pwidth, float pheight, qboolean *resultbutton, keynum_t key)
+static void VID_TouchscreenCursor(float px, float py, float pwidth, float pheight, qbool *resultbutton, keynum_t key)
 {
 	int finger;
 	float fx, fy, fwidth, fheight;
-	qboolean button = false;
+	qbool button = false;
 	static int cursorfinger = -1;
 	static int cursorfreemovement = false;
 	static int canclick = false;
@@ -700,7 +653,7 @@ static void VID_TouchscreenCursor(float px, float py, float pwidth, float pheigh
 		}
 		if (scr_numtouchscreenareas < 128)
 		{
-			if (clickrealtime + 1 > realtime)
+			if (clickrealtime + 1 > host.realtime)
 			{
 				scr_touchscreenareas[scr_numtouchscreenareas].pic = "gfx/gui/touch_puck_cur_click.tga";
 			}
@@ -710,7 +663,7 @@ static void VID_TouchscreenCursor(float px, float py, float pwidth, float pheigh
 			}
 			else
 			{
-				switch ((int)realtime * 10 % 20)
+				switch ((int)host.realtime * 10 % 20)
 				{
 				case 0:
 					scr_touchscreenareas[scr_numtouchscreenareas].pic = "gfx/gui/touch_puck_cur_touch.tga";
@@ -764,11 +717,11 @@ static void VID_TouchscreenCursor(float px, float py, float pwidth, float pheigh
 			{
 				Key_Event(key, 0, true);
 				canclick = false;
-				clickrealtime = realtime;
+				clickrealtime = host.realtime;
 			}
 
 			// SS:BR can't qc can't cope with presses and releases on the same frame
-			if (clickrealtime && clickrealtime + 0.1 < realtime)
+			if (clickrealtime && clickrealtime + 0.1 < host.realtime)
 			{
 				Key_Event(key, 0, false);
 				clickrealtime = 0;
@@ -787,14 +740,31 @@ void VID_BuildJoyState(vid_joystate_t *joystate)
 	{
 		SDL_Joystick *joy = vid_sdljoystick;
 		int j;
-		int numaxes;
-		int numbuttons;
-		numaxes = SDL_JoystickNumAxes(joy);
-		for (j = 0;j < numaxes;j++)
-			joystate->axis[j] = SDL_JoystickGetAxis(joy, j) * (1.0f / 32767.0f);
-		numbuttons = SDL_JoystickNumButtons(joy);
-		for (j = 0;j < numbuttons;j++)
-			joystate->button[j] = SDL_JoystickGetButton(joy, j);
+
+		if (vid_sdlgamecontroller)
+		{
+			for (j = 0; j <= SDL_CONTROLLER_AXIS_MAX; ++j)
+			{
+				joystate->axis[j] = SDL_GameControllerGetAxis(vid_sdlgamecontroller, (SDL_GameControllerAxis)j) * (1.0f / 32767.0f);
+			}
+			for (j = 0; j < SDL_CONTROLLER_BUTTON_MAX; ++j)
+				joystate->button[j] = SDL_GameControllerGetButton(vid_sdlgamecontroller, (SDL_GameControllerButton)j);
+			// emulate joy buttons for trigger "axes"
+			joystate->button[SDL_CONTROLLER_BUTTON_MAX] = VID_JoyState_GetAxis(joystate, SDL_CONTROLLER_AXIS_TRIGGERLEFT, 1, joy_sdl2_trigger_deadzone.value) > 0.0f;
+			joystate->button[SDL_CONTROLLER_BUTTON_MAX+1] = VID_JoyState_GetAxis(joystate, SDL_CONTROLLER_AXIS_TRIGGERRIGHT, 1, joy_sdl2_trigger_deadzone.value) > 0.0f;
+		}
+		else
+
+		{
+			int numaxes;
+			int numbuttons;
+			numaxes = SDL_JoystickNumAxes(joy);
+			for (j = 0;j < numaxes;j++)
+				joystate->axis[j] = SDL_JoystickGetAxis(joy, j) * (1.0f / 32767.0f);
+			numbuttons = SDL_JoystickNumButtons(joy);
+			for (j = 0;j < numbuttons;j++)
+				joystate->button[j] = SDL_JoystickGetButton(joy, j);
+		}
 	}
 
 	VID_Shared_BuildJoyState_Finish(joystate);
@@ -837,8 +807,8 @@ static void IN_Move_TouchScreen_SteelStorm(void)
 	int i, numfingers;
 	float xscale, yscale;
 	float move[3], aim[3];
-	static qboolean oldbuttons[128];
-	static qboolean buttons[128];
+	static qbool oldbuttons[128];
+	static qbool buttons[128];
 	keydest_t keydest = (key_consoleactive & KEY_CONSOLEACTIVE_USER) ? key_console : key_dest;
 	memcpy(oldbuttons, buttons, sizeof(oldbuttons));
 	memset(multitouchs, 0, sizeof(multitouchs));
@@ -852,8 +822,8 @@ static void IN_Move_TouchScreen_SteelStorm(void)
 	if (numfingers == 1)
 	{
 		multitouch[MAXFINGERS-1][0] = SDL_GetMouseState(&x, &y) ? 11 : 0;
-		multitouch[MAXFINGERS-1][1] = (float)x / vid.width;
-		multitouch[MAXFINGERS-1][2] = (float)y / vid.height;
+		multitouch[MAXFINGERS-1][1] = (float)x / vid.mode.width;
+		multitouch[MAXFINGERS-1][2] = (float)y / vid.mode.height;
 	}
 	else
 	{
@@ -950,16 +920,16 @@ static void IN_Move_TouchScreen_Quake(void)
 {
 	int x, y;
 	float move[3], aim[3], click[3];
-	static qboolean oldbuttons[128];
-	static qboolean buttons[128];
+	static qbool oldbuttons[128];
+	static qbool buttons[128];
 	keydest_t keydest = (key_consoleactive & KEY_CONSOLEACTIVE_USER) ? key_console : key_dest;
 	memcpy(oldbuttons, buttons, sizeof(oldbuttons));
 	memset(multitouchs, 0, sizeof(multitouchs));
 
 	// simple quake controls
 	multitouch[MAXFINGERS-1][0] = SDL_GetMouseState(&x, &y);
-	multitouch[MAXFINGERS-1][1] = x * 32768 / vid.width;
-	multitouch[MAXFINGERS-1][2] = y * 32768 / vid.height;
+	multitouch[MAXFINGERS-1][1] = x * 32768 / vid.mode.width;
+	multitouch[MAXFINGERS-1][2] = y * 32768 / vid.mode.height;
 
 	// top of screen is toggleconsole and K_ESCAPE
 	switch(keydest)
@@ -970,7 +940,7 @@ static void IN_Move_TouchScreen_Quake(void)
 		if (!VID_ShowingKeyboard())
 		{
 			// user entered a command, close the console now
-			Con_ToggleConsole_f();
+			Con_ToggleConsole_f(cmd_local);
 		}
 		VID_TouchscreenArea( 0,   0,   0,   0,   0, NULL                         , 0.0f, NULL, NULL, &buttons[15], (keynum_t)0, NULL, 0, 0, 0, true);
 		VID_TouchscreenArea( 0,   0,   0,   0,   0, NULL                         , 0.0f, NULL, move, &buttons[0], K_MOUSE4, NULL, 0, 0, 0, true);
@@ -1020,7 +990,7 @@ void IN_Move( void )
 	static int old_x = 0, old_y = 0;
 	static int stuck = 0;
 	static keydest_t oldkeydest;
-	static qboolean oldshowkeyboard;
+	static qbool oldshowkeyboard;
 	int x, y;
 	vid_joystate_t joystate;
 	keydest_t keydest = (key_consoleactive & KEY_CONSOLEACTIVE_USER) ? key_console : key_dest;
@@ -1075,15 +1045,13 @@ void IN_Move( void )
 			{
 				// have the mouse stuck in the middle, example use: prevent expose effect of beryl during the game when not using
 				// window grabbing. --blub
+				int win_half_width = vid.mode.width>>1;
+				int win_half_height = vid.mode.height>>1;
 	
 				// we need 2 frames to initialize the center position
 				if(!stuck)
 				{
-#if SDL_MAJOR_VERSION == 1
-					SDL_WarpMouse(win_half_width, win_half_height);
-#else
 					SDL_WarpMouseInWindow(window, win_half_width, win_half_height);
-#endif
 					SDL_GetMouseState(&x, &y);
 					SDL_GetRelativeMouseState(&x, &y);
 					++stuck;
@@ -1094,11 +1062,7 @@ void IN_Move( void )
 					SDL_GetMouseState(&x, &y);
 					old_x = x - win_half_width;
 					old_y = y - win_half_height;
-#if SDL_MAJOR_VERSION == 1
-					SDL_WarpMouse(win_half_width, win_half_height);
-#else
 					SDL_WarpMouseInWindow(window, win_half_width, win_half_height);
-#endif
 				}
 			} else {
 				SDL_GetRelativeMouseState( &x, &y );
@@ -1115,6 +1079,8 @@ void IN_Move( void )
 			in_mouse_x = in_mouse_y = 0;
 	}
 
+	//Con_Printf("Mouse position: in_mouse %f %f in_windowmouse %f %f\n", in_mouse_x, in_mouse_y, in_windowmouse_x, in_windowmouse_y);
+
 	VID_BuildJoyState(&joystate);
 	VID_ApplyJoyState(&joystate);
 }
@@ -1123,33 +1089,11 @@ void IN_Move( void )
 // Message Handling
 ////
 
-#ifdef SDL_R_RESTART
-static qboolean sdl_needs_restart;
-static void sdl_start(void)
-{
-}
-static void sdl_shutdown(void)
-{
-	sdl_needs_restart = false;
-}
-static void sdl_newmap(void)
-{
-}
-#endif
-
 static keynum_t buttonremap[] =
 {
 	K_MOUSE1,
 	K_MOUSE3,
 	K_MOUSE2,
-#if SDL_MAJOR_VERSION == 1
-	// TODO Find out how SDL maps these buttons. It looks like we should
-	// still include these for sdl2? At least the button indexes don't
-	// differ between SDL1 and SDL2 for me, thus this array should stay the
-	// same (in X11 button order).
-	K_MWHEELUP,
-	K_MWHEELDOWN,
-#endif
 	K_MOUSE4,
 	K_MOUSE5,
 	K_MOUSE6,
@@ -1165,130 +1109,13 @@ static keynum_t buttonremap[] =
 	K_MOUSE16,
 };
 
-#if SDL_MAJOR_VERSION == 1
-// SDL
-void Sys_SendKeyEvents( void )
-{
-	static qboolean sound_active = true;
-	int keycode;
-	SDL_Event event;
-
-	VID_EnableJoystick(true);
-
-	while( SDL_PollEvent( &event ) )
-		switch( event.type ) {
-			case SDL_QUIT:
-				Sys_Quit(0);
-				break;
-			case SDL_KEYDOWN:
-			case SDL_KEYUP:
-				keycode = MapKey(event.key.keysym.sym);
-				if (!VID_JoyBlockEmulatedKeys(keycode))
-				{
-					if(keycode == K_NUMLOCK || keycode == K_CAPSLOCK)
-					{
-						// simulate down followed by up
-						Key_Event(keycode, event.key.keysym.unicode, true);
-						Key_Event(keycode, event.key.keysym.unicode, false);
-						break;
-					}
-					Key_Event(keycode, event.key.keysym.unicode, (event.key.state == SDL_PRESSED));
-				}
-				break;
-			case SDL_ACTIVEEVENT:
-				if( event.active.state & SDL_APPACTIVE )
-				{
-					if( event.active.gain )
-						vid_hidden = false;
-					else
-						vid_hidden = true;
-				}
-				break;
-			case SDL_MOUSEBUTTONDOWN:
-			case SDL_MOUSEBUTTONUP:
-				if (!vid_touchscreen.integer)
-				if (event.button.button > 0 && event.button.button <= ARRAY_SIZE(buttonremap))
-					Key_Event( buttonremap[event.button.button - 1], 0, event.button.state == SDL_PRESSED );
-				break;
-			case SDL_JOYBUTTONDOWN:
-			case SDL_JOYBUTTONUP:
-			case SDL_JOYAXISMOTION:
-			case SDL_JOYBALLMOTION:
-			case SDL_JOYHATMOTION:
-				break;
-			case SDL_VIDEOEXPOSE:
-				break;
-			case SDL_VIDEORESIZE:
-				if(vid_resizable.integer < 2 || vid_isfullscreen)
-				{
-					vid.width = event.resize.w;
-					vid.height = event.resize.h;
-					if (!vid_isfullscreen)
-						video_screen = SDL_SetVideoMode(vid.width, vid.height, video_bpp, video_flags);
-					if (vid_softsurface)
-					{
-						SDL_FreeSurface(vid_softsurface);
-						vid_softsurface = SDL_CreateRGBSurface(SDL_SWSURFACE, vid.width, vid.height, 32, 0x00FF0000, 0x0000FF00, 0x000000FF, 0xFF000000);
-						SDL_SetAlpha(vid_softsurface, 0, 255);
-						vid.softpixels = (unsigned int *)vid_softsurface->pixels;
-						if (vid.softdepthpixels)
-							free(vid.softdepthpixels);
-						vid.softdepthpixels = (unsigned int*)calloc(1, vid.width * vid.height * 4);
-					}
-#ifdef SDL_R_RESTART
-					// better not call R_Modules_Restart from here directly, as this may wreak havoc...
-					// so, let's better queue it for next frame
-					if(!sdl_needs_restart)
-					{
-						Cbuf_AddText("\nr_restart\n");
-						sdl_needs_restart = true;
-					}
-#endif
-				}
-				break;
-#if SDL_MAJOR_VERSION != 1
-			case SDL_TEXTEDITING:
-				break;
-			case SDL_TEXTINPUT:
-				break;
-#endif
-			case SDL_MOUSEMOTION:
-				break;
-			default:
-				Con_DPrintf("Received unrecognized SDL_Event type 0x%x\n", event.type);
-				break;
-		}
-
-	// enable/disable sound on focus gain/loss
-	if ((!vid_hidden && vid_activewindow) || !snd_mutewhenidle.integer)
-	{
-		if (!sound_active)
-		{
-			S_UnblockSound ();
-			sound_active = true;
-		}
-	}
-	else
-	{
-		if (sound_active)
-		{
-			S_BlockSound ();
-			sound_active = false;
-		}
-	}
-}
-
-#else
-
 //#define DEBUGSDLEVENTS
-
-// SDL2
-void Sys_SendKeyEvents( void )
+void Sys_SDL_HandleEvents(void)
 {
-	static qboolean sound_active = true;
 	int keycode;
 	int i;
-	qboolean isdown;
+	const char *chp;
+	qbool isdown;
 	Uchar unicode;
 	char pending_text[64] = "";
 	SDL_Event event;
@@ -1310,7 +1137,7 @@ void Sys_SendKeyEvents( void )
 #ifdef DEBUGSDLEVENTS
 				Con_DPrintf("SDL_Event: SDL_QUIT\n");
 #endif
-				Sys_Quit(0);
+				host.state = host_shutdown;
 				break;
 			case SDL_KEYDOWN:
 			case SDL_KEYUP:
@@ -1340,7 +1167,7 @@ void Sys_SendKeyEvents( void )
 								// what follows the first character (a committed word)
 								// is typed after the key itself
 								if (rest && *rest)
-									strlcpy(pending_text, rest, sizeof(pending_text));
+									dp_strlcpy(pending_text, rest, sizeof(pending_text));
 							}
 						}
 						else
@@ -1425,36 +1252,48 @@ void Sys_SendKeyEvents( void )
 #endif
 						break;
 					case SDL_WINDOWEVENT_MOVED:
+						vid.xPos = event.window.data1;
+						vid.yPos = event.window.data2;
+						// Update vid.displayindex (current monitor) as it may have changed
+						// SDL_GetWindowDisplayIndex() doesn't work if the window manager moves the fullscreen window, but this works:
+						for (i = 0; i < vid_info_displaycount.integer; ++i)
+						{
+							SDL_Rect displaybounds;
+							if (SDL_GetDisplayBounds(i, &displaybounds) < 0)
+							{
+								Con_Printf(CON_ERROR "Error getting bounds of display %i: \"%s\"\n", i, SDL_GetError());
+								return;
+							}
+							if (vid.xPos >= displaybounds.x && vid.xPos < displaybounds.x + displaybounds.w)
+							if (vid.yPos >= displaybounds.y && vid.yPos < displaybounds.y + displaybounds.h)
+							{
+								vid.mode.display = i;
+								break;
+							}
+						}
+						// when the window manager adds/removes the border it's likely to move the SDL window
+						// we'll need to correct that to (re)align the xhair with the monitor
+						if (vid_wmborder_waiting)
+						{
+							SDL_GetWindowBordersSize(window, &i, NULL, NULL, NULL);
+							if (!i != vid_wmborderless) // border state changed
+							{
+								SDL_SetWindowPosition(window, SDL_WINDOWPOS_CENTERED_DISPLAY(vid.mode.display), SDL_WINDOWPOS_CENTERED_DISPLAY(vid.mode.display));
+								SDL_GetWindowPosition(window, &vid.xPos, &vid.yPos);
+								vid_wmborder_waiting = false;
+							}
+						}
 						break;
-					case SDL_WINDOWEVENT_RESIZED:
+					case SDL_WINDOWEVENT_RESIZED: // external events only
 						if(vid_resizable.integer < 2)
 						{
-							vid.width = event.window.data1;
-							vid.height = event.window.data2;
-							if (vid_softsurface)
-							{
-								SDL_FreeSurface(vid_softsurface);
-								vid_softsurface = SDL_CreateRGBSurface(SDL_SWSURFACE, vid.width, vid.height, 32, 0x00FF0000, 0x0000FF00, 0x000000FF, 0xFF000000);
-								SDL_SetSurfaceBlendMode(vid_softsurface, SDL_BLENDMODE_NONE);
-								vid.softpixels = (unsigned int *)vid_softsurface->pixels;
-								if (vid.softdepthpixels)
-									free(vid.softdepthpixels);
-								vid.softdepthpixels = (unsigned int*)calloc(1, vid.width * vid.height * 4);
-							}
-#ifdef SDL_R_RESTART
-							// better not call R_Modules_Restart from here directly, as this may wreak havoc...
-							// so, let's better queue it for next frame.
-							// Insanotic: only the software renderer needs it; the GL
-							// renderer resizes its buffers on the next frame by itself,
-							// and a full restart on every resize step made dragging the
-							// window edge stutter
-							if(vid_softsurface && !sdl_needs_restart)
-							{
-								Cbuf_AddText("\nr_restart\n");
-								sdl_needs_restart = true;
-							}
-#endif
+							//vid.mode.width = event.window.data1;
+							//vid.mode.height = event.window.data2;
+							// get the real framebuffer size in case the platform's screen coordinates are DPI scaled
+							SDL_GL_GetDrawableSize(window, &vid.mode.width, &vid.mode.height);
 						}
+						break;
+					case SDL_WINDOWEVENT_SIZE_CHANGED: // internal and external events
 						break;
 					case SDL_WINDOWEVENT_MINIMIZED:
 						break;
@@ -1474,9 +1313,42 @@ void Sys_SendKeyEvents( void )
 						VID_ReleaseAllTouches();
 						break;
 					case SDL_WINDOWEVENT_CLOSE:
-						Sys_Quit(0);
+						host.state = host_shutdown;
+						break;
+					case SDL_WINDOWEVENT_TAKE_FOCUS:
+						break;
+					case SDL_WINDOWEVENT_HIT_TEST:
+						break;
+					case SDL_WINDOWEVENT_ICCPROF_CHANGED:
+						break;
+					case SDL_WINDOWEVENT_DISPLAY_CHANGED:
+						// this event can't be relied on in fullscreen, see SDL_WINDOWEVENT_MOVED above
+						vid.mode.display = event.window.data1;
 						break;
 					}
+				}
+				break;
+			case SDL_DISPLAYEVENT: // Display hotplugging
+				switch (event.display.event)
+				{
+					case SDL_DISPLAYEVENT_CONNECTED:
+						Con_Printf(CON_WARN "Display %i connected: %s\n", event.display.display, SDL_GetDisplayName(event.display.display));
+#ifdef __linux__
+						Con_Print(CON_WARN "A vid_restart may be necessary!\n");
+#endif
+						Cvar_SetValueQuick(&vid_info_displaycount, SDL_GetNumVideoDisplays());
+						// Ideally we'd call VID_ApplyDisplayMode() to try to switch to the preferred display here,
+						// but we may need a vid_restart first, see comments in VID_ApplyDisplayMode().
+						break;
+					case SDL_DISPLAYEVENT_DISCONNECTED:
+						Con_Printf(CON_WARN "Display %i disconnected.\n", event.display.display);
+#ifdef __linux__
+						Con_Print(CON_WARN "A vid_restart may be necessary!\n");
+#endif
+						Cvar_SetValueQuick(&vid_info_displaycount, SDL_GetNumVideoDisplays());
+						break;
+					case SDL_DISPLAYEVENT_ORIENTATION:
+						break;
 				}
 				break;
 			case SDL_TEXTEDITING:
@@ -1527,7 +1399,7 @@ void Sys_SendKeyEvents( void )
 						if (multitouch[i][0])
 							down++;
 					if (down == 3 && (key_dest != key_game || (key_consoleactive & KEY_CONSOLEACTIVE_USER)))
-						Cbuf_AddText("toggleconsole\n");
+						Cbuf_AddText(cmd_local, "toggleconsole\n");
 				}
 				break;
 			case SDL_FINGERUP:
@@ -1575,662 +1447,19 @@ void Sys_SendKeyEvents( void )
 				break;
 		}
 
-	// enable/disable sound on focus gain/loss
-	if ((!vid_hidden && vid_activewindow) || !snd_mutewhenidle.integer)
-	{
-		if (!sound_active)
-		{
-			S_UnblockSound ();
-			sound_active = true;
-		}
-	}
+	vid_activewindow = !vid_hidden && vid_hasfocus;
+
+	if (!vid_activewindow || key_consoleactive || scr_loading)
+		VID_SetMouse(false, false);
+	else if (key_dest == key_menu || key_dest == key_menu_grabbed)
+		VID_SetMouse(vid_mouse.integer && !in_client_mouse && !UI_RML_Modal() && !vid_touchscreen.integer, !vid_touchscreen.integer);
 	else
-	{
-		if (sound_active)
-		{
-			S_BlockSound ();
-			sound_active = false;
-		}
-	}
+		VID_SetMouse(vid_mouse.integer && !UI_RML_Modal() && !cl.csqc_wantsmousemove && cl_prydoncursor.integer <= 0 && (!cls.demoplayback || cl_demo_mousegrab.integer) && !vid_touchscreen.integer, !vid_touchscreen.integer);
 }
-#endif
 
 /////////////////
 // Video system
 ////
-
-#ifdef USE_GLES2
-#ifndef qglClear
-#ifdef __IPHONEOS__
-#include <OpenGLES/ES2/gl.h>
-#else
-#include <SDL_opengles.h>
-#endif
-
-//#define PRECALL //Con_Printf("GLCALL %s:%i\n", __FILE__, __LINE__)
-#define PRECALL
-#define POSTCALL
-GLboolean wrapglIsBuffer(GLuint buffer) {PRECALL;return glIsBuffer(buffer);POSTCALL;}
-GLboolean wrapglIsEnabled(GLenum cap) {PRECALL;return glIsEnabled(cap);POSTCALL;}
-GLboolean wrapglIsFramebuffer(GLuint framebuffer) {PRECALL;return glIsFramebuffer(framebuffer);POSTCALL;}
-//GLboolean wrapglIsQuery(GLuint qid) {PRECALL;return glIsQuery(qid);POSTCALL;}
-GLboolean wrapglIsRenderbuffer(GLuint renderbuffer) {PRECALL;return glIsRenderbuffer(renderbuffer);POSTCALL;}
-//GLboolean wrapglUnmapBuffer(GLenum target) {PRECALL;return glUnmapBuffer(target);POSTCALL;}
-GLenum wrapglCheckFramebufferStatus(GLenum target) {PRECALL;return glCheckFramebufferStatus(target);POSTCALL;}
-GLenum wrapglGetError(void) {PRECALL;return glGetError();POSTCALL;}
-GLuint wrapglCreateProgram(void) {PRECALL;return glCreateProgram();POSTCALL;}
-GLuint wrapglCreateShader(GLenum shaderType) {PRECALL;return glCreateShader(shaderType);POSTCALL;}
-//GLuint wrapglGetHandle(GLenum pname) {PRECALL;return glGetHandle(pname);POSTCALL;}
-GLint wrapglGetAttribLocation(GLuint programObj, const GLchar *name) {PRECALL;return glGetAttribLocation(programObj, name);POSTCALL;}
-GLint wrapglGetUniformLocation(GLuint programObj, const GLchar *name) {PRECALL;return glGetUniformLocation(programObj, name);POSTCALL;}
-//GLvoid* wrapglMapBuffer(GLenum target, GLenum access) {PRECALL;return glMapBuffer(target, access);POSTCALL;}
-const GLubyte* wrapglGetString(GLenum name) {PRECALL;return (const GLubyte*)glGetString(name);POSTCALL;}
-void wrapglActiveStencilFace(GLenum e) {PRECALL;Con_Printf("glActiveStencilFace(e)\n");POSTCALL;}
-void wrapglActiveTexture(GLenum e) {PRECALL;glActiveTexture(e);POSTCALL;}
-void wrapglAlphaFunc(GLenum func, GLclampf ref) {PRECALL;Con_Printf("glAlphaFunc(func, ref)\n");POSTCALL;}
-void wrapglArrayElement(GLint i) {PRECALL;Con_Printf("glArrayElement(i)\n");POSTCALL;}
-void wrapglAttachShader(GLuint containerObj, GLuint obj) {PRECALL;glAttachShader(containerObj, obj);POSTCALL;}
-//void wrapglBegin(GLenum mode) {PRECALL;Con_Printf("glBegin(mode)\n");POSTCALL;}
-//void wrapglBeginQuery(GLenum target, GLuint qid) {PRECALL;glBeginQuery(target, qid);POSTCALL;}
-void wrapglBindAttribLocation(GLuint programObj, GLuint index, const GLchar *name) {PRECALL;glBindAttribLocation(programObj, index, name);POSTCALL;}
-//void wrapglBindFragDataLocation(GLuint programObj, GLuint index, const GLchar *name) {PRECALL;glBindFragDataLocation(programObj, index, name);POSTCALL;}
-void wrapglBindBuffer(GLenum target, GLuint buffer) {PRECALL;glBindBuffer(target, buffer);POSTCALL;}
-void wrapglBindFramebuffer(GLenum target, GLuint framebuffer) {PRECALL;glBindFramebuffer(target, framebuffer);POSTCALL;}
-void wrapglBindRenderbuffer(GLenum target, GLuint renderbuffer) {PRECALL;glBindRenderbuffer(target, renderbuffer);POSTCALL;}
-void wrapglBindTexture(GLenum target, GLuint texture) {PRECALL;glBindTexture(target, texture);POSTCALL;}
-void wrapglBlendEquation(GLenum e) {PRECALL;glBlendEquation(e);POSTCALL;}
-void wrapglBlendFunc(GLenum sfactor, GLenum dfactor) {PRECALL;glBlendFunc(sfactor, dfactor);POSTCALL;}
-void wrapglBufferData(GLenum target, GLsizeiptrARB size, const GLvoid *data, GLenum usage) {PRECALL;glBufferData(target, size, data, usage);POSTCALL;}
-void wrapglBufferSubData(GLenum target, GLintptrARB offset, GLsizeiptrARB size, const GLvoid *data) {PRECALL;glBufferSubData(target, offset, size, data);POSTCALL;}
-void wrapglClear(GLbitfield mask) {PRECALL;glClear(mask);POSTCALL;}
-void wrapglClearColor(GLclampf red, GLclampf green, GLclampf blue, GLclampf alpha) {PRECALL;glClearColor(red, green, blue, alpha);POSTCALL;}
-void wrapglClearDepth(GLclampd depth) {PRECALL;/*Con_Printf("glClearDepth(%f)\n", depth);glClearDepthf((float)depth);*/POSTCALL;}
-void wrapglClearStencil(GLint s) {PRECALL;glClearStencil(s);POSTCALL;}
-void wrapglClientActiveTexture(GLenum target) {PRECALL;Con_Printf("glClientActiveTexture(target)\n");POSTCALL;}
-void wrapglColor4f(GLfloat red, GLfloat green, GLfloat blue, GLfloat alpha) {PRECALL;Con_Printf("glColor4f(red, green, blue, alpha)\n");POSTCALL;}
-void wrapglColor4ub(GLubyte red, GLubyte green, GLubyte blue, GLubyte alpha) {PRECALL;Con_Printf("glColor4ub(red, green, blue, alpha)\n");POSTCALL;}
-void wrapglColorMask(GLboolean red, GLboolean green, GLboolean blue, GLboolean alpha) {PRECALL;glColorMask(red, green, blue, alpha);POSTCALL;}
-void wrapglColorPointer(GLint size, GLenum type, GLsizei stride, const GLvoid *ptr) {PRECALL;Con_Printf("glColorPointer(size, type, stride, ptr)\n");POSTCALL;}
-void wrapglCompileShader(GLuint shaderObj) {PRECALL;glCompileShader(shaderObj);POSTCALL;}
-void wrapglCompressedTexImage2D(GLenum target, GLint level, GLenum internalformat, GLsizei width, GLsizei height, GLint border,  GLsizei imageSize, const void *data) {PRECALL;glCompressedTexImage2D(target, level, internalformat, width, height, border, imageSize, data);POSTCALL;}
-void wrapglCompressedTexImage3D(GLenum target, GLint level, GLenum internalformat, GLsizei width, GLsizei height, GLsizei depth, GLint border, GLsizei imageSize, const void *data) {PRECALL;Con_Printf("glCompressedTexImage3D(target, level, internalformat, width, height, depth, border, imageSize, data)\n");POSTCALL;}
-void wrapglCompressedTexSubImage2D(GLenum target, GLint level, GLint xoffset, GLint yoffset, GLsizei width, GLsizei height, GLenum format, GLsizei imageSize, const void *data) {PRECALL;glCompressedTexSubImage2D(target, level, xoffset, yoffset, width, height, format, imageSize, data);POSTCALL;}
-void wrapglCompressedTexSubImage3D(GLenum target, GLint level, GLint xoffset, GLint yoffset, GLint zoffset, GLsizei width, GLsizei height, GLsizei depth, GLenum format, GLsizei imageSize, const void *data) {PRECALL;Con_Printf("glCompressedTexSubImage3D(target, level, xoffset, yoffset, zoffset, width, height, depth, format, imageSize, data)\n");POSTCALL;}
-void wrapglCopyTexImage2D(GLenum target, GLint level, GLenum internalformat, GLint x, GLint y, GLsizei width, GLsizei height, GLint border) {PRECALL;glCopyTexImage2D(target, level, internalformat, x, y, width, height, border);POSTCALL;}
-void wrapglCopyTexSubImage2D(GLenum target, GLint level, GLint xoffset, GLint yoffset, GLint x, GLint y, GLsizei width, GLsizei height) {PRECALL;glCopyTexSubImage2D(target, level, xoffset, yoffset, x, y, width, height);POSTCALL;}
-void wrapglCopyTexSubImage3D(GLenum target, GLint level, GLint xoffset, GLint yoffset, GLint zoffset, GLint x, GLint y, GLsizei width, GLsizei height) {PRECALL;Con_Printf("glCopyTexSubImage3D(target, level, xoffset, yoffset, zoffset, x, y, width, height)\n");POSTCALL;}
-void wrapglCullFace(GLenum mode) {PRECALL;glCullFace(mode);POSTCALL;}
-void wrapglDeleteBuffers(GLsizei n, const GLuint *buffers) {PRECALL;glDeleteBuffers(n, buffers);POSTCALL;}
-void wrapglDeleteFramebuffers(GLsizei n, const GLuint *framebuffers) {PRECALL;glDeleteFramebuffers(n, framebuffers);POSTCALL;}
-void wrapglDeleteShader(GLuint obj) {PRECALL;glDeleteShader(obj);POSTCALL;}
-void wrapglDeleteProgram(GLuint obj) {PRECALL;glDeleteProgram(obj);POSTCALL;}
-//void wrapglDeleteQueries(GLsizei n, const GLuint *ids) {PRECALL;glDeleteQueries(n, ids);POSTCALL;}
-void wrapglDeleteRenderbuffers(GLsizei n, const GLuint *renderbuffers) {PRECALL;glDeleteRenderbuffers(n, renderbuffers);POSTCALL;}
-void wrapglDeleteTextures(GLsizei n, const GLuint *textures) {PRECALL;glDeleteTextures(n, textures);POSTCALL;}
-void wrapglDepthFunc(GLenum func) {PRECALL;glDepthFunc(func);POSTCALL;}
-void wrapglDepthMask(GLboolean flag) {PRECALL;glDepthMask(flag);POSTCALL;}
-//void wrapglDepthRange(GLclampd near_val, GLclampd far_val) {PRECALL;glDepthRangef((float)near_val, (float)far_val);POSTCALL;}
-void wrapglDepthRangef(GLclampf near_val, GLclampf far_val) {PRECALL;glDepthRangef(near_val, far_val);POSTCALL;}
-void wrapglDetachShader(GLuint containerObj, GLuint attachedObj) {PRECALL;glDetachShader(containerObj, attachedObj);POSTCALL;}
-void wrapglDisable(GLenum cap) {PRECALL;glDisable(cap);POSTCALL;}
-void wrapglDisableClientState(GLenum cap) {PRECALL;Con_Printf("glDisableClientState(cap)\n");POSTCALL;}
-void wrapglDisableVertexAttribArray(GLuint index) {PRECALL;glDisableVertexAttribArray(index);POSTCALL;}
-void wrapglDrawArrays(GLenum mode, GLint first, GLsizei count) {PRECALL;glDrawArrays(mode, first, count);POSTCALL;}
-void wrapglDrawBuffer(GLenum mode) {PRECALL;Con_Printf("glDrawBuffer(mode)\n");POSTCALL;}
-void wrapglDrawBuffers(GLsizei n, const GLenum *bufs) {PRECALL;Con_Printf("glDrawBuffers(n, bufs)\n");POSTCALL;}
-void wrapglDrawElements(GLenum mode, GLsizei count, GLenum type, const GLvoid *indices) {PRECALL;glDrawElements(mode, count, type, indices);POSTCALL;}
-//void wrapglDrawRangeElements(GLenum mode, GLuint start, GLuint end, GLsizei count, GLenum type, const GLvoid *indices) {PRECALL;glDrawRangeElements(mode, start, end, count, type, indices);POSTCALL;}
-//void wrapglDrawRangeElementsEXT(GLenum mode, GLuint start, GLuint end, GLsizei count, GLenum type, const GLvoid *indices) {PRECALL;glDrawRangeElements(mode, start, end, count, type, indices);POSTCALL;}
-void wrapglEnable(GLenum cap) {PRECALL;glEnable(cap);POSTCALL;}
-void wrapglEnableClientState(GLenum cap) {PRECALL;Con_Printf("glEnableClientState(cap)\n");POSTCALL;}
-void wrapglEnableVertexAttribArray(GLuint index) {PRECALL;glEnableVertexAttribArray(index);POSTCALL;}
-//void wrapglEnd(void) {PRECALL;Con_Printf("glEnd()\n");POSTCALL;}
-//void wrapglEndQuery(GLenum target) {PRECALL;glEndQuery(target);POSTCALL;}
-void wrapglFinish(void) {PRECALL;glFinish();POSTCALL;}
-void wrapglFlush(void) {PRECALL;glFlush();POSTCALL;}
-void wrapglFramebufferRenderbuffer(GLenum target, GLenum attachment, GLenum renderbuffertarget, GLuint renderbuffer) {PRECALL;glFramebufferRenderbuffer(target, attachment, renderbuffertarget, renderbuffer);POSTCALL;}
-void wrapglFramebufferTexture2D(GLenum target, GLenum attachment, GLenum textarget, GLuint texture, GLint level) {PRECALL;glFramebufferTexture2D(target, attachment, textarget, texture, level);POSTCALL;}
-void wrapglFramebufferTexture3D(GLenum target, GLenum attachment, GLenum textarget, GLuint texture, GLint level, GLint zoffset) {PRECALL;Con_Printf("glFramebufferTexture3D()\n");POSTCALL;}
-void wrapglGenBuffers(GLsizei n, GLuint *buffers) {PRECALL;glGenBuffers(n, buffers);POSTCALL;}
-void wrapglGenFramebuffers(GLsizei n, GLuint *framebuffers) {PRECALL;glGenFramebuffers(n, framebuffers);POSTCALL;}
-//void wrapglGenQueries(GLsizei n, GLuint *ids) {PRECALL;glGenQueries(n, ids);POSTCALL;}
-void wrapglGenRenderbuffers(GLsizei n, GLuint *renderbuffers) {PRECALL;glGenRenderbuffers(n, renderbuffers);POSTCALL;}
-void wrapglGenTextures(GLsizei n, GLuint *textures) {PRECALL;glGenTextures(n, textures);POSTCALL;}
-void wrapglGenerateMipmap(GLenum target) {PRECALL;glGenerateMipmap(target);POSTCALL;}
-void wrapglGetActiveAttrib(GLuint programObj, GLuint index, GLsizei maxLength, GLsizei *length, GLint *size, GLenum *type, GLchar *name) {PRECALL;glGetActiveAttrib(programObj, index, maxLength, length, size, type, name);POSTCALL;}
-void wrapglGetActiveUniform(GLuint programObj, GLuint index, GLsizei maxLength, GLsizei *length, GLint *size, GLenum *type, GLchar *name) {PRECALL;glGetActiveUniform(programObj, index, maxLength, length, size, type, name);POSTCALL;}
-void wrapglGetAttachedShaders(GLuint containerObj, GLsizei maxCount, GLsizei *count, GLuint *obj) {PRECALL;glGetAttachedShaders(containerObj, maxCount, count, obj);POSTCALL;}
-void wrapglGetBooleanv(GLenum pname, GLboolean *params) {PRECALL;glGetBooleanv(pname, params);POSTCALL;}
-void wrapglGetCompressedTexImage(GLenum target, GLint lod, void *img) {PRECALL;Con_Printf("glGetCompressedTexImage(target, lod, img)\n");POSTCALL;}
-void wrapglGetDoublev(GLenum pname, GLdouble *params) {PRECALL;Con_Printf("glGetDoublev(pname, params)\n");POSTCALL;}
-void wrapglGetFloatv(GLenum pname, GLfloat *params) {PRECALL;glGetFloatv(pname, params);POSTCALL;}
-void wrapglGetFramebufferAttachmentParameteriv(GLenum target, GLenum attachment, GLenum pname, GLint *params) {PRECALL;glGetFramebufferAttachmentParameteriv(target, attachment, pname, params);POSTCALL;}
-void wrapglGetShaderInfoLog(GLuint obj, GLsizei maxLength, GLsizei *length, GLchar *infoLog) {PRECALL;glGetShaderInfoLog(obj, maxLength, length, infoLog);POSTCALL;}
-void wrapglGetProgramInfoLog(GLuint obj, GLsizei maxLength, GLsizei *length, GLchar *infoLog) {PRECALL;glGetProgramInfoLog(obj, maxLength, length, infoLog);POSTCALL;}
-void wrapglGetIntegerv(GLenum pname, GLint *params) {PRECALL;glGetIntegerv(pname, params);POSTCALL;}
-void wrapglGetShaderiv(GLuint obj, GLenum pname, GLint *params) {PRECALL;glGetShaderiv(obj, pname, params);POSTCALL;}
-void wrapglGetProgramiv(GLuint obj, GLenum pname, GLint *params) {PRECALL;glGetProgramiv(obj, pname, params);POSTCALL;}
-//void wrapglGetQueryObjectiv(GLuint qid, GLenum pname, GLint *params) {PRECALL;glGetQueryObjectiv(qid, pname, params);POSTCALL;}
-//void wrapglGetQueryObjectuiv(GLuint qid, GLenum pname, GLuint *params) {PRECALL;glGetQueryObjectuiv(qid, pname, params);POSTCALL;}
-//void wrapglGetQueryiv(GLenum target, GLenum pname, GLint *params) {PRECALL;glGetQueryiv(target, pname, params);POSTCALL;}
-void wrapglGetRenderbufferParameteriv(GLenum target, GLenum pname, GLint *params) {PRECALL;glGetRenderbufferParameteriv(target, pname, params);POSTCALL;}
-void wrapglGetShaderSource(GLuint obj, GLsizei maxLength, GLsizei *length, GLchar *source) {PRECALL;glGetShaderSource(obj, maxLength, length, source);POSTCALL;}
-void wrapglGetTexImage(GLenum target, GLint level, GLenum format, GLenum type, GLvoid *pixels) {PRECALL;Con_Printf("glGetTexImage(target, level, format, type, pixels)\n");POSTCALL;}
-void wrapglGetTexLevelParameterfv(GLenum target, GLint level, GLenum pname, GLfloat *params) {PRECALL;Con_Printf("glGetTexLevelParameterfv(target, level, pname, params)\n");POSTCALL;}
-void wrapglGetTexLevelParameteriv(GLenum target, GLint level, GLenum pname, GLint *params) {PRECALL;Con_Printf("glGetTexLevelParameteriv(target, level, pname, params)\n");POSTCALL;}
-void wrapglGetTexParameterfv(GLenum target, GLenum pname, GLfloat *params) {PRECALL;glGetTexParameterfv(target, pname, params);POSTCALL;}
-void wrapglGetTexParameteriv(GLenum target, GLenum pname, GLint *params) {PRECALL;glGetTexParameteriv(target, pname, params);POSTCALL;}
-void wrapglGetUniformfv(GLuint programObj, GLint location, GLfloat *params) {PRECALL;glGetUniformfv(programObj, location, params);POSTCALL;}
-void wrapglGetUniformiv(GLuint programObj, GLint location, GLint *params) {PRECALL;glGetUniformiv(programObj, location, params);POSTCALL;}
-void wrapglHint(GLenum target, GLenum mode) {PRECALL;glHint(target, mode);POSTCALL;}
-void wrapglLineWidth(GLfloat width) {PRECALL;glLineWidth(width);POSTCALL;}
-void wrapglLinkProgram(GLuint programObj) {PRECALL;glLinkProgram(programObj);POSTCALL;}
-void wrapglLoadIdentity(void) {PRECALL;Con_Printf("glLoadIdentity()\n");POSTCALL;}
-void wrapglLoadMatrixf(const GLfloat *m) {PRECALL;Con_Printf("glLoadMatrixf(m)\n");POSTCALL;}
-void wrapglMatrixMode(GLenum mode) {PRECALL;Con_Printf("glMatrixMode(mode)\n");POSTCALL;}
-void wrapglMultiTexCoord1f(GLenum target, GLfloat s) {PRECALL;Con_Printf("glMultiTexCoord1f(target, s)\n");POSTCALL;}
-void wrapglMultiTexCoord2f(GLenum target, GLfloat s, GLfloat t) {PRECALL;Con_Printf("glMultiTexCoord2f(target, s, t)\n");POSTCALL;}
-void wrapglMultiTexCoord3f(GLenum target, GLfloat s, GLfloat t, GLfloat r) {PRECALL;Con_Printf("glMultiTexCoord3f(target, s, t, r)\n");POSTCALL;}
-void wrapglMultiTexCoord4f(GLenum target, GLfloat s, GLfloat t, GLfloat r, GLfloat q) {PRECALL;Con_Printf("glMultiTexCoord4f(target, s, t, r, q)\n");POSTCALL;}
-void wrapglNormalPointer(GLenum type, GLsizei stride, const GLvoid *ptr) {PRECALL;Con_Printf("glNormalPointer(type, stride, ptr)\n");POSTCALL;}
-void wrapglPixelStorei(GLenum pname, GLint param) {PRECALL;glPixelStorei(pname, param);POSTCALL;}
-void wrapglPointSize(GLfloat size) {PRECALL;Con_Printf("glPointSize(size)\n");POSTCALL;}
-//void wrapglPolygonMode(GLenum face, GLenum mode) {PRECALL;Con_Printf("glPolygonMode(face, mode)\n");POSTCALL;}
-void wrapglPolygonOffset(GLfloat factor, GLfloat units) {PRECALL;glPolygonOffset(factor, units);POSTCALL;}
-void wrapglPolygonStipple(const GLubyte *mask) {PRECALL;Con_Printf("glPolygonStipple(mask)\n");POSTCALL;}
-void wrapglReadBuffer(GLenum mode) {PRECALL;Con_Printf("glReadBuffer(mode)\n");POSTCALL;}
-void wrapglReadPixels(GLint x, GLint y, GLsizei width, GLsizei height, GLenum format, GLenum type, GLvoid *pixels) {PRECALL;glReadPixels(x, y, width, height, format, type, pixels);POSTCALL;}
-void wrapglRenderbufferStorage(GLenum target, GLenum internalformat, GLsizei width, GLsizei height) {PRECALL;glRenderbufferStorage(target, internalformat, width, height);POSTCALL;}
-void wrapglScissor(GLint x, GLint y, GLsizei width, GLsizei height) {PRECALL;glScissor(x, y, width, height);POSTCALL;}
-void wrapglShaderSource(GLuint shaderObj, GLsizei count, const GLchar **string, const GLint *length) {PRECALL;glShaderSource(shaderObj, count, string, length);POSTCALL;}
-void wrapglStencilFunc(GLenum func, GLint ref, GLuint mask) {PRECALL;glStencilFunc(func, ref, mask);POSTCALL;}
-void wrapglStencilFuncSeparate(GLenum func1, GLenum func2, GLint ref, GLuint mask) {PRECALL;Con_Printf("glStencilFuncSeparate(func1, func2, ref, mask)\n");POSTCALL;}
-void wrapglStencilMask(GLuint mask) {PRECALL;glStencilMask(mask);POSTCALL;}
-void wrapglStencilOp(GLenum fail, GLenum zfail, GLenum zpass) {PRECALL;glStencilOp(fail, zfail, zpass);POSTCALL;}
-void wrapglStencilOpSeparate(GLenum e1, GLenum e2, GLenum e3, GLenum e4) {PRECALL;Con_Printf("glStencilOpSeparate(e1, e2, e3, e4)\n");POSTCALL;}
-void wrapglTexCoord1f(GLfloat s) {PRECALL;Con_Printf("glTexCoord1f(s)\n");POSTCALL;}
-void wrapglTexCoord2f(GLfloat s, GLfloat t) {PRECALL;Con_Printf("glTexCoord2f(s, t)\n");POSTCALL;}
-void wrapglTexCoord3f(GLfloat s, GLfloat t, GLfloat r) {PRECALL;Con_Printf("glTexCoord3f(s, t, r)\n");POSTCALL;}
-void wrapglTexCoord4f(GLfloat s, GLfloat t, GLfloat r, GLfloat q) {PRECALL;Con_Printf("glTexCoord4f(s, t, r, q)\n");POSTCALL;}
-void wrapglTexCoordPointer(GLint size, GLenum type, GLsizei stride, const GLvoid *ptr) {PRECALL;Con_Printf("glTexCoordPointer(size, type, stride, ptr)\n");POSTCALL;}
-void wrapglTexEnvf(GLenum target, GLenum pname, GLfloat param) {PRECALL;Con_Printf("glTexEnvf(target, pname, param)\n");POSTCALL;}
-void wrapglTexEnvfv(GLenum target, GLenum pname, const GLfloat *params) {PRECALL;Con_Printf("glTexEnvfv(target, pname, params)\n");POSTCALL;}
-void wrapglTexEnvi(GLenum target, GLenum pname, GLint param) {PRECALL;Con_Printf("glTexEnvi(target, pname, param)\n");POSTCALL;}
-void wrapglTexImage2D(GLenum target, GLint level, GLint internalFormat, GLsizei width, GLsizei height, GLint border, GLenum format, GLenum type, const GLvoid *pixels) {PRECALL;glTexImage2D(target, level, internalFormat, width, height, border, format, type, pixels);POSTCALL;}
-void wrapglTexImage3D(GLenum target, GLint level, GLenum internalFormat, GLsizei width, GLsizei height, GLsizei depth, GLint border, GLenum format, GLenum type, const GLvoid *pixels) {PRECALL;Con_Printf("glTexImage3D(target, level, internalformat, width, height, depth, border, format, type, pixels)\n");POSTCALL;}
-void wrapglTexParameterf(GLenum target, GLenum pname, GLfloat param) {PRECALL;glTexParameterf(target, pname, param);POSTCALL;}
-void wrapglTexParameterfv(GLenum target, GLenum pname, GLfloat *params) {PRECALL;glTexParameterfv(target, pname, params);POSTCALL;}
-void wrapglTexParameteri(GLenum target, GLenum pname, GLint param) {PRECALL;glTexParameteri(target, pname, param);POSTCALL;}
-void wrapglTexSubImage2D(GLenum target, GLint level, GLint xoffset, GLint yoffset, GLsizei width, GLsizei height, GLenum format, GLenum type, const GLvoid *pixels) {PRECALL;glTexSubImage2D(target, level, xoffset, yoffset, width, height, format, type, pixels);POSTCALL;}
-void wrapglTexSubImage3D(GLenum target, GLint level, GLint xoffset, GLint yoffset, GLint zoffset, GLsizei width, GLsizei height, GLsizei depth, GLenum format, GLenum type, const GLvoid *pixels) {PRECALL;Con_Printf("glTexSubImage3D(target, level, xoffset, yoffset, zoffset, width, height, depth, format, type, pixels)\n");POSTCALL;}
-void wrapglUniform1f(GLint location, GLfloat v0) {PRECALL;glUniform1f(location, v0);POSTCALL;}
-void wrapglUniform1fv(GLint location, GLsizei count, const GLfloat *value) {PRECALL;glUniform1fv(location, count, value);POSTCALL;}
-void wrapglUniform1i(GLint location, GLint v0) {PRECALL;glUniform1i(location, v0);POSTCALL;}
-void wrapglUniform1iv(GLint location, GLsizei count, const GLint *value) {PRECALL;glUniform1iv(location, count, value);POSTCALL;}
-void wrapglUniform2f(GLint location, GLfloat v0, GLfloat v1) {PRECALL;glUniform2f(location, v0, v1);POSTCALL;}
-void wrapglUniform2fv(GLint location, GLsizei count, const GLfloat *value) {PRECALL;glUniform2fv(location, count, value);POSTCALL;}
-void wrapglUniform2i(GLint location, GLint v0, GLint v1) {PRECALL;glUniform2i(location, v0, v1);POSTCALL;}
-void wrapglUniform2iv(GLint location, GLsizei count, const GLint *value) {PRECALL;glUniform2iv(location, count, value);POSTCALL;}
-void wrapglUniform3f(GLint location, GLfloat v0, GLfloat v1, GLfloat v2) {PRECALL;glUniform3f(location, v0, v1, v2);POSTCALL;}
-void wrapglUniform3fv(GLint location, GLsizei count, const GLfloat *value) {PRECALL;glUniform3fv(location, count, value);POSTCALL;}
-void wrapglUniform3i(GLint location, GLint v0, GLint v1, GLint v2) {PRECALL;glUniform3i(location, v0, v1, v2);POSTCALL;}
-void wrapglUniform3iv(GLint location, GLsizei count, const GLint *value) {PRECALL;glUniform3iv(location, count, value);POSTCALL;}
-void wrapglUniform4f(GLint location, GLfloat v0, GLfloat v1, GLfloat v2, GLfloat v3) {PRECALL;glUniform4f(location, v0, v1, v2, v3);POSTCALL;}
-void wrapglUniform4fv(GLint location, GLsizei count, const GLfloat *value) {PRECALL;glUniform4fv(location, count, value);POSTCALL;}
-void wrapglUniform4i(GLint location, GLint v0, GLint v1, GLint v2, GLint v3) {PRECALL;glUniform4i(location, v0, v1, v2, v3);POSTCALL;}
-void wrapglUniform4iv(GLint location, GLsizei count, const GLint *value) {PRECALL;glUniform4iv(location, count, value);POSTCALL;}
-void wrapglUniformMatrix2fv(GLint location, GLsizei count, GLboolean transpose, const GLfloat *value) {PRECALL;glUniformMatrix2fv(location, count, transpose, value);POSTCALL;}
-void wrapglUniformMatrix3fv(GLint location, GLsizei count, GLboolean transpose, const GLfloat *value) {PRECALL;glUniformMatrix3fv(location, count, transpose, value);POSTCALL;}
-void wrapglUniformMatrix4fv(GLint location, GLsizei count, GLboolean transpose, const GLfloat *value) {PRECALL;glUniformMatrix4fv(location, count, transpose, value);POSTCALL;}
-void wrapglUseProgram(GLuint programObj) {PRECALL;glUseProgram(programObj);POSTCALL;}
-void wrapglValidateProgram(GLuint programObj) {PRECALL;glValidateProgram(programObj);POSTCALL;}
-void wrapglVertex2f(GLfloat x, GLfloat y) {PRECALL;Con_Printf("glVertex2f(x, y)\n");POSTCALL;}
-void wrapglVertex3f(GLfloat x, GLfloat y, GLfloat z) {PRECALL;Con_Printf("glVertex3f(x, y, z)\n");POSTCALL;}
-void wrapglVertex4f(GLfloat x, GLfloat y, GLfloat z, GLfloat w) {PRECALL;Con_Printf("glVertex4f(x, y, z, w)\n");POSTCALL;}
-void wrapglVertexAttribPointer(GLuint index, GLint size, GLenum type, GLboolean normalized, GLsizei stride, const GLvoid *pointer) {PRECALL;glVertexAttribPointer(index, size, type, normalized, stride, pointer);POSTCALL;}
-void wrapglVertexPointer(GLint size, GLenum type, GLsizei stride, const GLvoid *ptr) {PRECALL;Con_Printf("glVertexPointer(size, type, stride, ptr)\n");POSTCALL;}
-void wrapglViewport(GLint x, GLint y, GLsizei width, GLsizei height) {PRECALL;glViewport(x, y, width, height);POSTCALL;}
-void wrapglVertexAttrib1f(GLuint index, GLfloat v0) {PRECALL;glVertexAttrib1f(index, v0);POSTCALL;}
-//void wrapglVertexAttrib1s(GLuint index, GLshort v0) {PRECALL;glVertexAttrib1s(index, v0);POSTCALL;}
-//void wrapglVertexAttrib1d(GLuint index, GLdouble v0) {PRECALL;glVertexAttrib1d(index, v0);POSTCALL;}
-void wrapglVertexAttrib2f(GLuint index, GLfloat v0, GLfloat v1) {PRECALL;glVertexAttrib2f(index, v0, v1);POSTCALL;}
-//void wrapglVertexAttrib2s(GLuint index, GLshort v0, GLshort v1) {PRECALL;glVertexAttrib2s(index, v0, v1);POSTCALL;}
-//void wrapglVertexAttrib2d(GLuint index, GLdouble v0, GLdouble v1) {PRECALL;glVertexAttrib2d(index, v0, v1);POSTCALL;}
-void wrapglVertexAttrib3f(GLuint index, GLfloat v0, GLfloat v1, GLfloat v2) {PRECALL;glVertexAttrib3f(index, v0, v1, v2);POSTCALL;}
-//void wrapglVertexAttrib3s(GLuint index, GLshort v0, GLshort v1, GLshort v2) {PRECALL;glVertexAttrib3s(index, v0, v1, v2);POSTCALL;}
-//void wrapglVertexAttrib3d(GLuint index, GLdouble v0, GLdouble v1, GLdouble v2) {PRECALL;glVertexAttrib3d(index, v0, v1, v2);POSTCALL;}
-void wrapglVertexAttrib4f(GLuint index, GLfloat v0, GLfloat v1, GLfloat v2, GLfloat v3) {PRECALL;glVertexAttrib4f(index, v0, v1, v2, v3);POSTCALL;}
-//void wrapglVertexAttrib4s(GLuint index, GLshort v0, GLshort v1, GLshort v2, GLshort v3) {PRECALL;glVertexAttrib4s(index, v0, v1, v2, v3);POSTCALL;}
-//void wrapglVertexAttrib4d(GLuint index, GLdouble v0, GLdouble v1, GLdouble v2, GLdouble v3) {PRECALL;glVertexAttrib4d(index, v0, v1, v2, v3);POSTCALL;}
-//void wrapglVertexAttrib4Nub(GLuint index, GLubyte x, GLubyte y, GLubyte z, GLubyte w) {PRECALL;glVertexAttrib4Nub(index, x, y, z, w);POSTCALL;}
-void wrapglVertexAttrib1fv(GLuint index, const GLfloat *v) {PRECALL;glVertexAttrib1fv(index, v);POSTCALL;}
-//void wrapglVertexAttrib1sv(GLuint index, const GLshort *v) {PRECALL;glVertexAttrib1sv(index, v);POSTCALL;}
-//void wrapglVertexAttrib1dv(GLuint index, const GLdouble *v) {PRECALL;glVertexAttrib1dv(index, v);POSTCALL;}
-void wrapglVertexAttrib2fv(GLuint index, const GLfloat *v) {PRECALL;glVertexAttrib2fv(index, v);POSTCALL;}
-//void wrapglVertexAttrib2sv(GLuint index, const GLshort *v) {PRECALL;glVertexAttrib2sv(index, v);POSTCALL;}
-//void wrapglVertexAttrib2dv(GLuint index, const GLdouble *v) {PRECALL;glVertexAttrib2dv(index, v);POSTCALL;}
-void wrapglVertexAttrib3fv(GLuint index, const GLfloat *v) {PRECALL;glVertexAttrib3fv(index, v);POSTCALL;}
-//void wrapglVertexAttrib3sv(GLuint index, const GLshort *v) {PRECALL;glVertexAttrib3sv(index, v);POSTCALL;}
-//void wrapglVertexAttrib3dv(GLuint index, const GLdouble *v) {PRECALL;glVertexAttrib3dv(index, v);POSTCALL;}
-void wrapglVertexAttrib4fv(GLuint index, const GLfloat *v) {PRECALL;glVertexAttrib4fv(index, v);POSTCALL;}
-//void wrapglVertexAttrib4sv(GLuint index, const GLshort *v) {PRECALL;glVertexAttrib4sv(index, v);POSTCALL;}
-//void wrapglVertexAttrib4dv(GLuint index, const GLdouble *v) {PRECALL;glVertexAttrib4dv(index, v);POSTCALL;}
-//void wrapglVertexAttrib4iv(GLuint index, const GLint *v) {PRECALL;glVertexAttrib4iv(index, v);POSTCALL;}
-//void wrapglVertexAttrib4bv(GLuint index, const GLbyte *v) {PRECALL;glVertexAttrib4bv(index, v);POSTCALL;}
-//void wrapglVertexAttrib4ubv(GLuint index, const GLubyte *v) {PRECALL;glVertexAttrib4ubv(index, v);POSTCALL;}
-//void wrapglVertexAttrib4usv(GLuint index, const GLushort *v) {PRECALL;glVertexAttrib4usv(index, GLushort v);POSTCALL;}
-//void wrapglVertexAttrib4uiv(GLuint index, const GLuint *v) {PRECALL;glVertexAttrib4uiv(index, v);POSTCALL;}
-//void wrapglVertexAttrib4Nbv(GLuint index, const GLbyte *v) {PRECALL;glVertexAttrib4Nbv(index, v);POSTCALL;}
-//void wrapglVertexAttrib4Nsv(GLuint index, const GLshort *v) {PRECALL;glVertexAttrib4Nsv(index, v);POSTCALL;}
-//void wrapglVertexAttrib4Niv(GLuint index, const GLint *v) {PRECALL;glVertexAttrib4Niv(index, v);POSTCALL;}
-//void wrapglVertexAttrib4Nubv(GLuint index, const GLubyte *v) {PRECALL;glVertexAttrib4Nubv(index, v);POSTCALL;}
-//void wrapglVertexAttrib4Nusv(GLuint index, const GLushort *v) {PRECALL;glVertexAttrib4Nusv(index, GLushort v);POSTCALL;}
-//void wrapglVertexAttrib4Nuiv(GLuint index, const GLuint *v) {PRECALL;glVertexAttrib4Nuiv(index, v);POSTCALL;}
-//void wrapglGetVertexAttribdv(GLuint index, GLenum pname, GLdouble *params) {PRECALL;glGetVertexAttribdv(index, pname, params);POSTCALL;}
-void wrapglGetVertexAttribfv(GLuint index, GLenum pname, GLfloat *params) {PRECALL;glGetVertexAttribfv(index, pname, params);POSTCALL;}
-void wrapglGetVertexAttribiv(GLuint index, GLenum pname, GLint *params) {PRECALL;glGetVertexAttribiv(index, pname, params);POSTCALL;}
-void wrapglGetVertexAttribPointerv(GLuint index, GLenum pname, GLvoid **pointer) {PRECALL;glGetVertexAttribPointerv(index, pname, pointer);POSTCALL;}
-#endif
-
-#if SDL_MAJOR_VERSION == 1
-#define SDL_GL_ExtensionSupported(x) (strstr(gl_extensions, x) || strstr(gl_platformextensions, x))
-#endif
-
-extern cvar_t gl_info_extensions;
-void GLES_Init(void)
-{
-#ifndef qglClear
-	qglIsBufferARB = wrapglIsBuffer;
-	qglIsEnabled = wrapglIsEnabled;
-	qglIsFramebufferEXT = wrapglIsFramebuffer;
-//	qglIsQueryARB = wrapglIsQuery;
-	qglIsRenderbufferEXT = wrapglIsRenderbuffer;
-//	qglUnmapBufferARB = wrapglUnmapBuffer;
-	qglCheckFramebufferStatus = wrapglCheckFramebufferStatus;
-	qglGetError = wrapglGetError;
-	qglCreateProgram = wrapglCreateProgram;
-	qglCreateShader = wrapglCreateShader;
-//	qglGetHandleARB = wrapglGetHandle;
-	qglGetAttribLocation = wrapglGetAttribLocation;
-	qglGetUniformLocation = wrapglGetUniformLocation;
-//	qglMapBufferARB = wrapglMapBuffer;
-	qglGetString = wrapglGetString;
-//	qglActiveStencilFaceEXT = wrapglActiveStencilFace;
-	qglActiveTexture = wrapglActiveTexture;
-	qglAlphaFunc = wrapglAlphaFunc;
-	qglArrayElement = wrapglArrayElement;
-	qglAttachShader = wrapglAttachShader;
-//	qglBegin = wrapglBegin;
-//	qglBeginQueryARB = wrapglBeginQuery;
-	qglBindAttribLocation = wrapglBindAttribLocation;
-//	qglBindFragDataLocation = wrapglBindFragDataLocation;
-	qglBindBufferARB = wrapglBindBuffer;
-	qglBindFramebuffer = wrapglBindFramebuffer;
-	qglBindRenderbuffer = wrapglBindRenderbuffer;
-	qglBindTexture = wrapglBindTexture;
-	qglBlendEquationEXT = wrapglBlendEquation;
-	qglBlendFunc = wrapglBlendFunc;
-	qglBufferDataARB = wrapglBufferData;
-	qglBufferSubDataARB = wrapglBufferSubData;
-	qglClear = wrapglClear;
-	qglClearColor = wrapglClearColor;
-	qglClearDepth = wrapglClearDepth;
-	qglClearStencil = wrapglClearStencil;
-	qglClientActiveTexture = wrapglClientActiveTexture;
-	qglColor4f = wrapglColor4f;
-	qglColor4ub = wrapglColor4ub;
-	qglColorMask = wrapglColorMask;
-	qglColorPointer = wrapglColorPointer;
-	qglCompileShader = wrapglCompileShader;
-	qglCompressedTexImage2DARB = wrapglCompressedTexImage2D;
-	qglCompressedTexImage3DARB = wrapglCompressedTexImage3D;
-	qglCompressedTexSubImage2DARB = wrapglCompressedTexSubImage2D;
-	qglCompressedTexSubImage3DARB = wrapglCompressedTexSubImage3D;
-	qglCopyTexImage2D = wrapglCopyTexImage2D;
-	qglCopyTexSubImage2D = wrapglCopyTexSubImage2D;
-	qglCopyTexSubImage3D = wrapglCopyTexSubImage3D;
-	qglCullFace = wrapglCullFace;
-	qglDeleteBuffersARB = wrapglDeleteBuffers;
-	qglDeleteFramebuffers = wrapglDeleteFramebuffers;
-	qglDeleteProgram = wrapglDeleteProgram;
-	qglDeleteShader = wrapglDeleteShader;
-//	qglDeleteQueriesARB = wrapglDeleteQueries;
-	qglDeleteRenderbuffers = wrapglDeleteRenderbuffers;
-	qglDeleteTextures = wrapglDeleteTextures;
-	qglDepthFunc = wrapglDepthFunc;
-	qglDepthMask = wrapglDepthMask;
-	qglDepthRangef = wrapglDepthRangef;
-	qglDetachShader = wrapglDetachShader;
-	qglDisable = wrapglDisable;
-	qglDisableClientState = wrapglDisableClientState;
-	qglDisableVertexAttribArray = wrapglDisableVertexAttribArray;
-	qglDrawArrays = wrapglDrawArrays;
-//	qglDrawBuffer = wrapglDrawBuffer;
-//	qglDrawBuffersARB = wrapglDrawBuffers;
-	qglDrawElements = wrapglDrawElements;
-//	qglDrawRangeElements = wrapglDrawRangeElements;
-	qglEnable = wrapglEnable;
-	qglEnableClientState = wrapglEnableClientState;
-	qglEnableVertexAttribArray = wrapglEnableVertexAttribArray;
-//	qglEnd = wrapglEnd;
-//	qglEndQueryARB = wrapglEndQuery;
-	qglFinish = wrapglFinish;
-	qglFlush = wrapglFlush;
-	qglFramebufferRenderbufferEXT = wrapglFramebufferRenderbuffer;
-	qglFramebufferTexture2DEXT = wrapglFramebufferTexture2D;
-	qglFramebufferTexture3DEXT = wrapglFramebufferTexture3D;
-	qglGenBuffersARB = wrapglGenBuffers;
-	qglGenFramebuffers = wrapglGenFramebuffers;
-//	qglGenQueriesARB = wrapglGenQueries;
-	qglGenRenderbuffers = wrapglGenRenderbuffers;
-	qglGenTextures = wrapglGenTextures;
-	qglGenerateMipmapEXT = wrapglGenerateMipmap;
-	qglGetActiveAttrib = wrapglGetActiveAttrib;
-	qglGetActiveUniform = wrapglGetActiveUniform;
-	qglGetAttachedShaders = wrapglGetAttachedShaders;
-	qglGetBooleanv = wrapglGetBooleanv;
-//	qglGetCompressedTexImageARB = wrapglGetCompressedTexImage;
-	qglGetDoublev = wrapglGetDoublev;
-	qglGetFloatv = wrapglGetFloatv;
-	qglGetFramebufferAttachmentParameterivEXT = wrapglGetFramebufferAttachmentParameteriv;
-	qglGetProgramInfoLog = wrapglGetProgramInfoLog;
-	qglGetShaderInfoLog = wrapglGetShaderInfoLog;
-	qglGetIntegerv = wrapglGetIntegerv;
-	qglGetShaderiv = wrapglGetShaderiv;
-	qglGetProgramiv = wrapglGetProgramiv;
-//	qglGetQueryObjectivARB = wrapglGetQueryObjectiv;
-//	qglGetQueryObjectuivARB = wrapglGetQueryObjectuiv;
-//	qglGetQueryivARB = wrapglGetQueryiv;
-	qglGetRenderbufferParameterivEXT = wrapglGetRenderbufferParameteriv;
-	qglGetShaderSource = wrapglGetShaderSource;
-	qglGetTexImage = wrapglGetTexImage;
-	qglGetTexLevelParameterfv = wrapglGetTexLevelParameterfv;
-	qglGetTexLevelParameteriv = wrapglGetTexLevelParameteriv;
-	qglGetTexParameterfv = wrapglGetTexParameterfv;
-	qglGetTexParameteriv = wrapglGetTexParameteriv;
-	qglGetUniformfv = wrapglGetUniformfv;
-	qglGetUniformiv = wrapglGetUniformiv;
-	qglHint = wrapglHint;
-	qglLineWidth = wrapglLineWidth;
-	qglLinkProgram = wrapglLinkProgram;
-	qglLoadIdentity = wrapglLoadIdentity;
-	qglLoadMatrixf = wrapglLoadMatrixf;
-	qglMatrixMode = wrapglMatrixMode;
-	qglMultiTexCoord1f = wrapglMultiTexCoord1f;
-	qglMultiTexCoord2f = wrapglMultiTexCoord2f;
-	qglMultiTexCoord3f = wrapglMultiTexCoord3f;
-	qglMultiTexCoord4f = wrapglMultiTexCoord4f;
-	qglNormalPointer = wrapglNormalPointer;
-	qglPixelStorei = wrapglPixelStorei;
-	qglPointSize = wrapglPointSize;
-//	qglPolygonMode = wrapglPolygonMode;
-	qglPolygonOffset = wrapglPolygonOffset;
-//	qglPolygonStipple = wrapglPolygonStipple;
-	qglReadBuffer = wrapglReadBuffer;
-	qglReadPixels = wrapglReadPixels;
-	qglRenderbufferStorage = wrapglRenderbufferStorage;
-	qglScissor = wrapglScissor;
-	qglShaderSource = wrapglShaderSource;
-	qglStencilFunc = wrapglStencilFunc;
-	qglStencilFuncSeparate = wrapglStencilFuncSeparate;
-	qglStencilMask = wrapglStencilMask;
-	qglStencilOp = wrapglStencilOp;
-	qglStencilOpSeparate = wrapglStencilOpSeparate;
-	qglTexCoord1f = wrapglTexCoord1f;
-	qglTexCoord2f = wrapglTexCoord2f;
-	qglTexCoord3f = wrapglTexCoord3f;
-	qglTexCoord4f = wrapglTexCoord4f;
-	qglTexCoordPointer = wrapglTexCoordPointer;
-	qglTexEnvf = wrapglTexEnvf;
-	qglTexEnvfv = wrapglTexEnvfv;
-	qglTexEnvi = wrapglTexEnvi;
-	qglTexImage2D = wrapglTexImage2D;
-	qglTexImage3D = wrapglTexImage3D;
-	qglTexParameterf = wrapglTexParameterf;
-	qglTexParameterfv = wrapglTexParameterfv;
-	qglTexParameteri = wrapglTexParameteri;
-	qglTexSubImage2D = wrapglTexSubImage2D;
-	qglTexSubImage3D = wrapglTexSubImage3D;
-	qglUniform1f = wrapglUniform1f;
-	qglUniform1fv = wrapglUniform1fv;
-	qglUniform1i = wrapglUniform1i;
-	qglUniform1iv = wrapglUniform1iv;
-	qglUniform2f = wrapglUniform2f;
-	qglUniform2fv = wrapglUniform2fv;
-	qglUniform2i = wrapglUniform2i;
-	qglUniform2iv = wrapglUniform2iv;
-	qglUniform3f = wrapglUniform3f;
-	qglUniform3fv = wrapglUniform3fv;
-	qglUniform3i = wrapglUniform3i;
-	qglUniform3iv = wrapglUniform3iv;
-	qglUniform4f = wrapglUniform4f;
-	qglUniform4fv = wrapglUniform4fv;
-	qglUniform4i = wrapglUniform4i;
-	qglUniform4iv = wrapglUniform4iv;
-	qglUniformMatrix2fv = wrapglUniformMatrix2fv;
-	qglUniformMatrix3fv = wrapglUniformMatrix3fv;
-	qglUniformMatrix4fv = wrapglUniformMatrix4fv;
-	qglUseProgram = wrapglUseProgram;
-	qglValidateProgram = wrapglValidateProgram;
-	qglVertex2f = wrapglVertex2f;
-	qglVertex3f = wrapglVertex3f;
-	qglVertex4f = wrapglVertex4f;
-	qglVertexAttribPointer = wrapglVertexAttribPointer;
-	qglVertexPointer = wrapglVertexPointer;
-	qglViewport = wrapglViewport;
-	qglVertexAttrib1f = wrapglVertexAttrib1f;
-//	qglVertexAttrib1s = wrapglVertexAttrib1s;
-//	qglVertexAttrib1d = wrapglVertexAttrib1d;
-	qglVertexAttrib2f = wrapglVertexAttrib2f;
-//	qglVertexAttrib2s = wrapglVertexAttrib2s;
-//	qglVertexAttrib2d = wrapglVertexAttrib2d;
-	qglVertexAttrib3f = wrapglVertexAttrib3f;
-//	qglVertexAttrib3s = wrapglVertexAttrib3s;
-//	qglVertexAttrib3d = wrapglVertexAttrib3d;
-	qglVertexAttrib4f = wrapglVertexAttrib4f;
-//	qglVertexAttrib4s = wrapglVertexAttrib4s;
-//	qglVertexAttrib4d = wrapglVertexAttrib4d;
-//	qglVertexAttrib4Nub = wrapglVertexAttrib4Nub;
-	qglVertexAttrib1fv = wrapglVertexAttrib1fv;
-//	qglVertexAttrib1sv = wrapglVertexAttrib1sv;
-//	qglVertexAttrib1dv = wrapglVertexAttrib1dv;
-	qglVertexAttrib2fv = wrapglVertexAttrib2fv;
-//	qglVertexAttrib2sv = wrapglVertexAttrib2sv;
-//	qglVertexAttrib2dv = wrapglVertexAttrib2dv;
-	qglVertexAttrib3fv = wrapglVertexAttrib3fv;
-//	qglVertexAttrib3sv = wrapglVertexAttrib3sv;
-//	qglVertexAttrib3dv = wrapglVertexAttrib3dv;
-	qglVertexAttrib4fv = wrapglVertexAttrib4fv;
-//	qglVertexAttrib4sv = wrapglVertexAttrib4sv;
-//	qglVertexAttrib4dv = wrapglVertexAttrib4dv;
-//	qglVertexAttrib4iv = wrapglVertexAttrib4iv;
-//	qglVertexAttrib4bv = wrapglVertexAttrib4bv;
-//	qglVertexAttrib4ubv = wrapglVertexAttrib4ubv;
-//	qglVertexAttrib4usv = wrapglVertexAttrib4usv;
-//	qglVertexAttrib4uiv = wrapglVertexAttrib4uiv;
-//	qglVertexAttrib4Nbv = wrapglVertexAttrib4Nbv;
-//	qglVertexAttrib4Nsv = wrapglVertexAttrib4Nsv;
-//	qglVertexAttrib4Niv = wrapglVertexAttrib4Niv;
-//	qglVertexAttrib4Nubv = wrapglVertexAttrib4Nubv;
-//	qglVertexAttrib4Nusv = wrapglVertexAttrib4Nusv;
-//	qglVertexAttrib4Nuiv = wrapglVertexAttrib4Nuiv;
-//	qglGetVertexAttribdv = wrapglGetVertexAttribdv;
-	qglGetVertexAttribfv = wrapglGetVertexAttribfv;
-	qglGetVertexAttribiv = wrapglGetVertexAttribiv;
-	qglGetVertexAttribPointerv = wrapglGetVertexAttribPointerv;
-#endif
-
-	gl_renderer = (const char *)qglGetString(GL_RENDERER);
-	gl_vendor = (const char *)qglGetString(GL_VENDOR);
-	gl_version = (const char *)qglGetString(GL_VERSION);
-	gl_extensions = (const char *)qglGetString(GL_EXTENSIONS);
-	
-	if (!gl_extensions)
-		gl_extensions = "";
-	if (!gl_platformextensions)
-		gl_platformextensions = "";
-	
-	Con_Printf("GL_VENDOR: %s\n", gl_vendor);
-	Con_Printf("GL_RENDERER: %s\n", gl_renderer);
-	Con_Printf("GL_VERSION: %s\n", gl_version);
-	Con_DPrintf("GL_EXTENSIONS: %s\n", gl_extensions);
-	Con_DPrintf("%s_EXTENSIONS: %s\n", gl_platform, gl_platformextensions);
-	
-	// LordHavoc: report supported extensions
-	Con_DPrintf("\nQuakeC extensions for server and client: %s\nQuakeC extensions for menu: %s\n", vm_sv_extensions, vm_m_extensions );
-
-	// GLES devices in general do not like GL_BGRA, so use GL_RGBA
-	vid.forcetextype = TEXTYPE_RGBA;
-	
-	vid.support.gl20shaders = true;
-	vid.support.amd_texture_texture4 = false;
-	vid.support.arb_depth_texture = SDL_GL_ExtensionSupported("GL_OES_depth_texture") != 0; // renderbuffer used anyway on gles2?
-	vid.support.arb_draw_buffers = false;
-	vid.support.arb_multitexture = false;
-	vid.support.arb_occlusion_query = false;
-	vid.support.arb_query_buffer_object = false;
-	vid.support.arb_shadow = false;
-	// Insanotic: glCompressedTexImage2D is core in GLES2; the formats are
-	// vendor extensions. Many phone GPUs (Adreno, Mali on newer drivers)
-	// have S3TC: then DDS textures upload as they are instead of being
-	// decoded on the CPU (slow, and 4-8 times the memory). Set again below
-	// from GL_EXT_texture_compression_s3tc.
-	vid.support.arb_texture_compression = false;
-	vid.support.arb_texture_cube_map = SDL_GL_ExtensionSupported("GL_OES_texture_cube_map") != 0;
-	vid.support.arb_texture_env_combine = false;
-	vid.support.arb_texture_gather = false;
-	vid.support.arb_texture_non_power_of_two = strstr(gl_extensions, "GL_OES_texture_npot") != NULL;
-	vid.support.arb_vertex_buffer_object = true; // GLES2 core
-	vid.support.ati_separate_stencil = false;
-	vid.support.ext_blend_minmax = false;
-	vid.support.ext_blend_subtract = true; // GLES2 core
-	vid.support.ext_blend_func_separate = true; // GLES2 core
-	vid.support.ext_draw_range_elements = false;
-
-	/*	ELUAN:
-		Note: "In OS 2.1, the functions in GL_OES_framebuffer_object were not usable from the Java API.
-		Calling them just threw an exception. Android developer relations confirmed that they forgot to implement these. (yeah...)
-		It's apparently been fixed in 2.2, though I haven't tested."
-	*/
-	// LadyHavoc: Android 2.1 is way old now, enabling this again, it's going to be required soon.
-	vid.support.ext_framebuffer_object = true;
-
-	vid.support.ext_packed_depth_stencil = false;
-	vid.support.ext_stencil_two_side = false;
-	vid.support.ext_texture_3d = SDL_GL_ExtensionSupported("GL_OES_texture_3D") != 0;
-	vid.support.ext_texture_compression_s3tc = SDL_GL_ExtensionSupported("GL_EXT_texture_compression_s3tc") != 0;
-	vid.support.khr_texture_compression_astc_ldr = SDL_GL_ExtensionSupported("GL_KHR_texture_compression_astc_ldr") != 0 && !COM_CheckParm("-noastc");
-	vid.support.arb_texture_compression = vid.support.ext_texture_compression_s3tc || vid.support.khr_texture_compression_astc_ldr;
-	vid.support.ext_texture_edge_clamp = true; // GLES2 core
-	vid.support.ext_texture_filter_anisotropic = false; // probably don't want to use it...
-	vid.support.ext_texture_srgb = false;
-	vid.support.arb_texture_float = SDL_GL_ExtensionSupported("GL_OES_texture_float") != 0;
-	vid.support.arb_half_float_pixel = SDL_GL_ExtensionSupported("GL_OES_texture_half_float") != 0;
-	vid.support.arb_half_float_vertex = SDL_GL_ExtensionSupported("GL_OES_vertex_half_float") != 0;
-
-	// Insanotic: gl_info_extensions is what the menu QuakeC asks (GL_CheckExtension
-	// in util.qc) to tell whether the GPU takes S3TC or ASTC textures. On
-	// desktop GL it is filled by GL_CheckExtension; this GLES path sets the
-	// flags above directly, so the list stayed empty: the menu then saw no
-	// texture compression, turned r_texture_dds_load off and restarted the
-	// renderer, and no DDS or ASTC texture ever loaded. List what the engine
-	// actually uses (so -noastc and -nos3tc are honoured too).
-	{
-		static const struct {const char *name; qboolean *flag;} gles_exts[] =
-		{
-			{"GL_EXT_texture_compression_s3tc", &vid.support.ext_texture_compression_s3tc},
-			{"GL_KHR_texture_compression_astc_ldr", &vid.support.khr_texture_compression_astc_ldr},
-			{"GL_ARB_texture_compression", &vid.support.arb_texture_compression},
-			{"GL_ARB_texture_non_power_of_two", &vid.support.arb_texture_non_power_of_two},
-			{"GL_ARB_texture_cube_map", &vid.support.arb_texture_cube_map},
-			{"GL_EXT_texture3D", &vid.support.ext_texture_3d},
-			{"GL_ARB_depth_texture", &vid.support.arb_depth_texture},
-			{"GL_ARB_texture_float", &vid.support.arb_texture_float},
-			{"GL_ARB_half_float_pixel", &vid.support.arb_half_float_pixel},
-			{"GL_ARB_half_float_vertex", &vid.support.arb_half_float_vertex},
-		};
-		char extstr[16384];
-		size_t i;
-		extstr[0] = 0;
-		for (i = 0; i < sizeof(gles_exts) / sizeof(gles_exts[0]); i++)
-			if (*gles_exts[i].flag)
-				dpsnprintf(extstr + strlen(extstr), sizeof(extstr) - strlen(extstr), "%s ", gles_exts[i].name);
-		Cvar_SetQuick(&gl_info_extensions, extstr);
-		Con_DPrintf("GLES texture compression: S3TC %s, ASTC %s\n",
-			vid.support.ext_texture_compression_s3tc ? "yes" : "no", vid.support.khr_texture_compression_astc_ldr ? "yes" : "no");
-	}
-
-	// NOTE: On some devices, a value of 512 gives better FPS than the maximum.
-	qglGetIntegerv(GL_MAX_TEXTURE_SIZE, (GLint*)&vid.maxtexturesize_2d);
-
-#ifdef GL_MAX_TEXTURE_MAX_ANISOTROPY_EXT
-	if (vid.support.ext_texture_filter_anisotropic)
-		qglGetIntegerv(GL_MAX_TEXTURE_MAX_ANISOTROPY_EXT, (GLint*)&vid.max_anisotropy);
-#endif
-	if (vid.support.arb_texture_cube_map)
-		qglGetIntegerv(GL_MAX_CUBE_MAP_TEXTURE_SIZE, (GLint*)&vid.maxtexturesize_cubemap);
-#ifdef GL_MAX_3D_TEXTURE_SIZE
-	if (vid.support.ext_texture_3d)
-		qglGetIntegerv(GL_MAX_3D_TEXTURE_SIZE, (GLint*)&vid.maxtexturesize_3d);
-#endif
-	Con_Printf("GL_MAX_CUBE_MAP_TEXTURE_SIZE = %i\n", vid.maxtexturesize_cubemap);
-	Con_Printf("GL_MAX_3D_TEXTURE_SIZE = %i\n", vid.maxtexturesize_3d);
-	{
-#define GL_ALPHA_BITS                           0x0D55
-#define GL_RED_BITS                             0x0D52
-#define GL_GREEN_BITS                           0x0D53
-#define GL_BLUE_BITS                            0x0D54
-#define GL_DEPTH_BITS                           0x0D56
-#define GL_STENCIL_BITS                         0x0D57
-		int fb_r = -1, fb_g = -1, fb_b = -1, fb_a = -1, fb_d = -1, fb_s = -1;
-		qglGetIntegerv(GL_RED_BITS    , &fb_r);
-		qglGetIntegerv(GL_GREEN_BITS  , &fb_g);
-		qglGetIntegerv(GL_BLUE_BITS   , &fb_b);
-		qglGetIntegerv(GL_ALPHA_BITS  , &fb_a);
-		qglGetIntegerv(GL_DEPTH_BITS  , &fb_d);
-		qglGetIntegerv(GL_STENCIL_BITS, &fb_s);
-		Con_Printf("Framebuffer depth is R%iG%iB%iA%iD%iS%i\n", fb_r, fb_g, fb_b, fb_a, fb_d, fb_s);
-	}
-
-	// verify that cubemap textures are really supported
-	if (vid.support.arb_texture_cube_map && vid.maxtexturesize_cubemap < 256)
-		vid.support.arb_texture_cube_map = false;
-	
-	// verify that 3d textures are really supported
-	if (vid.support.ext_texture_3d && vid.maxtexturesize_3d < 32)
-	{
-		vid.support.ext_texture_3d = false;
-		Con_Printf("GL_OES_texture_3d reported bogus GL_MAX_3D_TEXTURE_SIZE, disabled\n");
-	}
-
-	vid.texunits = 4;
-	vid.teximageunits = 8;
-	vid.texarrayunits = 5;
-	//qglGetIntegerv(GL_MAX_TEXTURE_UNITS, (GLint*)&vid.texunits);
-	qglGetIntegerv(GL_MAX_TEXTURE_IMAGE_UNITS, (GLint*)&vid.teximageunits);CHECKGLERROR
-	//qglGetIntegerv(GL_MAX_TEXTURE_COORDS, (GLint*)&vid.texarrayunits);CHECKGLERROR
-	vid.texunits = bound(1, vid.texunits, MAX_TEXTUREUNITS);
-	vid.teximageunits = bound(1, vid.teximageunits, MAX_TEXTUREUNITS);
-	vid.texarrayunits = bound(1, vid.texarrayunits, MAX_TEXTUREUNITS);
-	Con_DPrintf("Using GLES2.0 rendering path - %i texture matrix, %i texture images, %i texcoords%s\n", vid.texunits, vid.teximageunits, vid.texarrayunits, vid.support.ext_framebuffer_object ? ", shadowmapping supported" : "");
-	vid.renderpath = RENDERPATH_GLES2;
-	vid.useinterleavedarrays = false;
-	vid.sRGBcapable2D = false;
-	vid.sRGBcapable3D = false;
-
-	// VorteX: set other info (maybe place them in VID_InitMode?)
-	extern cvar_t gl_info_vendor;
-	extern cvar_t gl_info_renderer;
-	extern cvar_t gl_info_version;
-	extern cvar_t gl_info_platform;
-	extern cvar_t gl_info_driver;
-	Cvar_SetQuick(&gl_info_vendor, gl_vendor);
-	Cvar_SetQuick(&gl_info_renderer, gl_renderer);
-	Cvar_SetQuick(&gl_info_version, gl_version);
-	Cvar_SetQuick(&gl_info_platform, gl_platform ? gl_platform : "");
-	Cvar_SetQuick(&gl_info_driver, gl_driver);
-}
-#endif
 
 void *GL_GetProcAddress(const char *name)
 {
@@ -2239,10 +1468,193 @@ void *GL_GetProcAddress(const char *name)
 	return p;
 }
 
-static qboolean vid_sdl_initjoysticksystem = false;
+qbool GL_ExtensionSupported(const char *name)
+{
+	return SDL_GL_ExtensionSupported(name);
+}
+
+/// Applies display settings immediately (no vid_restart required).
+static void VID_ApplyDisplayMode(const viddef_mode_t *mode)
+{
+	uint32_t fullscreenwanted;
+	int displaywanted = bound(0, mode->display, vid_info_displaycount.integer - 1);
+	SDL_DisplayMode modefinal;
+
+	if (mode->fullscreen)
+		fullscreenwanted = mode->desktopfullscreen ? SDL_WINDOW_FULLSCREEN_DESKTOP : SDL_WINDOW_FULLSCREEN;
+	else
+		fullscreenwanted = 0;
+
+	// moving to another display or switching to windowed
+	if (vid.mode.display != displaywanted // SDL seems unable to move any fullscreen window to another display
+	|| !fullscreenwanted)
+	{
+		if (SDL_SetWindowFullscreen(window, 0) < 0)
+		{
+			Con_Printf(CON_ERROR "ERROR: can't deactivate fullscreen on display %i because %s\n", vid.mode.display, SDL_GetError());
+			return;
+		}
+		vid.mode.desktopfullscreen = vid.mode.fullscreen = false;
+		Con_DPrintf("Fullscreen deactivated on display %i\n", vid.mode.display);
+	}
+
+	// switching to windowed
+	if (!fullscreenwanted)
+	{
+		int toppx;
+
+		SDL_SetWindowSize(window, vid.mode.width = mode->width, vid.mode.height = mode->height);
+		// resizable and borderless set here cos a separate callback would fail if the cvar is changed when the window is fullscreen
+		SDL_SetWindowResizable(window, vid_resizable.integer ? SDL_TRUE : SDL_FALSE);
+		SDL_SetWindowBordered(window, (SDL_bool)!vid_borderless.integer);
+		SDL_GetWindowBordersSize(window, &toppx, NULL, NULL, NULL);
+		vid_wmborderless = !toppx;
+		if (vid_borderless.integer != vid_wmborderless) // this is not the state we're looking for
+			vid_wmborder_waiting = true;
+	}
+
+	// moving to another display or switching to windowed
+	if (vid.mode.display != displaywanted || !fullscreenwanted)
+	{
+//		SDL_SetWindowPosition(window, SDL_WINDOWPOS_CENTERED_DISPLAY(displaywanted), SDL_WINDOWPOS_CENTERED_DISPLAY(displaywanted));
+//		SDL_GetWindowPosition(window, &vid.xPos, &vid.yPos);
+
+		/* bones_was_here BUG: after SDL_DISPLAYEVENT hotplug events, on Xorg + NVIDIA,
+		 * SDL_WINDOWPOS_CENTERED_DISPLAY(displaywanted) may place the window somewhere completely invisible.
+		 * WORKAROUND: manual positioning seems safer: although SDL_GetDisplayBounds() may return outdated values,
+		 * SDL_SetWindowPosition() always placed the window somewhere fully visible, even if it wasn't correct,
+		 * when tested with SDL 2.26.5.
+		 */
+		SDL_Rect displaybounds;
+		if (SDL_GetDisplayBounds(displaywanted, &displaybounds) < 0)
+		{
+			Con_Printf(CON_ERROR "Error getting bounds of display %i: \"%s\"\n", displaywanted, SDL_GetError());
+			return;
+		}
+		vid.xPos = displaybounds.x + 0.5 * (displaybounds.w - vid.mode.width);
+		vid.yPos = displaybounds.y + 0.5 * (displaybounds.h - vid.mode.height);
+		SDL_SetWindowPosition(window, vid.xPos, vid.yPos);
+
+		vid.mode.display = displaywanted;
+	}
+
+	// switching to a fullscreen mode
+	if (fullscreenwanted)
+	{
+		if (fullscreenwanted == SDL_WINDOW_FULLSCREEN)
+		{
+			// determine if a modeset is needed and if the requested resolution is supported
+			SDL_DisplayMode modewanted, modecurrent;
+
+			modewanted.w = mode->width;
+			modewanted.h = mode->height;
+			modewanted.format = mode->bitsperpixel == 16 ? SDL_PIXELFORMAT_RGB565 : SDL_PIXELFORMAT_RGB888;
+			modewanted.refresh_rate = mode->refreshrate;
+			if (!SDL_GetClosestDisplayMode(displaywanted, &modewanted, &modefinal))
+			{
+				// SDL_GetError() returns a random unrelated error if this fails (in 2.26.5)
+				Con_Printf(CON_ERROR "Error getting closest mode to %ix%i@%ihz for display %i\n", modewanted.w, modewanted.h, modewanted.refresh_rate, vid.mode.display);
+				return;
+			}
+			if (SDL_GetCurrentDisplayMode(displaywanted, &modecurrent) < 0)
+			{
+				Con_Printf(CON_ERROR "Error getting current mode of display %i: \"%s\"\n", vid.mode.display, SDL_GetError());
+				return;
+			}
+			if (memcmp(&modecurrent, &modefinal, sizeof(modecurrent)) != 0)
+			{
+				if (mode->width != modefinal.w || mode->height != modefinal.h)
+				{
+					Con_Printf(CON_WARN "Display %i doesn't support resolution %ix%i\n", vid.mode.display, modewanted.w, modewanted.h);
+					return;
+				}
+				if (SDL_SetWindowDisplayMode(window, &modefinal) < 0)
+				{
+					Con_Printf(CON_ERROR "Error setting mode %ix%i@%ihz for display %i: \"%s\"\n", modefinal.w, modefinal.h, modefinal.refresh_rate, vid.mode.display, SDL_GetError());
+					return;
+				}
+				// HACK to work around SDL BUG when switching from a lower to a higher res:
+				// the display res gets increased but the window size isn't increased
+				// (unless we do this first; switching to windowed mode first also works).
+				SDL_SetWindowFullscreen(window, SDL_WINDOW_FULLSCREEN_DESKTOP);
+			}
+		}
+
+		if (SDL_SetWindowFullscreen(window, fullscreenwanted) < 0)
+		{
+			Con_Printf(CON_ERROR "ERROR: can't activate fullscreen on display %i because %s\n", vid.mode.display, SDL_GetError());
+			return;
+		}
+		// get the real framebuffer size in case the platform's screen coordinates are DPI scaled
+		SDL_GL_GetDrawableSize(window, &vid.mode.width, &vid.mode.height);
+		vid.mode.fullscreen = true;
+		vid.mode.desktopfullscreen = fullscreenwanted == SDL_WINDOW_FULLSCREEN_DESKTOP;
+		Con_DPrintf("Fullscreen activated on display %i\n", vid.mode.display);
+	}
+
+	if (!fullscreenwanted || fullscreenwanted == SDL_WINDOW_FULLSCREEN_DESKTOP)
+		SDL_GetDesktopDisplayMode(displaywanted, &modefinal);
+	else { /* modefinal was set by SDL_GetClosestDisplayMode */ }
+	vid.mode.bitsperpixel = SDL_BITSPERPIXEL(modefinal.format);
+	vid.mode.refreshrate  = mode->refreshrate && mode->fullscreen && !mode->desktopfullscreen ? modefinal.refresh_rate : 0;
+	vid.stencil           = mode->bitsperpixel > 16;
+}
+
+static void VID_ApplyDisplayMode_c(cvar_t *var)
+{
+	viddef_mode_t mode;
+
+	if (!window)
+		return;
+
+	// Menu designs aren't suitable for instant hardware modesetting
+	// they make players scroll through a list, setting the cvars at each step.
+	if (key_dest == key_menu && !key_consoleactive // in menu, console closed
+	&& vid_fullscreen.integer && !vid_desktopfullscreen.integer) // modesetting enabled
+		return;
+
+	Con_DPrintf("%s: applying %s \"%s\"\n", __func__, var->name, var->string);
+
+	mode.display           = vid_display.integer;
+	mode.fullscreen        = vid_fullscreen.integer;
+	mode.desktopfullscreen = vid_desktopfullscreen.integer;
+	mode.width             = vid_width.integer;
+	mode.height            = vid_height.integer;
+	mode.bitsperpixel      = vid_bitsperpixel.integer;
+	mode.refreshrate       = max(0, vid_refreshrate.integer);
+	VID_ApplyDisplayMode(&mode);
+}
+
+static void VID_SetVsync_c(cvar_t *var)
+{
+	int vsyncwanted = cls.timedemo ? 0 : vid_vsync.integer;
+
+	if (!context)
+		return;
+/*
+Can't check first: on Wayland SDL_GL_GetSwapInterval() may initially return 0 when vsync is on.
+On Xorg it returns the correct value.
+	if (SDL_GL_GetSwapInterval() == vsyncwanted)
+		return;
+*/
+
+	// __EMSCRIPTEN__ SDL_GL_SetSwapInterval() calls emscripten_set_main_loop_timing()
+	if (SDL_GL_SetSwapInterval(vsyncwanted) >= 0)
+		Con_DPrintf("Vsync %s\n", vsyncwanted ? "activated" : "deactivated");
+	else
+		Con_Printf(CON_ERROR "ERROR: can't %s vsync because %s\n", vsyncwanted ? "activate" : "deactivate", SDL_GetError());
+}
+
+static void VID_SetHints_c(cvar_t *var)
+{
+	SDL_SetHint(SDL_HINT_MOUSE_FOCUS_CLICKTHROUGH,     vid_mouse_clickthrough.integer     ? "1" : "0");
+	SDL_SetHint(SDL_HINT_VIDEO_MINIMIZE_ON_FOCUS_LOSS, vid_minimize_on_focus_loss.integer ? "1" : "0");
+}
 
 void VID_Init (void)
 {
+	SDL_version version;
+
 #ifndef __IPHONEOS__
 #ifdef MACOSX
 	Cvar_RegisterVariable(&apple_mouse_noaccel);
@@ -2251,9 +1663,28 @@ void VID_Init (void)
 #ifdef DP_MOBILETOUCH
 	Cvar_SetValueQuick(&vid_touchscreen, 1);
 #endif
+	Cvar_RegisterVariable(&joy_sdl2_trigger_deadzone);
 
-#ifdef SDL_R_RESTART
-	R_RegisterModule("SDL", sdl_start, sdl_shutdown, sdl_newmap, NULL, NULL);
+	Cvar_RegisterCallback(&vid_display,                VID_ApplyDisplayMode_c);
+	Cvar_RegisterCallback(&vid_fullscreen,             VID_ApplyDisplayMode_c);
+	Cvar_RegisterCallback(&vid_desktopfullscreen,      VID_ApplyDisplayMode_c);
+	Cvar_RegisterCallback(&vid_width,                  VID_ApplyDisplayMode_c);
+	Cvar_RegisterCallback(&vid_height,                 VID_ApplyDisplayMode_c);
+	Cvar_RegisterCallback(&vid_refreshrate,            VID_ApplyDisplayMode_c);
+	Cvar_RegisterCallback(&vid_resizable,              VID_ApplyDisplayMode_c);
+	Cvar_RegisterCallback(&vid_borderless,             VID_ApplyDisplayMode_c);
+	Cvar_RegisterCallback(&vid_vsync,                  VID_SetVsync_c);
+	Cvar_RegisterCallback(&vid_mouse_clickthrough,     VID_SetHints_c);
+	Cvar_RegisterCallback(&vid_minimize_on_focus_loss, VID_SetHints_c);
+
+	// DPI scaling prevents use of the native resolution, causing blurry rendering
+	// and/or mouse cursor problems and/or incorrect render area, so we need to opt-out.
+	// Must be set before first SDL_INIT_VIDEO. Documented in SDL_hints.h.
+#ifdef WIN32
+	// make SDL coordinates == hardware pixels
+	SDL_SetHint(SDL_HINT_WINDOWS_DPI_SCALING, "0");
+	// use best available awareness mode
+	SDL_SetHint(SDL_HINT_WINDOWS_DPI_AWARENESS, "permonitorv2");
 #endif
 
 #if SDL_MAJOR_VERSION >= 2
@@ -2272,35 +1703,42 @@ void VID_Init (void)
 	// Insanotic: the joystick subsystem scans every input device (about
 	// 0.15 s); it starts later in VID_EnableJoystick instead of before the
 	// first frame
-	vid_isfullscreen = false;
+
+	SDL_GetVersion(&version);
+	Con_Printf("Linked against SDL version %d.%d.%d\n"
+	           "Using SDL library version %d.%d.%d\n",
+	           SDL_MAJOR_VERSION, SDL_MINOR_VERSION, SDL_PATCHLEVEL,
+	           version.major, version.minor, version.patch);
 }
 
 static int vid_sdljoystickindex = -1;
-void VID_EnableJoystick(qboolean enable)
+void VID_EnableJoystick(qbool enable)
 {
 	int index = joy_enable.integer > 0 ? joy_index.integer : -1;
 	int numsdljoysticks;
-	qboolean success = false;
+	qbool success = false;
 	int sharedcount = 0;
 	int sdlindex = -1;
-	static qboolean joystick_started = false;
+	static qbool joystick_started = false;
 	static double first_call = -1;
 	if (!joystick_started)
 	{
 		// start the SDL joystick subsystem once joysticks are wanted, or a
 		// moment after startup so the menu can list detected controllers
 		if (first_call < 0)
-			first_call = realtime;
-		if (joy_enable.integer <= 0 && realtime - first_call < 2)
+			first_call = host.realtime;
+		if (joy_enable.integer <= 0 && host.realtime - first_call < 2)
 			return;
 		joystick_started = true;
 		// Insanotic: on Android SDL lists the motion sensor as the first
 		// joystick; "use joystick input" would then steer by tilting the
 		// device instead of using a real gamepad
 		SDL_SetHint(SDL_HINT_ACCELEROMETER_AS_JOYSTICK, "0");
-		vid_sdl_initjoysticksystem = SDL_InitSubSystem(SDL_INIT_JOYSTICK) >= 0;
-		if (!vid_sdl_initjoysticksystem)
+		if (SDL_InitSubSystem(SDL_INIT_JOYSTICK) < 0)
+		{
 			Con_Printf("Failed to init SDL joystick subsystem: %s\n", SDL_GetError());
+			return;
+		}
 	}
 	sharedcount = VID_Shared_SetJoystick(index);
 	if (index >= 0 && index < sharedcount)
@@ -2320,23 +1758,31 @@ void VID_EnableJoystick(qboolean enable)
 		vid_sdljoystickindex = sdlindex;
 		// close SDL joystick if active
 		if (vid_sdljoystick)
+		{
 			SDL_JoystickClose(vid_sdljoystick);
-		vid_sdljoystick = NULL;
+			vid_sdljoystick = NULL;
+		}
+		if (vid_sdlgamecontroller)
+		{
+			SDL_GameControllerClose(vid_sdlgamecontroller);
+			vid_sdlgamecontroller = NULL;
+		}
 		if (sdlindex >= 0)
 		{
 			vid_sdljoystick = SDL_JoystickOpen(sdlindex);
 			if (vid_sdljoystick)
 			{
-#if SDL_MAJOR_VERSION == 1
-				const char *joystickname = SDL_JoystickName(sdlindex);
-#else
 				const char *joystickname = SDL_JoystickName(vid_sdljoystick);
-#endif
+				if (SDL_IsGameController(vid_sdljoystickindex))
+				{
+					vid_sdlgamecontroller = SDL_GameControllerOpen(vid_sdljoystickindex);
+					Con_DPrintf("Using SDL GameController mappings for Joystick %i\n", index);
+				}
 				Con_Printf("Joystick %i opened (SDL_Joystick %i is \"%s\" with %i axes, %i buttons, %i balls)\n", index, sdlindex, joystickname, (int)SDL_JoystickNumAxes(vid_sdljoystick), (int)SDL_JoystickNumButtons(vid_sdljoystick), (int)SDL_JoystickNumBalls(vid_sdljoystick));
 			}
 			else
 			{
-				Con_Printf("Joystick %i failed (SDL_JoystickOpen(%i) returned: %s)\n", index, sdlindex, SDL_GetError());
+				Con_Printf(CON_ERROR "Joystick %i failed (SDL_JoystickOpen(%i) returned: %s)\n", index, sdlindex, SDL_GetError());
 				sdlindex = -1;
 			}
 		}
@@ -2349,306 +1795,14 @@ void VID_EnableJoystick(qboolean enable)
 		Cvar_SetValueQuick(&joy_active, success ? 1 : 0);
 }
 
-#if SDL_MAJOR_VERSION == 1
-// set the icon (we dont use SDL here since it would be too much a PITA)
-#ifdef WIN32
-#include "resource.h"
-#include <SDL_syswm.h>
-static SDL_Surface *VID_WrapSDL_SetVideoMode(int screenwidth, int screenheight, int screenbpp, int screenflags)
-{
-	SDL_Surface *screen = NULL;
-	SDL_SysWMinfo info;
-	HICON icon;
-	SDL_WM_SetCaption( gamename, NULL );
-	screen = SDL_SetVideoMode(screenwidth, screenheight, screenbpp, screenflags);
-	if (screen)
-	{
-		// get the HWND handle
-		SDL_VERSION( &info.version );
-		if (SDL_GetWMInfo(&info))
-		{
-			icon = LoadIcon( GetModuleHandle( NULL ), MAKEINTRESOURCE( IDI_ICON1 ) );
-#ifndef _W64 //If Windows 64bit data types don't exist
-#ifndef SetClassLongPtr
-#define SetClassLongPtr SetClassLong
-#endif
-#ifndef GCLP_HICON
-#define GCLP_HICON GCL_HICON
-#endif
-#ifndef LONG_PTR
-#define LONG_PTR LONG
-#endif
-#endif
-			SetClassLongPtr( info.window, GCLP_HICON, (LONG_PTR)icon );
-		}
-	}
-	return screen;
-}
-#elif defined(MACOSX)
-static SDL_Surface *VID_WrapSDL_SetVideoMode(int screenwidth, int screenheight, int screenbpp, int screenflags)
-{
-	SDL_Surface *screen = NULL;
-	SDL_WM_SetCaption( gamename, NULL );
-	screen = SDL_SetVideoMode(screenwidth, screenheight, screenbpp, screenflags);
-	// we don't use SDL_WM_SetIcon here because the icon in the .app should be used
-	return screen;
-}
-#else
-// Adding the OS independent XPM version --blub
-#include "darkplaces.xpm"
-#include "nexuiz.xpm"
-#if SDL_MAJOR_VERSION == 1
-#if SDL_VIDEO_DRIVER_X11 && !SDL_VIDEO_DRIVER_QUARTZ
-#include <SDL_syswm.h>
-#endif
-#endif
-static SDL_Surface *icon = NULL;
-static SDL_Surface *VID_WrapSDL_SetVideoMode(int screenwidth, int screenheight, int screenbpp, int screenflags)
-{
-	/*
-	 * Somewhat restricted XPM reader. Only supports XPMs saved by GIMP 2.4 at
-	 * default settings with less than 91 colors and transparency.
-	 */
-
-	int width, height, colors, isize, i, j;
-	int thenone = -1;
-	static SDL_Color palette[256];
-	unsigned short palenc[256]; // store color id by char
-	char *xpm;
-	char **idata, *data;
-	const SDL_version *version;
-	SDL_Surface *screen = NULL;
-
-	if (icon)
-		SDL_FreeSurface(icon);
-	icon = NULL;
-	version = SDL_Linked_Version();
-	// only use non-XPM icon support in SDL v1.3 and higher
-	// SDL v1.2 does not support "smooth" transparency, and thus is better
-	// off the xpm way
-	if(version->major >= 2 || (version->major == 1 && version->minor >= 3))
-	{
-		data = (char *) loadimagepixelsbgra("darkplaces-icon", false, false, false, NULL);
-		if(data)
-		{
-			unsigned int red = 0x00FF0000;
-			unsigned int green = 0x0000FF00;
-			unsigned int blue = 0x000000FF;
-			unsigned int alpha = 0xFF000000;
-			width = image_width;
-			height = image_height;
-
-			// reallocate with malloc, as this is in tempmempool (do not want)
-			xpm = data;
-			data = (char *) malloc(width * height * 4);
-			memcpy(data, xpm, width * height * 4);
-			Mem_Free(xpm);
-			xpm = NULL;
-
-			icon = SDL_CreateRGBSurface(SDL_SRCALPHA, width, height, 32, LittleLong(red), LittleLong(green), LittleLong(blue), LittleLong(alpha));
-
-			if (icon)
-				icon->pixels = data;
-			else
-			{
-				Con_Printf(	"Failed to create surface for the window Icon!\n"
-						"%s\n", SDL_GetError());
-				free(data);
-			}
-		}
-	}
-
-	// we only get here if non-XPM icon was missing, or SDL version is not
-	// sufficient for transparent non-XPM icons
-	if(!icon)
-	{
-		xpm = (char *) FS_LoadFile("darkplaces-icon.xpm", tempmempool, false, NULL);
-		idata = NULL;
-		if(xpm)
-			idata = XPM_DecodeString(xpm);
-		if(!idata)
-			idata = ENGINE_ICON;
-		if(xpm)
-			Mem_Free(xpm);
-
-		data = idata[0];
-
-		if(sscanf(data, "%i %i %i %i", &width, &height, &colors, &isize) == 4)
-		{
-			if(isize == 1)
-			{
-				for(i = 0; i < colors; ++i)
-				{
-					unsigned int r, g, b;
-					char idx;
-
-					if(sscanf(idata[i+1], "%c c #%02x%02x%02x", &idx, &r, &g, &b) != 4)
-					{
-						char foo[2];
-						if(sscanf(idata[i+1], "%c c Non%1[e]", &idx, foo) != 2) // I take the DailyWTF credit for this. --div0
-							break;
-						else
-						{
-							palette[i].r = 255; // color key
-							palette[i].g = 0;
-							palette[i].b = 255;
-							thenone = i; // weeeee
-							palenc[(unsigned char) idx] = i;
-						}
-					}
-					else
-					{
-						palette[i].r = r - (r == 255 && g == 0 && b == 255); // change 255/0/255 pink to 254/0/255 for color key
-						palette[i].g = g;
-						palette[i].b = b;
-						palenc[(unsigned char) idx] = i;
-					}
-				}
-
-				if (i == colors)
-				{
-					// allocate the image data
-					data = (char*) malloc(width*height);
-
-					for(j = 0; j < height; ++j)
-					{
-						for(i = 0; i < width; ++i)
-						{
-							// casting to the safest possible datatypes ^^
-							data[j * width + i] = palenc[((unsigned char*)idata[colors+j+1])[i]];
-						}
-					}
-
-					if(icon != NULL)
-					{
-						// SDL_FreeSurface should free the data too
-						// but for completeness' sake...
-						if(icon->flags & SDL_PREALLOC)
-						{
-							free(icon->pixels);
-							icon->pixels = NULL; // safety
-						}
-						SDL_FreeSurface(icon);
-					}
-
-					icon = SDL_CreateRGBSurface(SDL_SRCCOLORKEY, width, height, 8, 0,0,0,0);// rmask, gmask, bmask, amask); no mask needed
-					// 8 bit surfaces get an empty palette allocated according to the docs
-					// so it's a palette image for sure :) no endian check necessary for the mask
-
-					if(icon)
-					{
-						icon->pixels = data;
-						SDL_SetPalette(icon, SDL_PHYSPAL|SDL_LOGPAL, palette, 0, colors);
-						SDL_SetColorKey(icon, SDL_SRCCOLORKEY, thenone);
-					}
-					else
-					{
-						Con_Printf(	"Failed to create surface for the window Icon!\n"
-								"%s\n", SDL_GetError());
-						free(data);
-					}
-				}
-				else
-				{
-					Con_Printf("This XPM's palette looks odd. Can't continue.\n");
-				}
-			}
-			else
-			{
-				// NOTE: Only 1-char colornames are supported
-				Con_Printf("This XPM's palette is either huge or idiotically unoptimized. It's key size is %i\n", isize);
-			}
-		}
-		else
-		{
-			// NOTE: Only 1-char colornames are supported
-			Con_Printf("Sorry, but this does not even look similar to an XPM.\n");
-		}
-	}
-
-	if (icon)
-		SDL_WM_SetIcon(icon, NULL);
-
-	SDL_WM_SetCaption( gamename, NULL );
-	screen = SDL_SetVideoMode(screenwidth, screenheight, screenbpp, screenflags);
-
-#if SDL_MAJOR_VERSION == 1
-// LordHavoc: info.info.x11.lock_func and accompanying code do not seem to compile with SDL 1.3
-#if SDL_VIDEO_DRIVER_X11 && !SDL_VIDEO_DRIVER_QUARTZ
-
-	version = SDL_Linked_Version();
-	// only use non-XPM icon support in SDL v1.3 and higher
-	// SDL v1.2 does not support "smooth" transparency, and thus is better
-	// off the xpm way
-	if(screen && (!(version->major >= 2 || (version->major == 1 && version->minor >= 3))))
-	{
-		// in this case, we did not set the good icon yet
-		SDL_SysWMinfo info;
-		SDL_VERSION(&info.version);
-		if(SDL_GetWMInfo(&info) == 1 && info.subsystem == SDL_SYSWM_X11)
-		{
-			data = (char *) loadimagepixelsbgra("darkplaces-icon", false, false, false, NULL);
-			if(data)
-			{
-				// use _NET_WM_ICON too
-				static long netwm_icon[MAX_NETWM_ICON];
-				int pos = 0;
-				int i = 1;
-				char vabuf[1024];
-
-				while(data)
-				{
-					if(pos + 2 * image_width * image_height < MAX_NETWM_ICON)
-					{
-						netwm_icon[pos++] = image_width;
-						netwm_icon[pos++] = image_height;
-						for(i = 0; i < image_height; ++i)
-							for(j = 0; j < image_width; ++j)
-								netwm_icon[pos++] = BuffLittleLong((unsigned char *) &data[(i*image_width+j)*4]);
-					}
-					else
-					{
-						Con_Printf("Skipping NETWM icon #%d because there is no space left\n", i);
-					}
-					++i;
-					Mem_Free(data);
-					data = (char *) loadimagepixelsbgra(va(vabuf, sizeof(vabuf), "darkplaces-icon%d", i), false, false, false, NULL);
-				}
-
-				info.info.x11.lock_func();
-				{
-					Atom net_wm_icon = XInternAtom(info.info.x11.display, "_NET_WM_ICON", false);
-					XChangeProperty(info.info.x11.display, info.info.x11.wmwindow, net_wm_icon, XA_CARDINAL, 32, PropModeReplace, (const unsigned char *) netwm_icon, pos);
-				}
-				info.info.x11.unlock_func();
-			}
-		}
-	}
-#endif
-#endif
-	return screen;
-}
-
-#endif
-#endif
-
-static void VID_OutputVersion(void)
-{
-	SDL_version version;
-#if SDL_MAJOR_VERSION == 1
-	version = *SDL_Linked_Version();
-#else
-	SDL_GetVersion(&version);
-#endif
-	Con_Printf(	"Linked against SDL version %d.%d.%d\n"
-					"Using SDL library version %d.%d.%d\n",
-					SDL_MAJOR_VERSION, SDL_MINOR_VERSION, SDL_PATCHLEVEL,
-					version.major, version.minor, version.patch );
-}
-
 #ifdef WIN32
 static void AdjustWindowBounds(viddef_mode_t *mode, RECT *rect)
 {
+	int workWidth;
+	int workHeight;
+	int titleBarPixels = 2;
+	int screenHeight;
+	RECT workArea;
 	LONG width = mode->width; // vid_width
 	LONG height = mode->height; // vid_height
 
@@ -2659,16 +1813,14 @@ static void AdjustWindowBounds(viddef_mode_t *mode, RECT *rect)
 	rect->bottom = height;
 	AdjustWindowRectEx(rect, WS_CAPTION|WS_THICKFRAME, false, 0);
 
-	RECT workArea;
 	SystemParametersInfo(SPI_GETWORKAREA, 0, &workArea, 0);
-	int workWidth = workArea.right - workArea.left;
-	int workHeight = workArea.bottom - workArea.top;
+	workWidth = workArea.right - workArea.left;
+	workHeight = workArea.bottom - workArea.top;
 
 	// SDL forces the window height to be <= screen height - 27px (on Win8.1 - probably intended for the title bar) 
 	// If the task bar is docked to the the left screen border and we move the window to negative y,
 	// there would be some part of the regular desktop visible on the bottom of the screen.
-	int titleBarPixels = 2;
-	int screenHeight = GetSystemMetrics(SM_CYSCREEN);
+	screenHeight = GetSystemMetrics(SM_CYSCREEN);
 	if (screenHeight == workHeight)
 		titleBarPixels = -rect->top;
 
@@ -2690,55 +1842,31 @@ static void AdjustWindowBounds(viddef_mode_t *mode, RECT *rect)
 }
 #endif
 
-static qboolean VID_InitModeGL(viddef_mode_t *mode)
+static qbool VID_InitModeGL(const viddef_mode_t *mode)
 {
-#if SDL_MAJOR_VERSION == 1
-	static int notfirstvideomode = false;
-	int flags = SDL_OPENGL;
-#else
 	int windowflags = SDL_WINDOW_SHOWN | SDL_WINDOW_OPENGL;
-	int xPos = SDL_WINDOWPOS_UNDEFINED;
-	int yPos = SDL_WINDOWPOS_UNDEFINED;
-#endif
-#ifndef USE_GLES2
 	int i;
-	const char *drivername;
-#endif
+	// SDL usually knows best
+	const char *drivername = NULL;
 
-	win_half_width = mode->width>>1;
-	win_half_height = mode->height>>1;
+	// video display selection (multi-monitor)
+	Cvar_SetValueQuick(&vid_info_displaycount, SDL_GetNumVideoDisplays());
+	vid.mode.display = bound(0, mode->display, vid_info_displaycount.integer - 1);
+	vid.xPos = SDL_WINDOWPOS_CENTERED_DISPLAY(vid.mode.display);
+	vid.yPos = SDL_WINDOWPOS_CENTERED_DISPLAY(vid.mode.display);
+	vid_wmborder_waiting = vid_wmborderless = false;
 
 	if(vid_resizable.integer)
-#if SDL_MAJOR_VERSION == 1
-		flags |= SDL_RESIZABLE;
-#else
 		windowflags |= SDL_WINDOW_RESIZABLE;
-#endif
-
-	VID_OutputVersion();
-
-#if SDL_MAJOR_VERSION == 1
-	/*
-	SDL 1.2 Hack
-		We cant switch from one OpenGL video mode to another.
-		Thus we first switch to some stupid 2D mode and then back to OpenGL.
-	*/
-	if (notfirstvideomode)
-		SDL_SetVideoMode( 0, 0, 0, 0 );
-	notfirstvideomode = true;
-#endif
 
 #ifndef USE_GLES2
-	// SDL usually knows best
-	drivername = NULL;
-
 // COMMANDLINEOPTION: SDL GL: -gl_driver <drivername> selects a GL driver library, default is whatever SDL recommends, useful only for 3dfxogl.dll/3dfxvgl.dll or fxmesa or similar, if you don't know what this is for, you don't need it
-	i = COM_CheckParm("-gl_driver");
-	if (i && i < com_argc - 1)
-		drivername = com_argv[i + 1];
+	i = Sys_CheckParm("-gl_driver");
+	if (i && i < sys.argc - 1)
+		drivername = sys.argv[i + 1];
 	if (SDL_GL_LoadLibrary(drivername) < 0)
 	{
-		Con_Printf("Unable to load GL driver \"%s\": %s\n", drivername, SDL_GetError());
+		Con_Printf(CON_ERROR "Unable to load GL driver \"%s\": %s\n", drivername, SDL_GetError());
 		return false;
 	}
 #endif
@@ -2749,418 +1877,182 @@ static qboolean VID_InitModeGL(viddef_mode_t *mode)
 	// hide the menu with SDL_WINDOW_BORDERLESS
 	windowflags |= SDL_WINDOW_FULLSCREEN | SDL_WINDOW_BORDERLESS;
 #endif
-#ifndef USE_GLES2
-	if ((qglGetString = (const GLubyte* (GLAPIENTRY *)(GLenum name))GL_GetProcAddress("glGetString")) == NULL)
-	{
-		VID_Shutdown();
-		Con_Print("Required OpenGL function glGetString not found\n");
-		return false;
-	}
-#endif
 
-	// Knghtbrd: should do platform-specific extension string function here
-
-	vid_isfullscreen = false;
-#if SDL_MAJOR_VERSION == 1
+	// SDL_CreateWindow() supports only width and height modesetting,
+	// so initially we use desktopfullscreen and perform a modeset later if necessary,
+	// this way we do only one modeset to apply the full config.
+	if (mode->fullscreen)
 	{
-		const SDL_VideoInfo *vi = SDL_GetVideoInfo();
-		desktop_mode.width = vi->current_w;
-		desktop_mode.height = vi->current_h;
-		desktop_mode.bpp = vi->vfmt->BitsPerPixel;
-		desktop_mode.pixelheight_num = 1;
-		desktop_mode.pixelheight_denom = 1; // SDL does not provide this
-		if (mode->fullscreen) {
-			if (vid_desktopfullscreen.integer)
-			{
-				mode->width = vi->current_w;
-				mode->height = vi->current_h;
-				mode->bitsperpixel = vi->vfmt->BitsPerPixel;
-			}
-			flags |= SDL_FULLSCREEN;
-			vid_isfullscreen = true;
-		}
-	}
-#else
-	{
-		if (mode->fullscreen) {
-			if (vid_desktopfullscreen.integer)
-			{
-				vid_mode_t *m = VID_GetDesktopMode();
-				mode->width = m->width;
-				mode->height = m->height;
-				windowflags |= SDL_WINDOW_FULLSCREEN_DESKTOP;
-			}
-			else
-				windowflags |= SDL_WINDOW_FULLSCREEN;
-			vid_isfullscreen = true;
-		}
-		else {
-#ifdef WIN32
-			RECT rect;
-			AdjustWindowBounds(mode, &rect);
-			xPos = rect.left;
-			yPos = rect.top;
-#endif
-		}
-	}
-#endif
-	//flags |= SDL_HWSURFACE;
-
-	SDL_GL_SetAttribute (SDL_GL_DOUBLEBUFFER, 1);
-	if (mode->bitsperpixel >= 32)
-	{
-		SDL_GL_SetAttribute (SDL_GL_RED_SIZE, 8);
-		SDL_GL_SetAttribute (SDL_GL_GREEN_SIZE, 8);
-		SDL_GL_SetAttribute (SDL_GL_BLUE_SIZE, 8);
-		SDL_GL_SetAttribute (SDL_GL_ALPHA_SIZE, 8);
-		SDL_GL_SetAttribute (SDL_GL_DEPTH_SIZE, 24);
-		SDL_GL_SetAttribute (SDL_GL_STENCIL_SIZE, 8);
+		windowflags |= SDL_WINDOW_FULLSCREEN_DESKTOP;
+		vid.mode.fullscreen = vid.mode.desktopfullscreen = true;
 	}
 	else
 	{
-		SDL_GL_SetAttribute (SDL_GL_RED_SIZE, 5);
-		SDL_GL_SetAttribute (SDL_GL_GREEN_SIZE, 5);
-		SDL_GL_SetAttribute (SDL_GL_BLUE_SIZE, 5);
-		SDL_GL_SetAttribute (SDL_GL_DEPTH_SIZE, 16);
+		if (vid_borderless.integer)
+			windowflags |= SDL_WINDOW_BORDERLESS;
+		else
+			vid_wmborder_waiting = true; // waiting for border to be added
+#ifdef WIN32
+		if (!vid_ignore_taskbar.integer)
+		{
+			RECT rect;
+			AdjustWindowBounds((viddef_mode_t *)mode, &rect);
+			vid.xPos = rect.left;
+			vid.xPos = rect.top;
+			vid_wmborder_waiting = false;
+		}
+#endif
+		vid.mode.fullscreen = vid.mode.desktopfullscreen = false;
 	}
+
+	VID_SetHints_c(NULL);
+
+	SDL_GL_SetAttribute (SDL_GL_DOUBLEBUFFER, 1);
+	SDL_GL_SetAttribute (SDL_GL_RED_SIZE, 8);
+	SDL_GL_SetAttribute (SDL_GL_GREEN_SIZE, 8);
+	SDL_GL_SetAttribute (SDL_GL_BLUE_SIZE, 8);
+	SDL_GL_SetAttribute (SDL_GL_ALPHA_SIZE, 8);
+	SDL_GL_SetAttribute (SDL_GL_DEPTH_SIZE, 24);
+	SDL_GL_SetAttribute (SDL_GL_STENCIL_SIZE, 8);
 	if (mode->stereobuffer)
+	{
 		SDL_GL_SetAttribute (SDL_GL_STEREO, 1);
+		vid.mode.stereobuffer = true;
+	}
 	if (mode->samples > 1)
 	{
 		SDL_GL_SetAttribute (SDL_GL_MULTISAMPLEBUFFERS, 1);
 		SDL_GL_SetAttribute (SDL_GL_MULTISAMPLESAMPLES, mode->samples);
 	}
 
-#if SDL_MAJOR_VERSION == 1
-	if (vid_vsync.integer)
-		SDL_GL_SetAttribute (SDL_GL_SWAP_CONTROL, 1);
-	else
-		SDL_GL_SetAttribute (SDL_GL_SWAP_CONTROL, 0);
-#else
 #ifdef USE_GLES2
+	SDL_GL_SetAttribute (SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_ES);
 	SDL_GL_SetAttribute (SDL_GL_CONTEXT_MAJOR_VERSION, 2);
 	SDL_GL_SetAttribute (SDL_GL_CONTEXT_MINOR_VERSION, 0);
-	SDL_GL_SetAttribute (SDL_GL_RETAINED_BACKING, 1);
-#endif
+#else
+	SDL_GL_SetAttribute (SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
+	SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
+	SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 2);
+	/* Requesting a Core profile and 3.2 minimum is mandatory on macOS and older Mesa drivers.
+	 * It works fine on other drivers too except NVIDIA, see HACK below.
+	 */
 #endif
 
-	video_bpp = mode->bitsperpixel;
-#if SDL_MAJOR_VERSION == 1
-	video_flags = flags;
-	video_screen = VID_WrapSDL_SetVideoMode(mode->width, mode->height, mode->bitsperpixel, flags);
-	if (video_screen == NULL)
-	{
-		Con_Printf("Failed to set video mode to %ix%i: %s\n", mode->width, mode->height, SDL_GetError());
-		VID_Shutdown();
-		return false;
-	}
-	mode->width = video_screen->w;
-	mode->height = video_screen->h;
-#else
-	window_flags = windowflags;
-	window = SDL_CreateWindow("Insanotic", xPos, yPos, mode->width, mode->height, windowflags);
+	SDL_GL_SetAttribute(SDL_GL_CONTEXT_FLAGS, (gl_debug.integer > 0 ? SDL_GL_CONTEXT_DEBUG_FLAG : 0));
+
+	window = SDL_CreateWindow("Insanotic", vid.xPos, vid.yPos, mode->width, mode->height, windowflags);
 	if (window == NULL)
 	{
-		Con_Printf("Failed to set video mode to %ix%i: %s\n", mode->width, mode->height, SDL_GetError());
+		Con_Printf(CON_ERROR "Failed to set video mode to %ix%i: %s\n", mode->width, mode->height, SDL_GetError());
 		VID_Shutdown();
 		return false;
 	}
-	SDL_GetWindowSize(window, &mode->width, &mode->height);
+
 	context = SDL_GL_CreateContext(window);
 	if (context == NULL)
+		Sys_Error("Failed to initialize OpenGL context: %s\n", SDL_GetError());
+
+	GL_InitFunctions();
+
+#if !defined(USE_GLES2) && !defined(MACOSX)
+	// NVIDIA hates the Core profile and limits the version to the minimum we specified.
+	// HACK: to detect NVIDIA we first need a context, fortunately replacing it takes a few milliseconds
+	gl_vendor = (const char *)qglGetString(GL_VENDOR);
+	if (strncmp(gl_vendor, "NVIDIA", 6) == 0)
 	{
-		Con_Printf("Failed to initialize OpenGL context: %s\n", SDL_GetError());
-		VID_Shutdown();
-		return false;
+		Con_DPrint("The Way It's Meant To Be Played: replacing OpenGL Core profile with Compatibility profile...\n");
+		SDL_GL_DeleteContext(context);
+		SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_COMPATIBILITY);
+		context = SDL_GL_CreateContext(window);
+		if (context == NULL)
+			Sys_Error("Failed to initialize OpenGL context: %s\n", SDL_GetError());
 	}
 #endif
 
-	vid_softsurface = NULL;
-	vid.softpixels = NULL;
-
-#if SDL_MAJOR_VERSION == 1
-	// init keyboard
-	SDL_EnableUNICODE( SDL_ENABLE );
-	// enable key repeat since everyone expects it
-	SDL_EnableKeyRepeat(SDL_DEFAULT_REPEAT_DELAY, SDL_DEFAULT_REPEAT_INTERVAL);
-#endif
-
-#if SDL_MAJOR_VERSION != 1
-	SDL_GL_SetSwapInterval(vid_vsync.integer != 0);
-	vid_usingvsync = (vid_vsync.integer != 0);
-#endif
-
-	gl_platform = "SDL";
-	gl_platformextensions = "";
-
-#ifdef USE_GLES2
-	GLES_Init();
-#else
-	GL_Init();
-#endif
+	// apply vid_vsync
+	Cvar_Callback(&vid_vsync);
 
 	vid_hidden = false;
-	vid_activewindow = false;
-	vid_hasfocus = true;
-	vid_usingmouse = false;
-	vid_usinghidecursor = false;
-		
-#if SDL_MAJOR_VERSION == 1
-	SDL_WM_GrabInput(SDL_GRAB_OFF);
-#endif
-	return true;
-}
-
-extern cvar_t gl_info_extensions;
-extern cvar_t gl_info_vendor;
-extern cvar_t gl_info_renderer;
-extern cvar_t gl_info_version;
-extern cvar_t gl_info_platform;
-extern cvar_t gl_info_driver;
-
-static qboolean VID_InitModeSoft(viddef_mode_t *mode)
-{
-#if SDL_MAJOR_VERSION == 1
-	int flags = SDL_HWSURFACE;
-	if(!COM_CheckParm("-noasyncblit")) flags |= SDL_ASYNCBLIT;
-#else
-	int windowflags = SDL_WINDOW_SHOWN;
-#endif
-
-	win_half_width = mode->width>>1;
-	win_half_height = mode->height>>1;
-
-	if(vid_resizable.integer)
-#if SDL_MAJOR_VERSION == 1
-		flags |= SDL_RESIZABLE;
-#else
-		windowflags |= SDL_WINDOW_RESIZABLE;
-#endif
-
-	VID_OutputVersion();
-
-	vid_isfullscreen = false;
-	if (mode->fullscreen) {
-#if SDL_MAJOR_VERSION == 1
-		const SDL_VideoInfo *vi = SDL_GetVideoInfo();
-		mode->width = vi->current_w;
-		mode->height = vi->current_h;
-		mode->bitsperpixel = vi->vfmt->BitsPerPixel;
-		flags |= SDL_FULLSCREEN;
-#else
-		if (vid_desktopfullscreen.integer)
-			windowflags |= SDL_WINDOW_FULLSCREEN_DESKTOP;
-		else
-			windowflags |= SDL_WINDOW_FULLSCREEN;
-#endif
-		vid_isfullscreen = true;
-	}
-
-	video_bpp = mode->bitsperpixel;
-#if SDL_MAJOR_VERSION == 1
-	video_flags = flags;
-	video_screen = VID_WrapSDL_SetVideoMode(mode->width, mode->height, mode->bitsperpixel, flags);
-	if (video_screen == NULL)
-	{
-		Con_Printf("Failed to set video mode to %ix%i: %s\n", mode->width, mode->height, SDL_GetError());
-		VID_Shutdown();
-		return false;
-	}
-	mode->width = video_screen->w;
-	mode->height = video_screen->h;
-#else
-	window_flags = windowflags;
-	window = SDL_CreateWindow("Insanotic", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, mode->width, mode->height, windowflags);
-	if (window == NULL)
-	{
-		Con_Printf("Failed to set video mode to %ix%i: %s\n", mode->width, mode->height, SDL_GetError());
-		VID_Shutdown();
-		return false;
-	}
-	SDL_GetWindowSize(window, &mode->width, &mode->height);
-#endif
-
-	// create a framebuffer using our specific color format, we let the SDL blit function convert it in VID_Finish
-	vid_softsurface = SDL_CreateRGBSurface(SDL_SWSURFACE, mode->width, mode->height, 32, 0x00FF0000, 0x0000FF00, 0x00000000FF, 0xFF000000);
-	if (vid_softsurface == NULL)
-	{
-		Con_Printf("Failed to setup software rasterizer framebuffer %ix%ix32bpp: %s\n", mode->width, mode->height, SDL_GetError());
-		VID_Shutdown();
-		return false;
-	}
-#if SDL_MAJOR_VERSION == 1
-	SDL_SetAlpha(vid_softsurface, 0, 255);
-#else
-	SDL_SetSurfaceBlendMode(vid_softsurface, SDL_BLENDMODE_NONE);
-#endif
-
-	vid.softpixels = (unsigned int *)vid_softsurface->pixels;
-	vid.softdepthpixels = (unsigned int *)calloc(1, mode->width * mode->height * 4);
-	if (DPSOFTRAST_Init(mode->width, mode->height, vid_soft_threads.integer, vid_soft_interlace.integer, (unsigned int *)vid_softsurface->pixels, (unsigned int *)vid.softdepthpixels) < 0)
-	{
-		Con_Printf("Failed to initialize software rasterizer\n");
-		VID_Shutdown();
-		return false;
-	}
-
-#if SDL_MAJOR_VERSION == 1
-	// init keyboard
-	SDL_EnableUNICODE( SDL_ENABLE );
-	// enable key repeat since everyone expects it
-	SDL_EnableKeyRepeat(SDL_DEFAULT_REPEAT_DELAY, SDL_DEFAULT_REPEAT_INTERVAL);
-#endif
-
-	VID_Soft_SharedSetup();
-
-	vid_hidden = false;
-	vid_activewindow = false;
+	vid_activewindow = true;
 	vid_hasfocus = true;
 	vid_usingmouse = false;
 	vid_usinghidecursor = false;
 
-#if SDL_MAJOR_VERSION == 1
-	SDL_WM_GrabInput(SDL_GRAB_OFF);
-#endif
+	// clear to black (loading plaque will be seen over this)
+	GL_Clear(GL_COLOR_BUFFER_BIT, NULL, 1.0f, 0);
+	VID_Finish(); // checks vid_hidden
+
+	GL_Setup();
+
+	// VorteX: set other info
+	Cvar_SetQuick(&gl_info_vendor, gl_vendor);
+	Cvar_SetQuick(&gl_info_renderer, gl_renderer);
+	Cvar_SetQuick(&gl_info_version, gl_version);
+	Cvar_SetQuick(&gl_info_driver, drivername ? drivername : "");
+
+	for (i = 0; i < vid_info_displaycount.integer; ++i)
+		Con_Printf("Display %i: %s\n", i, SDL_GetDisplayName(i));
+
+	// Perform any hardware modesetting and update vid.mode
+	// if modesetting fails desktopfullscreen continues to be used (see above).
+	VID_ApplyDisplayMode(mode);
+
 	return true;
 }
 
-qboolean VID_InitMode(viddef_mode_t *mode)
+qbool VID_InitMode(const viddef_mode_t *mode)
 {
 	// GAME_STEELSTORM specific
-	steelstorm_showing_map = Cvar_FindVar("steelstorm_showing_map");
-	steelstorm_showing_mousecursor = Cvar_FindVar("steelstorm_showing_mousecursor");
+	steelstorm_showing_map = Cvar_FindVar(&cvars_all, "steelstorm_showing_map", ~0);
+	steelstorm_showing_mousecursor = Cvar_FindVar(&cvars_all, "steelstorm_showing_mousecursor", ~0);
 
 	if (!SDL_WasInit(SDL_INIT_VIDEO) && SDL_InitSubSystem(SDL_INIT_VIDEO) < 0)
 		Sys_Error ("Failed to init SDL video subsystem: %s", SDL_GetError());
 
-#if SDL_MAJOR_VERSION != 1
 	Cvar_SetValueQuick(&vid_touchscreen_supportshowkeyboard, SDL_HasScreenKeyboardSupport() ? 1 : 0);
-#endif
-#ifdef SSE_POSSIBLE
-	if (vid_soft.integer)
-		return VID_InitModeSoft(mode);
-	else
-#endif
-		return VID_InitModeGL(mode);
+	return VID_InitModeGL(mode);
 }
 
 void VID_Shutdown (void)
 {
 	VID_EnableJoystick(false);
-	VID_SetMouse(false, false, false);
+	VID_SetMouse(false, false);
 
-#if SDL_MAJOR_VERSION == 1
-#ifndef WIN32
-#ifndef MACOSX
-	if (icon)
-		SDL_FreeSurface(icon);
-	icon = NULL;
-#endif
-#endif
-#endif
-
-	if (vid_softsurface)
-		SDL_FreeSurface(vid_softsurface);
-	vid_softsurface = NULL;
-	vid.softpixels = NULL;
-	if (vid.softdepthpixels)
-		free(vid.softdepthpixels);
-	vid.softdepthpixels = NULL;
-
-#if SDL_MAJOR_VERSION != 1
+	SDL_GL_DeleteContext(context);
+	context = NULL;
 	SDL_DestroyWindow(window);
 	window = NULL;
-#endif
 
 	SDL_QuitSubSystem(SDL_INIT_VIDEO);
-
-	gl_driver[0] = 0;
-	gl_extensions = "";
-	gl_platform = "";
-	gl_platformextensions = "";
 }
 
 void VID_Finish (void)
 {
-#if SDL_MAJOR_VERSION == 1
-	Uint8 appstate;
-
-	//react on appstate changes
-	appstate = SDL_GetAppState();
-
-	vid_hidden = !(appstate & SDL_APPACTIVE);
-	vid_hasfocus = (appstate & SDL_APPINPUTFOCUS) != 0;
-#endif
-	vid_activewindow = !vid_hidden && vid_hasfocus;
-
 	VID_UpdateGamma();
 
 	if (!vid_hidden)
 	{
 		switch(vid.renderpath)
 		{
-		case RENDERPATH_GL11:
-		case RENDERPATH_GL13:
-		case RENDERPATH_GL20:
-		case RENDERPATH_GLES1:
+		case RENDERPATH_GL32:
 		case RENDERPATH_GLES2:
 			CHECKGLERROR
 			if (r_speeds.integer == 2 || gl_finish.integer)
 				GL_Finish();
-
-#if SDL_MAJOR_VERSION != 1
-{
-	qboolean vid_usevsync;
-	vid_usevsync = (vid_vsync.integer && !cls.timedemo);
-	if (vid_usingvsync != vid_usevsync)
-	{
-		vid_usingvsync = vid_usevsync;
-		if (SDL_GL_SetSwapInterval(vid_usevsync != 0) >= 0)
-			Con_DPrintf("Vsync %s\n", vid_usevsync ? "activated" : "deactivated");
-		else
-			Con_DPrintf("ERROR: can't %s vsync\n", vid_usevsync ? "activate" : "deactivate");
-	}
-}
-#endif
-#if SDL_MAJOR_VERSION == 1
-			SDL_GL_SwapBuffers();
-#else
 			SDL_GL_SwapWindow(window);
-#endif
-			break;
-		case RENDERPATH_SOFT:
-			DPSOFTRAST_Finish();
-#if SDL_MAJOR_VERSION == 1
-//		if (!r_test.integer)
-		{
-			SDL_BlitSurface(vid_softsurface, NULL, video_screen, NULL);
-			SDL_Flip(video_screen);
-		}
-#else
-			{
-				SDL_Surface *screen = SDL_GetWindowSurface(window);
-				SDL_BlitSurface(vid_softsurface, NULL, screen, NULL);
-				SDL_UpdateWindowSurface(window);
-			}
-#endif
-			break;
-		case RENDERPATH_D3D9:
-		case RENDERPATH_D3D10:
-		case RENDERPATH_D3D11:
-			if (r_speeds.integer == 2 || gl_finish.integer)
-				GL_Finish();
 			break;
 		}
 	}
 }
 
-vid_mode_t *VID_GetDesktopMode(void)
+vid_mode_t VID_GetDesktopMode(void)
 {
-#if SDL_MAJOR_VERSION != 1
 	SDL_DisplayMode mode;
 	int bpp;
 	Uint32 rmask, gmask, bmask, amask;
-	SDL_GetDesktopDisplayMode(0, &mode);
+	vid_mode_t desktop_mode;
+
+	SDL_GetDesktopDisplayMode(vid.mode.display, &mode);
 	SDL_PixelFormatEnumToMasks(mode.format, &bpp, &rmask, &gmask, &bmask, &amask);
 	desktop_mode.width = mode.w;
 	desktop_mode.height = mode.h;
@@ -3168,56 +2060,30 @@ vid_mode_t *VID_GetDesktopMode(void)
 	desktop_mode.refreshrate = mode.refresh_rate;
 	desktop_mode.pixelheight_num = 1;
 	desktop_mode.pixelheight_denom = 1; // SDL does not provide this
-	// TODO check whether this actually works, or whether we do still need
-	// a read-window-size-after-entering-desktop-fullscreen hack for
-	// multiscreen setups.
-#endif
-	return &desktop_mode;
+	return desktop_mode;
 }
 
 size_t VID_ListModes(vid_mode_t *modes, size_t maxcount)
 {
 	size_t k = 0;
-#if SDL_MAJOR_VERSION == 1
-	SDL_Rect **vidmodes;
-	int bpp = SDL_GetVideoInfo()->vfmt->BitsPerPixel;
-#ifdef WIN64
-	SDL_Rect **ENDRECT = (SDL_Rect**)-1LL;
-#else
-	SDL_Rect **ENDRECT = (SDL_Rect**)-1;
-#endif
-
-	for(vidmodes = SDL_ListModes(NULL, SDL_FULLSCREEN|SDL_HWSURFACE); vidmodes && vidmodes != ENDRECT && *vidmodes; ++vidmodes)
-	{
-		if(k >= maxcount)
-			break;
-		modes[k].width = (*vidmodes)->w;
-		modes[k].height = (*vidmodes)->h;
-		modes[k].bpp = bpp;
-		modes[k].refreshrate = 60; // no support for refresh rate in SDL
-		modes[k].pixelheight_num = 1;
-		modes[k].pixelheight_denom = 1; // SDL does not provide this
-		++k;
-	}
-#else
 	int modenum;
-	int nummodes = SDL_GetNumDisplayModes(0);
+	int nummodes = SDL_GetNumDisplayModes(vid.mode.display);
 	SDL_DisplayMode mode;
 	for (modenum = 0;modenum < nummodes;modenum++)
 	{
 		if (k >= maxcount)
 			break;
-		if (SDL_GetDisplayMode(0, modenum, &mode))
+		if (SDL_GetDisplayMode(vid.mode.display, modenum, &mode))
 			continue;
 		modes[k].width = mode.w;
 		modes[k].height = mode.h;
-		// FIXME bpp?
+		modes[k].bpp = SDL_BITSPERPIXEL(mode.format);
 		modes[k].refreshrate = mode.refresh_rate;
 		modes[k].pixelheight_num = 1;
 		modes[k].pixelheight_denom = 1; // SDL does not provide this
+		Con_DPrintf("Display %i mode %i: %ix%i %ibpp %ihz\n", vid.mode.display, modenum, modes[k].width, modes[k].height, modes[k].bpp, modes[k].refreshrate);
 		k++;
 	}
-#endif
 	return k;
 }
 
@@ -3238,14 +2104,14 @@ int VID_GetTouches(vid_touch_t *out, int max)
 	}
 	// lifted fingers have been reported once now: let them go
 	VID_FlushTouchReleases();
-	if (cl_lua_touch_mouse.integer && n < max && vid.width > 0 && vid.height > 0)
+	if (cl_lua_touch_mouse.integer && n < max && vid.mode.width > 0 && vid.mode.height > 0)
 	{
 		int x, y;
 		if (SDL_GetMouseState(&x, &y) & SDL_BUTTON(SDL_BUTTON_LEFT))
 		{
 			out[n].id = 1000;
-			out[n].x = (float)x / vid.width;
-			out[n].y = (float)y / vid.height;
+			out[n].x = (float)x / vid.mode.width;
+			out[n].y = (float)y / vid.mode.height;
 			n++;
 		}
 	}

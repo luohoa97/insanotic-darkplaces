@@ -66,38 +66,19 @@ else
 	CMD_MKDIR=$(CMD_UNIXMKDIR)
 endif
 
-# 64bits AMD CPUs use another lib directory
-ifeq ($(DP_MACHINE),x86_64)
-	UNIX_X11LIBPATH:=/usr/X11R6/lib64
-else
-	UNIX_X11LIBPATH:=/usr/X11R6/lib
-endif
-
 # default targets
-TARGETS_DEBUG=sv-debug cl-debug sdl-debug
-TARGETS_PROFILE=sv-profile cl-profile sdl-profile
-TARGETS_RELEASE=sv-release cl-release sdl-release
-TARGETS_RELEASE_PROFILE=sv-release-profile cl-release-profile sdl-release-profile
-TARGETS_NEXUIZ=sv-nexuiz cl-nexuiz sdl-nexuiz
+TARGETS_DEBUG=sv-debug sdl-debug
+TARGETS_PROFILE=sv-profile sdl-profile
+TARGETS_RELEASE=sv-release sdl-release
+TARGETS_RELEASE_PROFILE=sv-release-profile sdl-release-profile
+TARGETS_NEXUIZ=sv-nexuiz sdl-nexuiz
+
 
 ###### Optional features #####
-DP_CDDA?=enabled
-ifeq ($(DP_CDDA), enabled)
-	OBJ_SDLCD=$(OBJ_CD_COMMON) cd_sdl.o
-	OBJ_LINUXCD=$(OBJ_CD_COMMON) cd_linux.o
-	OBJ_BSDCD=$(OBJ_CD_COMMON) cd_bsd.o
-	OBJ_WINCD=$(OBJ_CD_COMMON) cd_win.o
-else
-	OBJ_SDLCD=$(OBJ_CD_COMMON) $(OBJ_NOCD)
-	OBJ_LINUXCD=$(OBJ_CD_COMMON) $(OBJ_NOCD)
-	OBJ_BSDCD=$(OBJ_CD_COMMON) $(OBJ_NOCD)
-	OBJ_WINCD=$(OBJ_CD_COMMON) $(OBJ_NOCD)
-endif
-
 DP_VIDEO_CAPTURE?=enabled
 ifeq ($(DP_VIDEO_CAPTURE), enabled)
 	CFLAGS_VIDEO_CAPTURE=-DCONFIG_VIDEO_CAPTURE
-	OBJ_VIDEO_CAPTURE= cap_avi.o cap_ogg.o
+	OBJ_VIDEO_CAPTURE=cap_avi.o cap_ogg.o
 else
 	CFLAGS_VIDEO_CAPTURE=
 	OBJ_VIDEO_CAPTURE=
@@ -105,14 +86,9 @@ endif
 
 # Linux configuration
 ifeq ($(DP_MAKE_TARGET), linux)
-	DEFAULT_SNDAPI=ALSA
-	OBJ_CD=$(OBJ_LINUXCD)
-
-	OBJ_CL=$(OBJ_GLX)
 	OBJ_ICON=
 	OBJ_ICON_NEXUIZ=
 
-	LDFLAGS_CL=$(LDFLAGS_LINUXCL)
 	LDFLAGS_SV=$(LDFLAGS_LINUXSV)
 	LDFLAGS_SDL=$(LDFLAGS_LINUXSDL)
 
@@ -120,30 +96,54 @@ ifeq ($(DP_MAKE_TARGET), linux)
 	SDLCONFIG_LIBS=$(SDLCONFIG_UNIXLIBS) $(SDLCONFIG_UNIXLIBS_X11)
 	SDLCONFIG_STATICLIBS=$(SDLCONFIG_UNIXSTATICLIBS) $(SDLCONFIG_UNIXSTATICLIBS_X11)
 
-	EXE_CL=$(EXE_UNIXCL)
 	EXE_SV=$(EXE_UNIXSV)
 	EXE_SDL=$(EXE_UNIXSDL)
-	EXE_CLNEXUIZ=$(EXE_UNIXCLNEXUIZ)
 	EXE_SVNEXUIZ=$(EXE_UNIXSVNEXUIZ)
 	EXE_SDLNEXUIZ=$(EXE_UNIXSDLNEXUIZ)
 
+	DP_LINK_SDL?=shared
 	DP_LINK_ZLIB?=shared
 	DP_LINK_JPEG?=shared
-	DP_LINK_ODE?=dlopen
+	DP_LINK_ODE?=
 	DP_LINK_CRYPTO?=dlopen
 	DP_LINK_CRYPTO_RIJNDAEL?=dlopen
+	DP_LINK_XMP?=dlopen
+endif
+
+ifeq ($(DP_MAKE_TARGET), wasm)
+	MAKE=emmake make
+# 	CFLAGS_EXTRA+=--use-port=sdl2 \
+# 	              --use-port=libpng \
+# 	              --use-port=libjpeg \
+# 	              --use-port=zlib \
+# 	              -DNOSUPPORTIPV6 \
+# 	              -DUSE_GLES2
+	CFLAGS_EXTRA+=-s USE_SDL=2 \
+	              -s USE_LIBPNG=1 \
+	              -s USE_LIBJPEG=1 \
+	              -s USE_ZLIB=1 \
+	              -DNOSUPPORTIPV6 \
+	              -DUSE_GLES2
+
+	SDLCONFIG_CFLAGS=$(SDLCONFIG_UNIXCFLAGS) $(SDLCONFIG_UNIXCFLAGS_X11)
+	SDLCONFIG_LIBS=$(SDLCONFIG_UNIXLIBS) $(SDLCONFIG_UNIXLIBS_X11)
+	SDLCONFIG_STATICLIBS=$(SDLCONFIG_UNIXSTATICLIBS) $(SDLCONFIG_UNIXSTATICLIBS_X11)
+	DP_SSE=0
+
+	DP_LINK_SDL?=shared
+	DP_LINK_ZLIB?=shared
+	DP_LINK_JPEG?=dlopen
+	DP_LINK_ODE?=
+	DP_LINK_CRYPTO?=dlopen
+	DP_LINK_CRYPTO_RIJNDAEL?=dlopen
+	DP_LINK_XMP?=dlopen
 endif
 
 # Mac OS X configuration
 ifeq ($(DP_MAKE_TARGET), macosx)
-	DEFAULT_SNDAPI=COREAUDIO
-	OBJ_CD=$(OBJ_MACOSXCD)
-
-	OBJ_CL=$(OBJ_AGL)
 	OBJ_ICON=
 	OBJ_ICON_NEXUIZ=
 
-	LDFLAGS_CL=$(LDFLAGS_MACOSXCL)
 	LDFLAGS_SV=$(LDFLAGS_MACOSXSV)
 	LDFLAGS_SDL=$(LDFLAGS_MACOSXSDL)
 
@@ -151,10 +151,8 @@ ifeq ($(DP_MAKE_TARGET), macosx)
 	SDLCONFIG_LIBS=$(SDLCONFIG_MACOSXLIBS)
 	SDLCONFIG_STATICLIBS=$(SDLCONFIG_MACOSXSTATICLIBS)
 
-	EXE_CL=$(EXE_MACOSXCL)
 	EXE_SV=$(EXE_UNIXSV)
 	EXE_SDL=$(EXE_UNIXSDL)
-	EXE_CLNEXUIZ=$(EXE_MACOSXCLNEXUIZ)
 	EXE_SVNEXUIZ=$(EXE_UNIXSVNEXUIZ)
 	EXE_SDLNEXUIZ=$(EXE_UNIXSDLNEXUIZ)
 
@@ -162,14 +160,14 @@ ifeq ($(DP_MAKE_TARGET), macosx)
 		CFLAGS_MAKEDEP=
 	endif
 
+	DP_LINK_SDL?=shared
 	DP_LINK_ZLIB?=shared
 	DP_LINK_JPEG?=dlopen
-	DP_LINK_ODE?=dlopen
+	DP_LINK_ODE?=
 	DP_LINK_CRYPTO?=dlopen
 	DP_LINK_CRYPTO_RIJNDAEL?=dlopen
+	DP_LINK_XMP?=dlopen
 
-	# on OS X, we don't build the CL by default because it uses deprecated
-	# and not-implemented-in-64bit Carbon
 	TARGETS_DEBUG=sv-debug sdl-debug
 	TARGETS_PROFILE=sv-profile sdl-profile
 	TARGETS_RELEASE=sv-release sdl-release
@@ -179,16 +177,11 @@ endif
 
 # SunOS configuration (Solaris)
 ifeq ($(DP_MAKE_TARGET), sunos)
-	DEFAULT_SNDAPI=BSD
-	OBJ_CD=$(OBJ_SUNOSCD)
-
-	OBJ_CL=$(OBJ_GLX)
 	OBJ_ICON=
 	OBJ_ICON_NEXUIZ=
 
 	CFLAGS_EXTRA=$(CFLAGS_SUNOS)
 
-	LDFLAGS_CL=$(LDFLAGS_SUNOSCL)
 	LDFLAGS_SV=$(LDFLAGS_SUNOSSV)
 	LDFLAGS_SDL=$(LDFLAGS_SUNOSSDL)
 
@@ -196,34 +189,26 @@ ifeq ($(DP_MAKE_TARGET), sunos)
 	SDLCONFIG_LIBS=$(SDLCONFIG_UNIXLIBS) $(SDLCONFIG_UNIXLIBS_X11)
 	SDLCONFIG_STATICLIBS=$(SDLCONFIG_UNIXSTATICLIBS) $(SDLCONFIG_UNIXSTATICLIBS_X11)
 
-	EXE_CL=$(EXE_UNIXCL)
 	EXE_SV=$(EXE_UNIXSV)
 	EXE_SDL=$(EXE_UNIXSDL)
-	EXE_CLNEXUIZ=$(EXE_UNIXCLNEXUIZ)
 	EXE_SVNEXUIZ=$(EXE_UNIXSVNEXUIZ)
 	EXE_SDLNEXUIZ=$(EXE_UNIXSDLNEXUIZ)
 
+	DP_LINK_SDL?=shared
 	DP_LINK_ZLIB?=shared
 	DP_LINK_JPEG?=shared
-	DP_LINK_ODE?=dlopen
+	DP_LINK_ODE?=
 	DP_LINK_CRYPTO?=dlopen
 	DP_LINK_CRYPTO_RIJNDAEL?=dlopen
+	DP_LINK_XMP?=dlopen
 endif
 
 # BSD configuration
 ifeq ($(DP_MAKE_TARGET), bsd)
-ifeq ($(DP_ARCH),FreeBSD)
-	DEFAULT_SNDAPI=OSS
-else
-	DEFAULT_SNDAPI=BSD
-endif
-	OBJ_CD=$(OBJ_BSDCD)
 
-	OBJ_CL=$(OBJ_GLX)
 	OBJ_ICON=
 	OBJ_ICON_NEXUIZ=
 
-	LDFLAGS_CL=$(LDFLAGS_BSDCL)
 	LDFLAGS_SV=$(LDFLAGS_BSDSV)
 	LDFLAGS_SDL=$(LDFLAGS_BSDSDL)
 
@@ -231,58 +216,25 @@ endif
 	SDLCONFIG_LIBS=$(SDLCONFIG_UNIXLIBS) $(SDLCONFIG_UNIXLIBS_X11)
 	SDLCONFIG_STATICLIBS=$(SDLCONFIG_UNIXSTATICLIBS) $(SDLCONFIG_UNIXSTATICLIBS_X11)
 
-	EXE_CL=$(EXE_UNIXCL)
 	EXE_SV=$(EXE_UNIXSV)
 	EXE_SDL=$(EXE_UNIXSDL)
-	EXE_CLNEXUIZ=$(EXE_UNIXCLNEXUIZ)
 	EXE_SVNEXUIZ=$(EXE_UNIXSVNEXUIZ)
 	EXE_SDLNEXUIZ=$(EXE_UNIXSDLNEXUIZ)
 
+	DP_LINK_SDL?=shared
 	DP_LINK_ZLIB?=shared
 	DP_LINK_JPEG?=shared
-	DP_LINK_ODE?=dlopen
+	DP_LINK_ODE?=
 	DP_LINK_CRYPTO?=dlopen
 	DP_LINK_CRYPTO_RIJNDAEL?=dlopen
+	DP_LINK_XMP?=dlopen
 endif
 
 # Win32 configuration
-ifeq ($(WIN32RELEASE), 1)
-#	TARGET=i686-pc-mingw32
-#	CC=$(TARGET)-g++
-#	WINDRES=$(TARGET)-windres
-	CPUOPTIMIZATIONS=-march=pentium3 -mfpmath=sse -fno-math-errno -fno-rounding-math -fno-signaling-nans -fno-trapping-math
-#       CPUOPTIMIZATIONS+=-DUSE_WSPIAPI_H -DSUPPORTIPV6
-	LDFLAGS_WINCOMMON=-Wl,--large-address-aware
-else
-	LDFLAGS_WINCOMMON=
-endif
-
-ifeq ($(WIN64RELEASE), 1)
-#	TARGET=x86_64-pc-mingw32
-#	CC=$(TARGET)-g++
-#	WINDRES=$(TARGET)-windres
-endif
-
-ifeq ($(D3D), 1)
-	CFLAGS_D3D=-DSUPPORTD3D -DSUPPORTDIRECTX
-	CFLAGS_WARNINGS=-Wall
-	LDFLAGS_D3D=-ld3d9
-else
-	CFLAGS_D3D=
-	CFLAGS_WARNINGS=-Wall -Wold-style-definition -Wstrict-prototypes -Wsign-compare -Wdeclaration-after-statement -Wmissing-prototypes
-	LDFLAGS_D3D=
-endif
-
-
 ifeq ($(DP_MAKE_TARGET), mingw)
-	DEFAULT_SNDAPI=WIN
-	OBJ_CD=$(OBJ_WINCD)
-
-	OBJ_CL=$(OBJ_WGL)
 	OBJ_ICON=darkplaces.o
 	OBJ_ICON_NEXUIZ=nexuiz.o
 
-	LDFLAGS_CL=$(LDFLAGS_WINCL)
 	LDFLAGS_SV=$(LDFLAGS_WINSV)
 	LDFLAGS_SDL=$(LDFLAGS_WINSDL)
 
@@ -290,27 +242,49 @@ ifeq ($(DP_MAKE_TARGET), mingw)
 	SDLCONFIG_LIBS=$(SDLCONFIG_UNIXLIBS)
 	SDLCONFIG_STATICLIBS=$(SDLCONFIG_UNIXSTATICLIBS)
 
-	EXE_CL=$(EXE_WINCL)
 	EXE_SV=$(EXE_WINSV)
 	EXE_SDL=$(EXE_WINSDL)
-	EXE_CLNEXUIZ=$(EXE_WINCLNEXUIZ)
 	EXE_SVNEXUIZ=$(EXE_WINSVNEXUIZ)
 	EXE_SDLNEXUIZ=$(EXE_WINSDLNEXUIZ)
 
+	DP_LINK_SDL?=shared
 	DP_LINK_ZLIB?=dlopen
 	DP_LINK_JPEG?=shared
-	DP_LINK_ODE?=dlopen
+	DP_LINK_ODE?=
 	DP_LINK_CRYPTO?=dlopen
 	DP_LINK_CRYPTO_RIJNDAEL?=dlopen
+	DP_LINK_XMP?=dlopen
 endif
 
-# set these to "" if you want to use dynamic loading instead
+
+##### Library linking #####
+# SDL2
+SDL_CONFIG?=sdl2-config
+SDLCONFIG_UNIXCFLAGS?=`$(SDL_CONFIG) --cflags`
+SDLCONFIG_UNIXCFLAGS_X11?=
+SDLCONFIG_UNIXLIBS?=`$(SDL_CONFIG) --libs`
+SDLCONFIG_UNIXLIBS_X11?=-lX11
+SDLCONFIG_UNIXSTATICLIBS?=`$(SDL_CONFIG) --static-libs`
+SDLCONFIG_UNIXSTATICLIBS_X11?=-lX11
+SDLCONFIG_MACOSXCFLAGS=$(SDLCONFIG_UNIXCFLAGS)
+SDLCONFIG_MACOSXLIBS=$(SDLCONFIG_UNIXLIBS)
+SDLCONFIG_MACOSXSTATICLIBS=$(SDLCONFIG_UNIXSTATICLIBS)
+ifeq ($(DP_LINK_SDL), shared)
+	SDL_LIBS=$(SDLCONFIG_LIBS)
+else ifeq ($(DP_LINK_SDL), static)
+	SDL_LIBS=$(SDLCONFIG_STATICLIBS)
+else ifeq ($(DP_LINK_SDL), dlopen)
+  $(error libSDL2 can only be used with shared or static linking)
+endif
+
 # zlib
 ifeq ($(DP_LINK_ZLIB), shared)
 	CFLAGS_LIBZ=-DLINK_TO_ZLIB
 	LIB_Z=-lz
-endif
-ifeq ($(DP_LINK_ZLIB), dlopen)
+else ifeq ($(DP_LINK_ZLIB), static)
+	CFLAGS_LIBZ=-DLINK_TO_ZLIB
+	LIB_Z=-l:libz.a
+else ifeq ($(DP_LINK_ZLIB), dlopen)
 	CFLAGS_LIBZ=
 	LIB_Z=
 endif
@@ -319,8 +293,10 @@ endif
 ifeq ($(DP_LINK_JPEG), shared)
 	CFLAGS_LIBJPEG=-DLINK_TO_LIBJPEG
 	LIB_JPEG=-ljpeg
-endif
-ifeq ($(DP_LINK_JPEG), dlopen)
+else ifeq ($(DP_LINK_JPEG), static)
+	CFLAGS_LIBJPEG=-DLINK_TO_LIBJPEG
+	LIB_JPEG=-l:libjpeg.a
+else ifeq ($(DP_LINK_JPEG), dlopen)
 	CFLAGS_LIBJPEG=
 	LIB_JPEG=
 endif
@@ -330,8 +306,12 @@ ifeq ($(DP_LINK_ODE), shared)
 	ODE_CONFIG?=ode-config
 	LIB_ODE=`$(ODE_CONFIG) --libs`
 	CFLAGS_ODE=`$(ODE_CONFIG) --cflags` -DUSEODE -DLINK_TO_LIBODE
-endif
-ifeq ($(DP_LINK_ODE), dlopen)
+else ifeq ($(DP_LINK_ODE), static)
+	# This is the configuration from Xonotic
+	ODE_CONFIG?=ode-config
+	LIB_ODE=-l:libode.a -lstdc++ -pthread
+	CFLAGS_ODE=-DUSEODE -DLINK_TO_LIBODE -DdDOUBLE
+else ifeq ($(DP_LINK_ODE), dlopen)
 	LIB_ODE=
 	CFLAGS_ODE=-DUSEODE
 endif
@@ -340,70 +320,46 @@ endif
 ifeq ($(DP_LINK_CRYPTO), shared)
 	LIB_CRYPTO=-ld0_blind_id
 	CFLAGS_CRYPTO=-DLINK_TO_CRYPTO
-endif
-ifeq ($(DP_LINK_CRYPTO), dlopen)
+else ifeq ($(DP_LINK_CRYPTO), static)
+	LIB_CRYPTO=-l:libd0_blind_id.a -lgmp
+	CFLAGS_CRYPTO=-DLINK_TO_CRYPTO
+else ifeq ($(DP_LINK_CRYPTO), static_inc_gmp)
+	LIB_CRYPTO=-l:libd0_blind_id.a -l:libgmp.a
+	CFLAGS_CRYPTO=-DLINK_TO_CRYPTO
+else ifeq ($(DP_LINK_CRYPTO), dlopen)
 	LIB_CRYPTO=
 	CFLAGS_CRYPTO=
 endif
+
+# d0_rijndael
 ifeq ($(DP_LINK_CRYPTO_RIJNDAEL), shared)
 	LIB_CRYPTO_RIJNDAEL=-ld0_rijndael
 	CFLAGS_CRYPTO_RIJNDAEL=-DLINK_TO_CRYPTO_RIJNDAEL
-endif
-ifeq ($(DP_LINK_CRYPTO_RIJNDAEL), dlopen)
+else ifeq ($(DP_LINK_CRYPTO_RIJNDAEL), static)
+	LIB_CRYPTO_RIJNDAEL=-l:libd0_rijndael.a
+	CFLAGS_CRYPTO_RIJNDAEL=-DLINK_TO_CRYPTO_RIJNDAEL
+else ifeq ($(DP_LINK_CRYPTO_RIJNDAEL), dlopen)
 	LIB_CRYPTO_RIJNDAEL=
 	CFLAGS_CRYPTO_RIJNDAEL=
 endif
 
-##### Sound configuration #####
-
-ifndef DP_SOUND_API
-	DP_SOUND_API=$(DEFAULT_SNDAPI)
+# xmp
+ifeq ($(DP_LINK_XMP), shared)
+	OBJ_SND_XMP=snd_xmp.o
+	LIB_SND_XMP=-lxmp
+	CFLAGS_SND_XMP=-DUSEXMP -DLINK_TO_LIBXMP
+else ifeq ($(DP_LINK_XMP), static)
+	OBJ_SND_XMP=snd_xmp.o
+	LIB_SND_XMP=-l:libxmp.a
+	CFLAGS_SND_XMP=-DUSEXMP -DLINK_TO_LIBXMP
+else ifeq ($(DP_LINK_XMP), dlopen)
+	OBJ_SND_XMP=snd_xmp.o
+	LIB_SND_XMP=
+	CFLAGS_SND_XMP=-DUSEXMP
 endif
 
-# NULL: no sound
-ifeq ($(DP_SOUND_API), NULL)
-	OBJ_SOUND=$(OBJ_SND_NULL)
-	LIB_SOUND=$(LIB_SND_NULL)
-endif
-
-# OSS: Open Sound System
-ifeq ($(DP_SOUND_API), OSS)
-	OBJ_SOUND=$(OBJ_SND_OSS)
-	LIB_SOUND=$(LIB_SND_OSS)
-endif
-
-# ALSA: Advanced Linux Sound Architecture
-ifeq ($(DP_SOUND_API), ALSA)
-	OBJ_SOUND=$(OBJ_SND_ALSA)
-	LIB_SOUND=$(LIB_SND_ALSA)
-endif
-
-# COREAUDIO: Core Audio
-ifeq ($(DP_SOUND_API), COREAUDIO)
-	OBJ_SOUND=$(OBJ_SND_COREAUDIO)
-	LIB_SOUND=$(LIB_SND_COREAUDIO)
-endif
-
-# BSD: BSD / Sun audio API
-ifeq ($(DP_SOUND_API), BSD)
-	OBJ_SOUND=$(OBJ_SND_BSD)
-	LIB_SOUND=$(LIB_SND_BSD)
-endif
-
-# WIN: DirectX and Win32 WAVE output
-ifeq ($(DP_SOUND_API), WIN)
-	OBJ_SOUND=$(OBJ_SND_WIN)
-	LIB_SOUND=$(LIB_SND_WIN)
-endif
-
-ifeq ($(DP_SOUND_API),3DRAS)
-	OBJ_SOUND=$(OBJ_SND_3DRAS)
-	LIB_SOUND=$(LIB_SND_3DRAS)
-endif
 
 ##### Extra CFLAGS #####
-
-CFLAGS_MAKEDEP?=-MMD
 ifdef DP_FS_BASEDIR
 	CFLAGS_FS=-DDP_FS_BASEDIR=\"$(DP_FS_BASEDIR)\"
 else
@@ -425,6 +381,7 @@ endif
 CFLAGS_NET=
 # Systems without IPv6 support should uncomment this:
 #CFLAGS_NET+=-DNOSUPPORTIPV6
+
 
 ##### GNU Make specific definitions #####
 
