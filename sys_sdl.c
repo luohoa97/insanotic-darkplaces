@@ -267,6 +267,16 @@ void Sys_InitConsole (void)
 {
 }
 
+#ifdef __EMSCRIPTEN__
+#include <emscripten.h>
+// the page's way in: run a console command ("map dance", "status", ...)
+EMSCRIPTEN_KEEPALIVE void Web_Command(const char *text)
+{
+	Cbuf_AddText(text);
+	Cbuf_AddText("\n");
+}
+#endif
+
 int main (int argc, char *argv[])
 {
 	signal(SIGFPE, SIG_IGN);
