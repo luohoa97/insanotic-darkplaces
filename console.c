@@ -1959,7 +1959,7 @@ void Con_TouchCloseRect(float *x, float *y, float *w, float *h)
 }
 
 // is the pointer (the finger that just touched down) on that button?
-qbool Con_TouchCloseHit(void)
+qboolean Con_TouchCloseHit(void)
 {
 	float bx, by, bw, bh, px, py;
 
