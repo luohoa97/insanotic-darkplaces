@@ -397,6 +397,20 @@ void VID_ShowKeyboard(qboolean show)
 #endif
 }
 
+// Insanotic: Android's Back button hides the keyboard but SDL still thinks
+// text input is active, so VID_ShowKeyboard(true) never re-shows it. Stop and
+// start text input again so the keyboard comes back on a tap.
+void VID_RestartKeyboard(void)
+{
+#if SDL_MAJOR_VERSION != 1
+	if (!SDL_HasScreenKeyboardSupport())
+		return;
+	if (SDL_IsTextInputActive())
+		SDL_StopTextInput();
+	SDL_StartTextInput();
+#endif
+}
+
 qboolean VID_ShowingKeyboard(void)
 {
 #if SDL_MAJOR_VERSION != 1

@@ -1971,6 +1971,91 @@ qboolean Con_TouchCloseHit(void)
 	return px >= bx && px < bx + bw && py >= by && py < by + bh;
 }
 
+/*
+Insanotic: touch scrolling of the console backlog. Drag a finger up or down to
+scroll (dragging down shows older lines), let go while moving to fling. A tap
+that did not drag brings the on-screen keyboard back (Back hides it without
+SDL noticing, so it has to be restarted, not just started).
+*/
+static void Con_TouchScroll(void)
+{
+	static qboolean down = false, dragging = false;
+	static float last_y, start_y, remainder, velocity; // console units, lines/s
+	static double last_time;
+	double now = realtime;
+	float dt = (float)(now - last_time);
+	float bx, by, bw, bh;
+	qboolean pressed;
+
+	last_time = now;
+	if (dt <= 0 || dt > 0.25f)
+		dt = 0.016f;
+	if (!vid_touchscreen.integer || !vid.mode.width || !vid.mode.height)
+	{
+		down = dragging = false;
+		return;
+	}
+	pressed = Key_IsDown(K_MOUSE1);
+	{
+		float y = in_windowmouse_y * vid_conheight.value / vid.mode.height;
+		float x = in_windowmouse_x * vid_conwidth.value / vid.mode.width;
+		float lh = max(1.0f, con_textsize.value);
+
+		if (pressed && !down)
+		{
+			// the close button is handled in Key_Event
+			Con_TouchCloseRect(&bx, &by, &bw, &bh);
+			if (!(x >= bx && y < by + bh))
+			{
+				down = true;
+				dragging = false;
+				start_y = last_y = y;
+				remainder = velocity = 0;
+			}
+		}
+		else if (pressed && down)
+		{
+			if (!dragging && fabs(y - start_y) > max(10.0f, lh * 0.75f))
+				dragging = true;
+			if (dragging)
+			{
+				float lines = (y - last_y) / lh + remainder;
+				int whole = (int)lines;
+				remainder = lines - whole;
+				con_backscroll += whole;
+				velocity = velocity * 0.6f + ((y - last_y) / lh / dt) * 0.4f;
+			}
+			last_y = y;
+		}
+		else if (!pressed && down)
+		{
+			down = false;
+			if (!dragging)
+				VID_RestartKeyboard();
+			else if (fabs(velocity) < 3.0f)
+				velocity = 0;
+			dragging = false;
+			remainder = 0;
+		}
+		else if (velocity != 0)
+		{
+			// fling: keep scrolling, slowing down
+			float lines = velocity * dt + remainder;
+			int whole = (int)lines;
+			remainder = lines - whole;
+			con_backscroll += whole;
+			velocity *= max(0.0f, 1.0f - 3.0f * dt);
+			if (fabs(velocity) < 1.0f)
+				velocity = remainder = 0;
+		}
+	}
+	if (con_backscroll < 0)
+	{
+		con_backscroll = 0;
+		velocity = 0;
+	}
+}
+
 void Con_DrawConsole (int lines)
 {
 	float alpha, alpha0;
@@ -1983,6 +2068,8 @@ void Con_DrawConsole (int lines)
 		return;
 
 	if (con_mutex) Thread_LockMutex(con_mutex);
+
+	Con_TouchScroll();
 
 	if (con_backscroll < 0)
 		con_backscroll = 0;

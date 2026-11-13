@@ -271,6 +271,7 @@ void VID_UpdateGamma(void);
 
 qboolean VID_HasScreenKeyboardSupport(void);
 void VID_ShowKeyboard(qboolean show);
+void VID_RestartKeyboard(void);
 qboolean VID_ShowingKeyboard(void);
 
 void VID_SetMouse (qboolean fullscreengrab, qboolean relative, qboolean hidecursor);
