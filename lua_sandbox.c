@@ -119,7 +119,7 @@ static luahookname_t *LuaSandbox_AddHook(luahost_t *host, const char *name)
 	if (h)
 		return h;
 	h = (luahookname_t *)Mem_Alloc(luasandbox_mempool, sizeof(*h));
-	strlcpy(h->name, name, sizeof(h->name));
+	dp_strlcpy(h->name, name, sizeof(h->name));
 	h->next = host->hooks;
 	host->hooks = h;
 	return h;
@@ -152,7 +152,7 @@ void LuaSandbox_Disable(luasandbox_t *m, const char *reason)
 	if (m->disabled)
 		return;
 	if (reason && !m->reason[0])
-		strlcpy(m->reason, reason, sizeof(m->reason));
+		dp_strlcpy(m->reason, reason, sizeof(m->reason));
 	m->disabled = true;
 	if (m->L)
 	{
@@ -245,7 +245,7 @@ void LuaSandbox_PushVec(lua_State *L, const vec3_t v)
 	lua_setmetatable(L, -2);
 }
 
-qboolean LuaSandbox_ToVec(lua_State *L, int idx, vec3_t out)
+qbool LuaSandbox_ToVec(lua_State *L, int idx, vec3_t out)
 {
 	static const char *named[3] = {"x", "y", "z"};
 	int i;
@@ -324,8 +324,8 @@ static int LuaXon_print(lua_State *L)
 
 static cvar_t *LuaXon_CvarForRead(lua_State *L, const char *name)
 {
-	cvar_t *c = Cvar_FindVar(name);
-	if (c && (c->flags & CVAR_PRIVATE))
+	cvar_t *c = Cvar_FindVar(&cvars_all, name, CF_CLIENT | CF_SERVER);
+	if (c && (c->flags & CF_PRIVATE))
 		luaL_error(L, "cvar '%s' is private", name);
 	return c;
 }
@@ -352,10 +352,10 @@ static int LuaXon_cvar_set(lua_State *L)
 {
 	const char *name = luaL_checkstring(L, 1);
 	const char *value = luaL_tolstring(L, 2, NULL);
-	cvar_t *c = Cvar_FindVar(name);
+	cvar_t *c = Cvar_FindVar(&cvars_all, name, CF_CLIENT | CF_SERVER);
 	if (!c)
 		return luaL_error(L, "no such cvar '%s' (use xon.cvar_register)", name);
-	if (c->flags & (CVAR_PRIVATE | CVAR_READONLY))
+	if (c->flags & (CF_PRIVATE | CF_READONLY))
 		return luaL_error(L, "cvar '%s' is protected", name);
 	Cvar_SetQuick(c, value);
 	return 0;
@@ -368,15 +368,15 @@ static int LuaXon_cvar_register(lua_State *L)
 	const char *def = luaL_tolstring(L, 2, NULL);
 	const char *desc = luaL_optstring(L, 3, NULL);
 	char descbuf[128];
-	cvar_t *c = Cvar_FindVar(name);
+	cvar_t *c = Cvar_FindVar(&cvars_all, name, CF_CLIENT | CF_SERVER);
 	if (!desc)
 	{
 		dpsnprintf(descbuf, sizeof(descbuf), "registered by Lua %s %s", m->host->kind, m->name);
 		desc = descbuf;
 	}
 	if (!c)
-		c = Cvar_Get(name, def, m->host->cvar_flags, desc);
-	if (!c || (c->flags & CVAR_PRIVATE))
+		c = Cvar_Get(&cvars_all, name, def, m->host->cvar_flags, desc);
+	if (!c || (c->flags & CF_PRIVATE))
 		return luaL_error(L, "cannot register cvar '%s'", name);
 	lua_pushnumber(L, c->value);
 	return 1;
@@ -521,7 +521,7 @@ static int LuaSandbox_MsgHandler(lua_State *L)
 	return 1;
 }
 
-qboolean LuaSandbox_Call(luasandbox_t *m, int nargs, int nresults, const char *what)
+qbool LuaSandbox_Call(luasandbox_t *m, int nargs, int nresults, const char *what)
 {
 	lua_State *L = m->L;
 	int base = lua_gettop(L) - nargs;
@@ -534,14 +534,14 @@ qboolean LuaSandbox_Call(luasandbox_t *m, int nargs, int nresults, const char *w
 	if (status != LUA_OK || m->killed)
 	{
 		char err[1024];
-		strlcpy(err, m->killed ? m->reason : (lua_tostring(L, -1) ? lua_tostring(L, -1) : "error object is not a string"), sizeof(err));
+		dp_strlcpy(err, m->killed ? m->reason : (lua_tostring(L, -1) ? lua_tostring(L, -1) : "error object is not a string"), sizeof(err));
 		LuaSandbox_Crashed(m, what, err);
 		return false;
 	}
 	return true;
 }
 
-static qboolean LuaSandbox_CreateState(luasandbox_t *m)
+static qbool LuaSandbox_CreateState(luasandbox_t *m)
 {
 	lua_State *L;
 	m->memlimit = (size_t)max(m->host->memory_limit->value, 1) * 1024 * 1024;
@@ -639,11 +639,11 @@ luasandbox_t *LuaSandbox_Load(luahost_t *host, const char *path)
 	m = (luasandbox_t *)Mem_Alloc(luasandbox_mempool, sizeof(*m));
 	host->items[host->num++] = m;
 	m->host = host;
-	strlcpy(m->path, path, sizeof(m->path));
+	dp_strlcpy(m->path, path, sizeof(m->path));
 	memcpy(m->dir, path, slash - path);
 	m->dir[slash - path] = 0;
-	strlcpy(m->name, m->dir + rootlen + 1, sizeof(m->name));
-	strlcpy(m->version, "0", sizeof(m->version));
+	dp_strlcpy(m->name, m->dir + rootlen + 1, sizeof(m->name));
+	dp_strlcpy(m->version, "0", sizeof(m->version));
 
 	dpsnprintf(json, sizeof(json), "%s/%s", m->dir, host->manifest);
 	buf = FS_LoadFile(json, tempmempool, true, &size);
@@ -678,7 +678,7 @@ luasandbox_t *LuaSandbox_Load(luahost_t *host, const char *path)
 		if (luaL_loadbufferx(m->L, (const char *)buf, (size_t)size, chunkname, "t") != LUA_OK)
 		{
 			char err[1024];
-			strlcpy(err, lua_tostring(m->L, -1), sizeof(err));
+			dp_strlcpy(err, lua_tostring(m->L, -1), sizeof(err));
 			Mem_Free(buf);
 			LuaSandbox_Crashed(m, "failed to compile", err);
 			return m;

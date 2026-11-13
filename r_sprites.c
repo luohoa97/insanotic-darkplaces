@@ -181,7 +181,7 @@ static void R_RotateSprite(const mspriteframe_t *frame, vec3_t origin, vec3_t le
 		// Now that we've kicked center-hotspotted sprites, rotate using the appropriate matrix :)
 
 		// determine the angle of a sprite, we could only do that once though and
-		// add a `qboolean initialized' to the mspriteframe_t struct... let's get the direction vector of it :)
+		// add a `qbool initialized' to the mspriteframe_t struct... let's get the direction vector of it :)
 
 		angle = atan(dir[1] / dir[0]) * 180.0f/M_PI;
 
@@ -208,7 +208,7 @@ static float spritetexcoord2f[4*2] = {0, 1, 0, 0, 1, 0, 1, 1};
 static void R_Model_Sprite_Draw_TransparentCallback(const entity_render_t *ent, const rtlight_t *rtlight, int numsurfaces, int *surfacelist)
 {
 	int i;
-	dp_model_t *model = ent->model;
+	model_t *model = ent->model;
 	vec3_t left, up, org, mforward, mleft, mup, middle;
 	float scale, dx, dy, hud_vs_screen;
 	int edge = 0;
@@ -381,7 +381,7 @@ static void R_Model_Sprite_Draw_TransparentCallback(const entity_render_t *ent, 
 		break;
 	}
 
-	// LordHavoc: interpolated sprite rendering
+	// LadyHavoc: interpolated sprite rendering
 	for (i = 0;i < MAX_FRAMEBLENDS;i++)
 	{
 		if (ent->frameblend[i].lerp >= 0.01f)
@@ -416,7 +416,11 @@ static void R_Model_Sprite_Draw_TransparentCallback(const entity_render_t *ent, 
 
 			R_CalcSprite_Vertex3f(vertex3f, org, left, up, frame->left, frame->right, frame->down, frame->up);
 
-			R_DrawCustomSurface_Texture(texture, &identitymatrix, texture->currentmaterialflags, 0, 4, 0, 2, false, false);
+			if (r_showspriteedges.integer)
+				for (i = 0; i < 4; i++)
+					R_DebugLine(vertex3f + i * 3, vertex3f + ((i + 1) % 4) * 3);
+
+			R_DrawCustomSurface_Texture(texture, &identitymatrix, texture->currentmaterialflags, 0, 4, 0, 2, false, false, false);
 		}
 	}
 

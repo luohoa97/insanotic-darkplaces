@@ -1,5 +1,6 @@
 /*
 Copyright (C) 1996-1997 Id Software, Inc.
+Copyright (C) 2000-2020 DarkPlaces contributors
 
 This program is free software; you can redistribute it and/or
 modify it under the terms of the GNU General Public License
@@ -21,11 +22,17 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #ifndef COMMON_H
 #define COMMON_H
 
+#include <stdarg.h>
+#include <assert.h>
+#include "qtypes.h"
+#include "qdefs.h"
 
 /// MSVC has a different name for several standard functions
 #ifdef WIN32
 # define strcasecmp _stricmp
 # define strncasecmp _strnicmp
+#else
+#include "strings.h"
 #endif
 
 // Create our own define for Mac OS X
@@ -33,21 +40,20 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 # define MACOSX
 #endif
 
-#ifdef SUNOS
-#include <sys/file.h>		///< Needed for FNDELAY
-#endif
 
 //============================================================================
 
+#define ContainerOf(ptr, type, member) ((type *)((char *)(ptr) - offsetof(type, member)))
+
 typedef struct sizebuf_s
 {
-	qboolean	allowoverflow;	///< if false, do a Sys_Error
-	qboolean	overflowed;		///< set to true if the buffer size failed
+	qbool	allowoverflow;	///< if false, do a Sys_Error
+	qbool	overflowed;		///< set to true if the buffer size failed
 	unsigned char		*data;
 	int			maxsize;
 	int			cursize;
 	int			readcount;
-	qboolean	badread;		// set if a read goes beyond end of message
+	qbool	badread;		// set if a read goes beyond end of message
 } sizebuf_t;
 
 void SZ_Clear (sizebuf_t *buf);
@@ -125,6 +131,7 @@ void StoreLittleShort (unsigned char *buffer, unsigned short i);
 typedef enum protocolversion_e
 {
 	PROTOCOL_UNKNOWN,
+	PROTOCOL_DARKPLACES8, ///< added parting messages. WIP
 	PROTOCOL_DARKPLACES7, ///< added QuakeWorld-style movement protocol to allow more consistent prediction
 	PROTOCOL_DARKPLACES6, ///< various changes
 	PROTOCOL_DARKPLACES5, ///< uses EntityFrame5 entity snapshot encoder/decoder which is based on a Tribes networking article at http://www.garagegames.com/articles/networking1/
@@ -173,10 +180,14 @@ int MSG_ReadBigLong (sizebuf_t *sb);
 float MSG_ReadLittleFloat (sizebuf_t *sb);
 float MSG_ReadBigFloat (sizebuf_t *sb);
 char *MSG_ReadString (sizebuf_t *sb, char *string, size_t maxstring);
-int MSG_ReadBytes (sizebuf_t *sb, int numbytes, unsigned char *out);
+/// Same as MSG_ReadString except it returns the number of bytes written to *string excluding the \0 terminator.
+size_t MSG_ReadString_len (sizebuf_t *sb, char *string, size_t maxstring);
+size_t MSG_ReadBytes (sizebuf_t *sb, size_t numbytes, unsigned char *out);
 
 #define MSG_ReadChar(sb) ((sb)->readcount >= (sb)->cursize ? ((sb)->badread = true, -1) : (signed char)(sb)->data[(sb)->readcount++])
 #define MSG_ReadByte(sb) ((sb)->readcount >= (sb)->cursize ? ((sb)->badread = true, -1) : (unsigned char)(sb)->data[(sb)->readcount++])
+/// Same as MSG_ReadByte but with no need to copy twice (first to `int` to check for -1) so each byte can be copied directly to a string[]
+#define MSG_ReadByte_opt(sb) ((sb)->readcount >= (sb)->cursize ? ((sb)->badread = true, '\0') : (unsigned char)(sb)->data[(sb)->readcount++])
 #define MSG_ReadShort MSG_ReadLittleShort
 #define MSG_ReadLong MSG_ReadLittleLong
 #define MSG_ReadFloat MSG_ReadLittleFloat
@@ -194,58 +205,73 @@ float MSG_ReadAngle (sizebuf_t *sb, protocolversion_t protocol);
 //============================================================================
 
 typedef float (*COM_WordWidthFunc_t) (void *passthrough, const char *w, size_t *length, float maxWidth); // length is updated to the longest fitting string into maxWidth; if maxWidth < 0, all characters are used and length is used as is
-typedef int (*COM_LineProcessorFunc) (void *passthrough, const char *line, size_t length, float width, qboolean isContination);
+typedef int (*COM_LineProcessorFunc) (void *passthrough, const char *line, size_t length, float width, qbool isContination);
 int COM_Wordwrap(const char *string, size_t length, float continuationSize, float maxWidth, COM_WordWidthFunc_t wordWidth, void *passthroughCW, COM_LineProcessorFunc processLine, void *passthroughPL);
 
 extern char com_token[MAX_INPUTLINE];
+extern unsigned com_token_len;
+qbool COM_ParseToken_Simple(const char **datapointer, qbool returnnewline, qbool parsebackslash, qbool parsecomments);
+qbool COM_ParseToken_QuakeC(const char **datapointer, qbool returnnewline);
+qbool COM_ParseToken_VM_Tokenize(const char **datapointer, qbool returnnewline);
+qbool COM_ParseToken_Console(const char **datapointer);
 
-int COM_ParseToken_Simple(const char **datapointer, qboolean returnnewline, qboolean parsebackslash, qboolean parsecomments);
-int COM_ParseToken_QuakeC(const char **datapointer, qboolean returnnewline);
-int COM_ParseToken_VM_Tokenize(const char **datapointer, qboolean returnnewline);
-int COM_ParseToken_Console(const char **datapointer);
-
-extern int com_argc;
-extern const char **com_argv;
-extern int com_selffd;
-
-int COM_CheckParm (const char *parm);
 void COM_Init (void);
 void COM_Shutdown (void);
-void COM_InitGameType (void);
 
 char *va(char *buf, size_t buflen, const char *format, ...) DP_FUNC_PRINTF(3);
 // does a varargs printf into provided buffer, returns buffer (so it can be called in-line unlike dpsnprintf)
 
+/* Some versions of GCC with -Wc++-compat will complain if static_assert
+ * is used even though the macro is valid C11, so make it happy anyway
+ * because having build logs without any purple text is pretty satisfying.
+ * TODO: Disable the flag by default in makefile, with an optional variable
+ * to reenable it.
+ */
+#ifndef __cplusplus
+#define DP_STATIC_ASSERT(expr, str) _Static_assert(expr, str)
+#else
+#define DP_STATIC_ASSERT(expr, str) static_assert(expr, str)
+#endif
 
 // snprintf and vsnprintf are NOT portable. Use their DP counterparts instead
-#ifdef snprintf
-# undef snprintf
-#endif
-#define snprintf DO_NOT_USE_SNPRINTF__USE_DPSNPRINTF
-#ifdef vsnprintf
-# undef vsnprintf
-#endif
-#define vsnprintf DO_NOT_USE_VSNPRINTF__USE_DPVSNPRINTF
+#undef snprintf
+#define snprintf DP_STATIC_ASSERT(0, "snprintf is forbidden for portability reasons. Use dpsnprintf instead.")
+#undef vsnprintf
+#define vsnprintf DP_STATIC_ASSERT(0, "vsnprintf is forbidden for portability reasons. Use dpvsnprintf instead.")
 
-// dpsnprintf and dpvsnprintf
-// return the number of printed characters, excluding the final '\0'
-// or return -1 if the buffer isn't big enough to contain the entire string.
-// buffer is ALWAYS null-terminated
+// documentation duplicated deliberately for the benefit of IDEs that support https://www.doxygen.nl/manual/docblocks.html
+/// Returns the number of printed characters, excluding the final '\0'
+/// or returns -1 if the buffer isn't big enough to contain the entire string.
+/// Buffer is ALWAYS null-terminated.
 extern int dpsnprintf (char *buffer, size_t buffersize, const char *format, ...) DP_FUNC_PRINTF(3);
+/// Returns the number of printed characters, excluding the final '\0'
+/// or returns -1 if the buffer isn't big enough to contain the entire string.
+/// Buffer is ALWAYS null-terminated.
 extern int dpvsnprintf (char *buffer, size_t buffersize, const char *format, va_list args);
 
 // A bunch of functions are forbidden for security reasons (and also to please MSVS 2005, for some of them)
-// LordHavoc: added #undef lines here to avoid warnings in Linux
+// LadyHavoc: added #undef lines here to avoid warnings in Linux
 #undef strcat
-#define strcat DO_NOT_USE_STRCAT__USE_STRLCAT_OR_MEMCPY
+#define strcat DP_STATIC_ASSERT(0, "strcat is forbidden for security reasons. Use dp_strlcat or memcpy instead.")
 #undef strncat
-#define strncat DO_NOT_USE_STRNCAT__USE_STRLCAT_OR_MEMCPY
+#define strncat DP_STATIC_ASSERT(0, "strncat is forbidden for security reasons. Use dp_strlcat or memcpy instead.")
 #undef strcpy
-#define strcpy DO_NOT_USE_STRCPY__USE_STRLCPY_OR_MEMCPY
+#define strcpy DP_STATIC_ASSERT(0, "strcpy is forbidden for security reasons. Use dp_strlcpy or memcpy instead.")
 #undef strncpy
-#define strncpy DO_NOT_USE_STRNCPY__USE_STRLCPY_OR_MEMCPY
-//#undef sprintf
-//#define sprintf DO_NOT_USE_SPRINTF__USE_DPSNPRINTF
+#define strncpy DP_STATIC_ASSERT(0, "strncpy is forbidden for security reasons. Use dp_strlcpy or memcpy instead.")
+#undef stpcpy
+#define stpcpy DP_STATIC_ASSERT(0, "stpcpy is forbidden for security reasons. Use dp_stpecpy or memcpy instead.")
+#undef ustpcpy
+#define ustpcpy DP_STATIC_ASSERT(0, "ustpcpy is forbidden for security reasons. Use dp_ustr2stp or memcpy instead.")
+#undef ustr2stp
+#define ustr2stp DP_STATIC_ASSERT(0, "ustr2stp is forbidden for security reasons. Use dp_ustr2stp or memcpy instead.")
+#undef sprintf
+#define sprintf DP_STATIC_ASSERT(0, "sprintf is forbidden for security reasons. Use dpsnprintf instead.")
+
+#undef strlcpy
+#define strlcpy DP_STATIC_ASSERT(0, "strlcpy is forbidden for stability and correctness. See common.h and common.c comments.")
+#undef strlcat
+#define strlcat DP_STATIC_ASSERT(0, "strlcat is forbidden for stability and correctness. See common.h and common.c comments.")
 
 
 //============================================================================
@@ -263,119 +289,24 @@ typedef enum userdirmode_e
 }
 userdirmode_t;
 
-typedef enum gamemode_e
-{
-	GAME_NORMAL,
-	GAME_HIPNOTIC,
-	GAME_ROGUE,
-	GAME_QUOTH,
-	GAME_NEHAHRA,
-	GAME_NEXUIZ,
-	GAME_XONOTIC,
-	GAME_TRANSFUSION,
-	GAME_GOODVSBAD2,
-	GAME_TEU,
-	GAME_BATTLEMECH,
-	GAME_ZYMOTIC,
-	GAME_SETHERAL,
-	GAME_TENEBRAE, // full of evil hackery
-	GAME_NEOTERIC,
-	GAME_OPENQUARTZ, //this game sucks
-	GAME_PRYDON,
-	GAME_DELUXEQUAKE,
-	GAME_THEHUNTED,
-	GAME_DEFEATINDETAIL2,
-	GAME_DARSANA,
-	GAME_CONTAGIONTHEORY,
-	GAME_EDU2P,
-	GAME_PROPHECY,
-	GAME_BLOODOMNICIDE,
-	GAME_STEELSTORM, // added by motorsep
-	GAME_STEELSTORM2, // added by motorsep
-	GAME_SSAMMO, // added by motorsep
-	GAME_STEELSTORMREVENANTS, // added by motorsep 07/19/2015
-	GAME_TOMESOFMEPHISTOPHELES, // added by motorsep
-	GAME_STRAPBOMB, // added by motorsep for Urre
-	GAME_MOONHELM,
-	GAME_VORETOURNAMENT,
-	GAME_COUNT
-}
-gamemode_t;
-
-// Master switch for some hacks/changes that eventually should become cvars.
-#define IS_NEXUIZ_DERIVED(g) ((g) == GAME_NEXUIZ || (g) == GAME_XONOTIC || (g) == GAME_VORETOURNAMENT)
-// Pre-csqcmodels era.
-#define IS_OLDNEXUIZ_DERIVED(g) ((g) == GAME_NEXUIZ || (g) == GAME_VORETOURNAMENT)
-
-extern gamemode_t gamemode;
-extern const char *gamename;
-extern const char *gamenetworkfiltername;
-extern const char *gamedirname1;
-extern const char *gamedirname2;
-extern const char *gamescreenshotname;
-extern const char *gameuserdirname;
-extern char com_modname[MAX_OSPATH];
-
-void COM_ChangeGameTypeForGameDirs(void);
-
-void COM_ToLowerString (const char *in, char *out, size_t size_out);
-void COM_ToUpperString (const char *in, char *out, size_t size_out);
+/// Returns the number of bytes written to *out excluding the \0 terminator.
+size_t COM_ToLowerString(const char *in, char *out, size_t size_out);
+/// Returns the number of bytes written to *out excluding the \0 terminator.
+size_t COM_ToUpperString(const char *in, char *out, size_t size_out);
 int COM_StringBeginsWith(const char *s, const char *match);
-
 int COM_ReadAndTokenizeLine(const char **text, char **argv, int maxargc, char *tokenbuf, int tokenbufsize, const char *commentprefix);
+size_t COM_StringLengthNoColors(const char *s, size_t size_s, qbool *valid);
+size_t COM_StringDecolorize(const char *in, size_t size_in, char *out, size_t size_out, qbool escape_carets);
 
-size_t COM_StringLengthNoColors(const char *s, size_t size_s, qboolean *valid);
-qboolean COM_StringDecolorize(const char *in, size_t size_in, char *out, size_t size_out, qboolean escape_carets);
-void COM_ToLowerString (const char *in, char *out, size_t size_out);
-void COM_ToUpperString (const char *in, char *out, size_t size_out);
 
-typedef struct stringlist_s
-{
-	/// maxstrings changes as needed, causing reallocation of strings[] array
-	int maxstrings;
-	int numstrings;
-	char **strings;
-} stringlist_t;
 
-int matchpattern(const char *in, const char *pattern, int caseinsensitive);
-int matchpattern_with_separator(const char *in, const char *pattern, int caseinsensitive, const char *separators, qboolean wildcard_least_one);
-void stringlistinit(stringlist_t *list);
-void stringlistfreecontents(stringlist_t *list);
-void stringlistappend(stringlist_t *list, const char *text);
-void stringlistsort(stringlist_t *list, qboolean uniq);
-void listdirectory(stringlist_t *list, const char *basepath, const char *path);
+#define dp_strlcpy(dst, src, dsize) dp__strlcpy(dst, src, dsize, __func__, __LINE__)
+#define dp_strlcat(dst, src, dsize) dp__strlcat(dst, src, dsize, __func__, __LINE__)
+size_t dp__strlcpy(char *dst, const char *src, size_t dsize, const char *func, unsigned line);
+size_t dp__strlcat(char *dst, const char *src, size_t dsize, const char *func, unsigned line);
+char *dp_stpecpy(char *dst, char *end, const char *src);
+char *dp_ustr2stp(char *dst, size_t dsize, const char *src, size_t slen);
 
-char *InfoString_GetValue(const char *buffer, const char *key, char *value, size_t valuelength);
-void InfoString_SetValue(char *buffer, size_t bufferlength, const char *key, const char *value);
-void InfoString_Print(char *buffer);
-
-// strlcat and strlcpy, from OpenBSD
-// Most (all?) BSDs already have them
-#if defined(__OpenBSD__) || defined(__NetBSD__) || defined(__FreeBSD__) || defined(MACOSX)
-# define HAVE_STRLCAT 1
-# define HAVE_STRLCPY 1
-#endif
-
-#ifndef HAVE_STRLCAT
-/*!
- * Appends src to string dst of size siz (unlike strncat, siz is the
- * full size of dst, not space left).  At most siz-1 characters
- * will be copied.  Always NUL terminates (unless siz <= strlen(dst)).
- * Returns strlen(src) + MIN(siz, strlen(initial dst)).
- * If retval >= siz, truncation occurred.
- */
-size_t strlcat(char *dst, const char *src, size_t siz);
-#endif  // #ifndef HAVE_STRLCAT
-
-#ifndef HAVE_STRLCPY
-/*!
- * Copy src to string dst of size siz.  At most siz-1 characters
- * will be copied.  Always NUL terminates (unless siz == 0).
- * Returns strlen(src); if retval >= siz, truncation occurred.
- */
-size_t strlcpy(char *dst, const char *src, size_t siz);
-
-#endif  // #ifndef HAVE_STRLCPY
 
 void FindFraction(double val, int *num, int *denom, int denomMax);
 
@@ -385,6 +316,8 @@ char **XPM_DecodeString(const char *in);
 size_t base64_encode(unsigned char *buf, size_t buflen, size_t outbuflen);
 
 #define ARRAY_SIZE(a) (sizeof(a) / sizeof((a)[0]))
+
+float Com_CalcRoll (const vec3_t angles, const vec3_t velocity, const vec_t angleval, const vec_t velocityval);
 
 #endif
 

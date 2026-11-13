@@ -9,6 +9,7 @@
 #include "cl_collision.h"
 #include "libcurl.h"
 #include "csprogs.h"
+#include "r_stats.h"
 #ifdef CONFIG_VIDEO_CAPTURE
 #include "cap_avi.h"
 #include "cap_ogg.h"
@@ -17,122 +18,107 @@
 // we have to include snd_main.h here only to get access to snd_renderbuffer->format.speed when writing the AVI headers
 #include "snd_main.h"
 
-cvar_t scr_viewsize = {CVAR_SAVE, "viewsize","100", "how large the view should be, 110 disables inventory bar, 120 disables status bar"};
-cvar_t scr_fov = {CVAR_SAVE, "fov","90", "field of vision, 1-170 degrees, default 90, some players use 110-130"};
-cvar_t scr_conalpha = {CVAR_SAVE, "scr_conalpha", "1", "opacity of console background gfx/conback"};
-cvar_t scr_conalphafactor = {CVAR_SAVE, "scr_conalphafactor", "1", "opacity of console background gfx/conback relative to scr_conalpha; when 0, gfx/conback is not drawn"};
-cvar_t scr_conalpha2factor = {CVAR_SAVE, "scr_conalpha2factor", "0", "opacity of console background gfx/conback2 relative to scr_conalpha; when 0, gfx/conback2 is not drawn"};
-cvar_t scr_conalpha3factor = {CVAR_SAVE, "scr_conalpha3factor", "0", "opacity of console background gfx/conback3 relative to scr_conalpha; when 0, gfx/conback3 is not drawn"};
-cvar_t scr_conbrightness = {CVAR_SAVE, "scr_conbrightness", "1", "brightness of console background (0 = black, 1 = image)"};
-cvar_t scr_conforcewhiledisconnected = {0, "scr_conforcewhiledisconnected", "1", "forces fullscreen console while disconnected"};
-cvar_t scr_conscroll_x = {CVAR_SAVE, "scr_conscroll_x", "0", "scroll speed of gfx/conback in x direction"};
-cvar_t scr_conscroll_y = {CVAR_SAVE, "scr_conscroll_y", "0", "scroll speed of gfx/conback in y direction"};
-cvar_t scr_conscroll2_x = {CVAR_SAVE, "scr_conscroll2_x", "0", "scroll speed of gfx/conback2 in x direction"};
-cvar_t scr_conscroll2_y = {CVAR_SAVE, "scr_conscroll2_y", "0", "scroll speed of gfx/conback2 in y direction"};
-cvar_t scr_conscroll3_x = {CVAR_SAVE, "scr_conscroll3_x", "0", "scroll speed of gfx/conback3 in x direction"};
-cvar_t scr_conscroll3_y = {CVAR_SAVE, "scr_conscroll3_y", "0", "scroll speed of gfx/conback3 in y direction"};
+cvar_t scr_viewsize = {CF_CLIENT | CF_ARCHIVE, "viewsize","100", "how large the view should be, 110 disables inventory bar, 120 disables status bar"};
+cvar_t scr_fov = {CF_CLIENT | CF_ARCHIVE, "fov","90", "field of vision, 1-170 degrees, default 90, some players use 110-130"};
+cvar_t scr_conalpha = {CF_CLIENT | CF_ARCHIVE, "scr_conalpha", "0.9", "opacity of console background gfx/conback (when console isn't forced fullscreen)"};
+cvar_t scr_conalphafactor = {CF_CLIENT | CF_ARCHIVE, "scr_conalphafactor", "1", "opacity of console background gfx/conback relative to scr_conalpha; when 0, gfx/conback is not drawn"};
+cvar_t scr_conalpha2factor = {CF_CLIENT | CF_ARCHIVE, "scr_conalpha2factor", "0", "opacity of console background gfx/conback2 relative to scr_conalpha; when 0, gfx/conback2 is not drawn"};
+cvar_t scr_conalpha3factor = {CF_CLIENT | CF_ARCHIVE, "scr_conalpha3factor", "0", "opacity of console background gfx/conback3 relative to scr_conalpha; when 0, gfx/conback3 is not drawn"};
+cvar_t scr_conbrightness = {CF_CLIENT | CF_ARCHIVE, "scr_conbrightness", "1", "brightness of console background (0 = black, 1 = image)"};
+cvar_t scr_conforcewhiledisconnected = {CF_CLIENT, "scr_conforcewhiledisconnected", "1", "1 forces fullscreen console while disconnected, 2 also forces it when the listen server has started but the client is still loading"};
+cvar_t scr_conheight = {CF_CLIENT | CF_ARCHIVE, "scr_conheight", "0.5", "fraction of screen height occupied by console (reduced as necessary for visibility of loading progress and infobar)"};
+cvar_t scr_conscroll_x = {CF_CLIENT | CF_ARCHIVE, "scr_conscroll_x", "0", "scroll speed of gfx/conback in x direction"};
+cvar_t scr_conscroll_y = {CF_CLIENT | CF_ARCHIVE, "scr_conscroll_y", "0", "scroll speed of gfx/conback in y direction"};
+cvar_t scr_conscroll2_x = {CF_CLIENT | CF_ARCHIVE, "scr_conscroll2_x", "0", "scroll speed of gfx/conback2 in x direction"};
+cvar_t scr_conscroll2_y = {CF_CLIENT | CF_ARCHIVE, "scr_conscroll2_y", "0", "scroll speed of gfx/conback2 in y direction"};
+cvar_t scr_conscroll3_x = {CF_CLIENT | CF_ARCHIVE, "scr_conscroll3_x", "0", "scroll speed of gfx/conback3 in x direction"};
+cvar_t scr_conscroll3_y = {CF_CLIENT | CF_ARCHIVE, "scr_conscroll3_y", "0", "scroll speed of gfx/conback3 in y direction"};
 #ifdef CONFIG_MENU
-cvar_t scr_menuforcewhiledisconnected = {0, "scr_menuforcewhiledisconnected", "0", "forces menu while disconnected"};
+cvar_t scr_menuforcewhiledisconnected = {CF_CLIENT, "scr_menuforcewhiledisconnected", "0", "forces menu while disconnected"};
 #endif
-cvar_t scr_centertime = {0, "scr_centertime","2", "how long centerprint messages show"};
-cvar_t scr_showram = {CVAR_SAVE, "showram","1", "show ram icon if low on surface cache memory (not used)"};
-cvar_t scr_showturtle = {CVAR_SAVE, "showturtle","0", "show turtle icon when framerate is too low"};
-cvar_t scr_showpause = {CVAR_SAVE, "showpause","1", "show pause icon when game is paused"};
-cvar_t scr_showbrand = {0, "showbrand","0", "shows gfx/brand.tga in a corner of the screen (different values select different positions, including centered)"};
-cvar_t scr_printspeed = {0, "scr_printspeed","0", "speed of intermission printing (episode end texts), a value of 0 disables the slow printing"};
-cvar_t scr_loadingscreen_background = {0, "scr_loadingscreen_background","0", "show the last visible background during loading screen (costs one screenful of video memory)"};
-cvar_t scr_loadingscreen_scale = {0, "scr_loadingscreen_scale","1", "scale factor of the background"};
-cvar_t scr_loadingscreen_scale_base = {0, "scr_loadingscreen_scale_base","0", "0 = console pixels, 1 = video pixels"};
-cvar_t scr_loadingscreen_scale_limit = {0, "scr_loadingscreen_scale_limit","0", "0 = no limit, 1 = until first edge hits screen edge, 2 = until last edge hits screen edge, 3 = until width hits screen width, 4 = until height hits screen height"};
-cvar_t scr_loadingscreen_picture = {CVAR_SAVE, "scr_loadingscreen_picture", "gfx/loading", "picture shown during loading"};
-cvar_t scr_loadingscreen_count = {0, "scr_loadingscreen_count","1", "number of loading screen files to use randomly (named loading.tga, loading2.tga, loading3.tga, ...)"};
-cvar_t scr_loadingscreen_firstforstartup = {0, "scr_loadingscreen_firstforstartup","0", "remove loading.tga from random scr_loadingscreen_count selection and only display it on client startup, 0 = normal, 1 = firstforstartup"};
-cvar_t scr_loadingscreen_barcolor = {0, "scr_loadingscreen_barcolor", "0 0 1", "rgb color of loadingscreen progress bar"};
-cvar_t scr_loadingscreen_barheight = {0, "scr_loadingscreen_barheight", "8", "the height of the loadingscreen progress bar"};
-cvar_t scr_loadingscreen_insanotic = {CVAR_SAVE, "scr_loadingscreen_insanotic", "1", "Insanotic loading screen: the map's picture, what is being loaded and one progress bar with a percentage from connecting to being in the game (0 = classic DarkPlaces screen)"};
-cvar_t scr_loadingscreen_startuptime = {CVAR_SAVE, "scr_loadingscreen_startuptime", "1", "seconds the last game start took until the menu (moves the startup progress bar; measured automatically)"};
-cvar_t scr_loadingscreen_maxfps = {0, "scr_loadingscreen_maxfps", "10", "restrict maximal FPS for loading screen so it will not update very often (this will make lesser loading times on a maps loading large number of models)"};
-cvar_t scr_infobar_height = {0, "scr_infobar_height", "8", "the height of the infobar items"};
-cvar_t vid_conwidth = {CVAR_SAVE, "vid_conwidth", "640", "virtual width of 2D graphics system"};
-cvar_t vid_conheight = {CVAR_SAVE, "vid_conheight", "480", "virtual height of 2D graphics system"};
-cvar_t vid_pixelheight = {CVAR_SAVE, "vid_pixelheight", "1", "adjusts vertical field of vision to account for non-square pixels (1280x1024 on a CRT monitor for example)"};
-cvar_t scr_screenshot_jpeg = {CVAR_SAVE, "scr_screenshot_jpeg","1", "save jpeg instead of targa"};
-cvar_t scr_screenshot_jpeg_quality = {CVAR_SAVE, "scr_screenshot_jpeg_quality","0.9", "image quality of saved jpeg"};
-cvar_t scr_screenshot_png = {CVAR_SAVE, "scr_screenshot_png","0", "save png instead of targa"};
-cvar_t scr_screenshot_gammaboost = {CVAR_SAVE, "scr_screenshot_gammaboost","1", "gamma correction on saved screenshots and videos, 1.0 saves unmodified images"};
-cvar_t scr_screenshot_alpha = {0, "scr_screenshot_alpha","0", "try to write an alpha channel to screenshots (debugging feature)"};
-cvar_t scr_screenshot_timestamp = {CVAR_SAVE, "scr_screenshot_timestamp", "1", "use a timestamp based number of the type YYYYMMDDHHMMSSsss instead of sequential numbering"};
+cvar_t scr_centertime = {CF_CLIENT, "scr_centertime","2", "how long centerprint messages show"};
+cvar_t scr_showram = {CF_CLIENT | CF_ARCHIVE, "showram","1", "show ram icon if low on surface cache memory (not used)"};
+cvar_t scr_showturtle = {CF_CLIENT | CF_ARCHIVE, "showturtle","0", "show turtle icon when framerate is too low"};
+cvar_t scr_showpause = {CF_CLIENT | CF_ARCHIVE, "showpause","1", "show pause icon when game is paused"};
+cvar_t scr_showbrand = {CF_CLIENT, "showbrand","0", "shows gfx/brand.tga in a corner of the screen (different values select different positions, including centered)"};
+cvar_t scr_printspeed = {CF_CLIENT, "scr_printspeed","0", "speed of intermission printing (episode end texts), a value of 0 disables the slow printing"};
+cvar_t scr_loadingscreen_background = {CF_CLIENT, "scr_loadingscreen_background","0", "show the last visible background during loading screen (costs one screenful of video memory)"};
+cvar_t scr_loadingscreen_scale = {CF_CLIENT, "scr_loadingscreen_scale","1", "scale factor of the background"};
+cvar_t scr_loadingscreen_scale_base = {CF_CLIENT, "scr_loadingscreen_scale_base","0", "0 = console pixels, 1 = video pixels"};
+cvar_t scr_loadingscreen_scale_limit = {CF_CLIENT, "scr_loadingscreen_scale_limit","0", "0 = no limit, 1 = until first edge hits screen edge, 2 = until last edge hits screen edge, 3 = until width hits screen width, 4 = until height hits screen height"};
+cvar_t scr_loadingscreen_picture = {CF_CLIENT, "scr_loadingscreen_picture", "gfx/loading", "picture shown during loading"};
+cvar_t scr_loadingscreen_count = {CF_CLIENT, "scr_loadingscreen_count","1", "number of loading screen files to use randomly (named loading.tga, loading2.tga, loading3.tga, ...)"};
+cvar_t scr_loadingscreen_firstforstartup = {CF_CLIENT, "scr_loadingscreen_firstforstartup","0", "remove loading.tga from random scr_loadingscreen_count selection and only display it on client startup, 0 = normal, 1 = firstforstartup"};
+cvar_t scr_loadingscreen_insanotic = {CF_CLIENT | CF_ARCHIVE, "scr_loadingscreen_insanotic", "1", "Insanotic loading screen: the map's picture, what is being loaded and one progress bar with a percentage from connecting to being in the game (0 = classic DarkPlaces screen)"};
+cvar_t scr_loadingscreen_startuptime = {CF_CLIENT | CF_ARCHIVE, "scr_loadingscreen_startuptime", "1", "seconds the last game start took until the menu (moves the startup progress bar; measured automatically)"};
+cvar_t scr_loadingscreen_barcolor = {CF_CLIENT, "scr_loadingscreen_barcolor", "0 0 1", "rgb color of loadingscreen progress bar"};
+cvar_t scr_loadingscreen_barheight = {CF_CLIENT, "scr_loadingscreen_barheight", "8", "the height of the loadingscreen progress bar"};
+cvar_t scr_loadingscreen_maxfps = {CF_CLIENT, "scr_loadingscreen_maxfps", "20", "maximum FPS for loading screen so it will not update very often (this reduces loading time with lots of models)"};
+cvar_t scr_infobar_height = {CF_CLIENT, "scr_infobar_height", "8", "the height of the infobar items"};
+cvar_t scr_sbarscale = {CF_CLIENT | CF_READONLY, "scr_sbarscale", "1", "current vid_height/vid_conheight, for compatibility with csprogs that read this cvar (found in Fitzquake-derived engines and FTEQW; despite the name it's not specific to the status bar)"};
+cvar_t vid_conwidthauto = {CF_CLIENT | CF_ARCHIVE, "vid_conwidthauto", "1", "automatically update vid_conwidth to match aspect ratio"};
+cvar_t vid_conwidth = {CF_CLIENT | CF_ARCHIVE, "vid_conwidth", "640", "virtual width of 2D graphics system (note: changes may be overwritten, see vid_conwidthauto)"};
+cvar_t vid_conheight = {CF_CLIENT | CF_ARCHIVE, "vid_conheight", "480", "virtual height of 2D graphics system"};
+cvar_t vid_pixelheight = {CF_CLIENT | CF_ARCHIVE, "vid_pixelheight", "1", "adjusts vertical field of vision to account for non-square pixels (1280x1024 on a CRT monitor for example)"};
+cvar_t scr_screenshot_jpeg = {CF_CLIENT | CF_ARCHIVE, "scr_screenshot_jpeg","1", "save jpeg instead of targa or PNG"};
+cvar_t scr_screenshot_jpeg_quality = {CF_CLIENT | CF_ARCHIVE, "scr_screenshot_jpeg_quality","0.9", "image quality of saved jpeg"};
+cvar_t scr_screenshot_png = {CF_CLIENT | CF_ARCHIVE, "scr_screenshot_png","0", "save png instead of targa"};
+cvar_t scr_screenshot_gammaboost = {CF_CLIENT | CF_ARCHIVE, "scr_screenshot_gammaboost","1", "gamma correction on saved screenshots and videos, 1.0 saves unmodified images"};
+cvar_t scr_screenshot_alpha = {CF_CLIENT, "scr_screenshot_alpha","0", "try to write an alpha channel to screenshots (debugging feature)"};
+cvar_t scr_screenshot_timestamp = {CF_CLIENT | CF_ARCHIVE, "scr_screenshot_timestamp", "1", "use a timestamp based number of the type YYYYMMDDHHMMSSsss instead of sequential numbering"};
 // scr_screenshot_name is defined in fs.c
 #ifdef CONFIG_VIDEO_CAPTURE
-cvar_t cl_capturevideo = {0, "cl_capturevideo", "0", "enables saving of video to a .avi file using uncompressed I420 colorspace and PCM audio, note that scr_screenshot_gammaboost affects the brightness of the output)"};
-cvar_t cl_capturevideo_demo_stop = {CVAR_SAVE, "cl_capturevideo_demo_stop", "1", "automatically stops video recording when demo ends"};
-cvar_t cl_capturevideo_printfps = {CVAR_SAVE, "cl_capturevideo_printfps", "1", "prints the frames per second captured in capturevideo (is only written to the log file, not to the console, as that would be visible on the video)"};
-cvar_t cl_capturevideo_width = {CVAR_SAVE, "cl_capturevideo_width", "0", "scales all frames to this resolution before saving the video"};
-cvar_t cl_capturevideo_height = {CVAR_SAVE, "cl_capturevideo_height", "0", "scales all frames to this resolution before saving the video"};
-cvar_t cl_capturevideo_realtime = {0, "cl_capturevideo_realtime", "0", "causes video saving to operate in realtime (mostly useful while playing, not while capturing demos), this can produce a much lower quality video due to poor sound/video sync and will abort saving if your machine stalls for over a minute"};
-cvar_t cl_capturevideo_fps = {CVAR_SAVE, "cl_capturevideo_fps", "30", "how many frames per second to save (29.97 for NTSC, 30 for typical PC video, 15 can be useful)"};
-cvar_t cl_capturevideo_nameformat = {CVAR_SAVE, "cl_capturevideo_nameformat", "dpvideo", "prefix for saved videos (the date is encoded using strftime escapes)"};
-cvar_t cl_capturevideo_number = {CVAR_SAVE, "cl_capturevideo_number", "1", "number to append to video filename, incremented each time a capture begins"};
-cvar_t cl_capturevideo_ogg = {CVAR_SAVE, "cl_capturevideo_ogg", "1", "save captured video data as Ogg/Vorbis/Theora streams"};
-cvar_t cl_capturevideo_framestep = {CVAR_SAVE, "cl_capturevideo_framestep", "1", "when set to n >= 1, render n frames to capture one (useful for motion blur like effects)"};
+cvar_t cl_capturevideo = {CF_CLIENT, "cl_capturevideo", "0", "enables saving of video to a .avi file using uncompressed I420 colorspace and PCM audio, note that scr_screenshot_gammaboost affects the brightness of the output)"};
+cvar_t cl_capturevideo_demo_stop = {CF_CLIENT | CF_ARCHIVE, "cl_capturevideo_demo_stop", "1", "automatically stops video recording when demo ends"};
+cvar_t cl_capturevideo_printfps = {CF_CLIENT | CF_ARCHIVE, "cl_capturevideo_printfps", "1", "prints the frames per second captured in capturevideo (is only written to stdout and any log file, not to the console as that would be visible on the video), value is seconds of wall time between prints"};
+cvar_t cl_capturevideo_width = {CF_CLIENT | CF_ARCHIVE, "cl_capturevideo_width", "0", "scales all frames to this resolution before saving the video"};
+cvar_t cl_capturevideo_height = {CF_CLIENT | CF_ARCHIVE, "cl_capturevideo_height", "0", "scales all frames to this resolution before saving the video"};
+cvar_t cl_capturevideo_realtime = {CF_CLIENT, "cl_capturevideo_realtime", "0", "causes video saving to operate in realtime (mostly useful while playing, not while capturing demos), this can produce a much lower quality video due to poor sound/video sync and will abort saving if your machine stalls for over a minute"};
+cvar_t cl_capturevideo_fps = {CF_CLIENT | CF_ARCHIVE, "cl_capturevideo_fps", "30", "how many frames per second to save (29.97 for NTSC, 30 for typical PC video, 15 can be useful)"};
+cvar_t cl_capturevideo_nameformat = {CF_CLIENT | CF_ARCHIVE, "cl_capturevideo_nameformat", "dpvideo", "prefix for saved videos (the date is encoded using strftime escapes)"};
+cvar_t cl_capturevideo_number = {CF_CLIENT | CF_ARCHIVE, "cl_capturevideo_number", "1", "number to append to video filename, incremented each time a capture begins"};
+cvar_t cl_capturevideo_ogg = {CF_CLIENT | CF_ARCHIVE, "cl_capturevideo_ogg", "1", "save captured video data as Ogg/Vorbis/Theora streams"};
+cvar_t cl_capturevideo_framestep = {CF_CLIENT | CF_ARCHIVE, "cl_capturevideo_framestep", "1", "when set to n >= 1, render n frames to capture one (useful for motion blur like effects)"};
 #endif
-cvar_t r_letterbox = {0, "r_letterbox", "0", "reduces vertical height of view to simulate a letterboxed movie effect (can be used by mods for cutscenes)"};
-cvar_t r_stereo_separation = {0, "r_stereo_separation", "4", "separation distance of eyes in the world (negative values are only useful for cross-eyed viewing)"};
-cvar_t r_stereo_sidebyside = {0, "r_stereo_sidebyside", "0", "side by side views for those who can't afford glasses but can afford eye strain (note: use a negative r_stereo_separation if you want cross-eyed viewing)"};
-cvar_t r_stereo_horizontal = {0, "r_stereo_horizontal", "0", "aspect skewed side by side view for special decoder/display hardware"};
-cvar_t r_stereo_vertical = {0, "r_stereo_vertical", "0", "aspect skewed top and bottom view for special decoder/display hardware"};
-cvar_t r_stereo_redblue = {0, "r_stereo_redblue", "0", "red/blue anaglyph stereo glasses (note: most of these glasses are actually red/cyan, try that one too)"};
-cvar_t r_stereo_redcyan = {0, "r_stereo_redcyan", "0", "red/cyan anaglyph stereo glasses, the kind given away at drive-in movies like Creature From The Black Lagoon In 3D"};
-cvar_t r_stereo_redgreen = {0, "r_stereo_redgreen", "0", "red/green anaglyph stereo glasses (for those who don't mind yellow)"};
-cvar_t r_stereo_angle = {0, "r_stereo_angle", "0", "separation angle of eyes (makes the views look different directions, as an example, 90 gives a 90 degree separation where the views are 45 degrees left and 45 degrees right)"};
-cvar_t scr_stipple = {0, "scr_stipple", "0", "interlacing-like stippling of the display"};
-cvar_t scr_refresh = {0, "scr_refresh", "1", "allows you to completely shut off rendering for benchmarking purposes"};
-cvar_t scr_screenshot_name_in_mapdir = {CVAR_SAVE, "scr_screenshot_name_in_mapdir", "0", "if set to 1, screenshots are placed in a subdirectory named like the map they are from"};
-cvar_t shownetgraph = {CVAR_SAVE, "shownetgraph", "0", "shows a graph of packet sizes and other information, 0 = off, 1 = show client netgraph, 2 = show client and server netgraphs (when hosting a server)"};
-cvar_t cl_demo_mousegrab = {0, "cl_demo_mousegrab", "0", "Allows reading the mouse input while playing demos. Useful for camera mods developed in csqc. (0: never, 1: always)"};
-cvar_t timedemo_screenshotframelist = {0, "timedemo_screenshotframelist", "", "when performing a timedemo, take screenshots of each frame in this space-separated list - example: 1 201 401"};
-cvar_t vid_touchscreen_outlinealpha = {0, "vid_touchscreen_outlinealpha", "0", "opacity of touchscreen area outlines"};
-cvar_t vid_touchscreen_overlayalpha = {0, "vid_touchscreen_overlayalpha", "0.25", "opacity of touchscreen area icons"};
-cvar_t r_speeds_graph = {CVAR_SAVE, "r_speeds_graph", "0", "display a graph of renderer statistics "};
-cvar_t r_speeds_graph_filter[8] =
-{
-	{CVAR_SAVE, "r_speeds_graph_filter_r", "timedelta", "Red - display the specified renderer statistic"},
-	{CVAR_SAVE, "r_speeds_graph_filter_g", "batch_batches", "Green - display the specified renderer statistic"},
-	{CVAR_SAVE, "r_speeds_graph_filter_b", "batch_triangles", "Blue - display the specified renderer statistic"},
-	{CVAR_SAVE, "r_speeds_graph_filter_y", "fast_triangles", "Yellow - display the specified renderer statistic"},
-	{CVAR_SAVE, "r_speeds_graph_filter_c", "copytriangles_triangles", "Cyan - display the specified renderer statistic"},
-	{CVAR_SAVE, "r_speeds_graph_filter_m", "dynamic_triangles", "Magenta - display the specified renderer statistic"},
-	{CVAR_SAVE, "r_speeds_graph_filter_w", "animcache_shade_vertices", "White - display the specified renderer statistic"},
-	{CVAR_SAVE, "r_speeds_graph_filter_o", "animcache_shape_vertices", "Orange - display the specified renderer statistic"},
-};
-cvar_t r_speeds_graph_length = {CVAR_SAVE, "r_speeds_graph_length", "1024", "number of frames in statistics graph, can be from 4 to 8192"};
-cvar_t r_speeds_graph_seconds = {CVAR_SAVE, "r_speeds_graph_seconds", "2", "number of seconds in graph, can be from 0.1 to 120"};
-cvar_t r_speeds_graph_x = {CVAR_SAVE, "r_speeds_graph_x", "0", "position of graph"};
-cvar_t r_speeds_graph_y = {CVAR_SAVE, "r_speeds_graph_y", "0", "position of graph"};
-cvar_t r_speeds_graph_width = {CVAR_SAVE, "r_speeds_graph_width", "256", "size of graph"};
-cvar_t r_speeds_graph_height = {CVAR_SAVE, "r_speeds_graph_height", "128", "size of graph"};
-cvar_t r_speeds_graph_maxtimedelta = {CVAR_SAVE, "r_speeds_graph_maxtimedelta", "16667", "maximum timedelta to display in the graph (this value will be the top line)"};
-cvar_t r_speeds_graph_maxdefault = {CVAR_SAVE, "r_speeds_graph_maxdefault", "100", "if the minimum and maximum observed values are closer than this, use this value as the graph range (keeps small numbers from being big graphs)"};
-
-
+cvar_t r_letterbox = {CF_CLIENT, "r_letterbox", "0", "reduces vertical height of view to simulate a letterboxed movie effect (can be used by mods for cutscenes)"};
+cvar_t r_stereo_separation = {CF_CLIENT, "r_stereo_separation", "4", "separation distance of eyes in the world (negative values are only useful for cross-eyed viewing)"};
+cvar_t r_stereo_sidebyside = {CF_CLIENT, "r_stereo_sidebyside", "0", "side by side views for those who can't afford glasses but can afford eye strain (note: use a negative r_stereo_separation if you want cross-eyed viewing)"};
+cvar_t r_stereo_horizontal = {CF_CLIENT, "r_stereo_horizontal", "0", "aspect skewed side by side view for special decoder/display hardware"};
+cvar_t r_stereo_vertical = {CF_CLIENT, "r_stereo_vertical", "0", "aspect skewed top and bottom view for special decoder/display hardware"};
+cvar_t r_stereo_redblue = {CF_CLIENT, "r_stereo_redblue", "0", "red/blue anaglyph stereo glasses (note: most of these glasses are actually red/cyan, try that one too)"};
+cvar_t r_stereo_redcyan = {CF_CLIENT, "r_stereo_redcyan", "0", "red/cyan anaglyph stereo glasses, the kind given away at drive-in movies like Creature From The Black Lagoon In 3D"};
+cvar_t r_stereo_redgreen = {CF_CLIENT, "r_stereo_redgreen", "0", "red/green anaglyph stereo glasses (for those who don't mind yellow)"};
+cvar_t r_stereo_angle = {CF_CLIENT, "r_stereo_angle", "0", "separation angle of eyes (makes the views look different directions, as an example, 90 gives a 90 degree separation where the views are 45 degrees left and 45 degrees right)"};
+cvar_t scr_stipple = {CF_CLIENT, "scr_stipple", "0", "interlacing-like stippling of the display"};
+cvar_t scr_refresh = {CF_CLIENT, "scr_refresh", "1", "allows you to completely shut off rendering for benchmarking purposes"};
+cvar_t scr_screenshot_name_in_mapdir = {CF_CLIENT | CF_ARCHIVE, "scr_screenshot_name_in_mapdir", "0", "if set to 1, screenshots are placed in a subdirectory named like the map they are from"};
+cvar_t net_graph = {CF_CLIENT | CF_ARCHIVE, "net_graph", "0", "shows a graph of packet sizes and other information, 0 = off, 1 = show client netgraph, 2 = show client and server netgraphs (when hosting a server)"};
+cvar_t cl_demo_mousegrab = {CF_CLIENT, "cl_demo_mousegrab", "0", "Allows reading the mouse input while playing demos. Useful for camera mods developed in csqc. (0: never, 1: always)"};
+cvar_t timedemo_screenshotframelist = {CF_CLIENT, "timedemo_screenshotframelist", "", "when performing a timedemo, take screenshots of each frame in this space-separated list - example: 1 201 401"};
+cvar_t vid_touchscreen_outlinealpha = {CF_CLIENT, "vid_touchscreen_outlinealpha", "0", "opacity of touchscreen area outlines"};
+cvar_t vid_touchscreen_overlayalpha = {CF_CLIENT, "vid_touchscreen_overlayalpha", "0.25", "opacity of touchscreen area icons"};
 
 extern cvar_t sbar_info_pos;
 extern cvar_t r_fog_clear;
 
 int jpeg_supported = false;
 
-qboolean	scr_initialized;		// ready to draw
+qbool	scr_initialized;		// ready to draw
 
-float		scr_con_current;
-int			scr_con_margin_bottom;
+qbool scr_loading = false;  // we are in a loading screen
+
+unsigned int        scr_con_current;
+static unsigned int scr_con_margin_bottom;
 
 extern int	con_vislines;
 
-static void SCR_ScreenShot_f (void);
-static void R_Envmap_f (void);
+extern int cl_punchangle_applied;
+
+static void SCR_ScreenShot_f(cmd_state_t *cmd);
+static void R_Envmap_f(cmd_state_t *cmd);
 
 // backend
-void R_ClearScreen(qboolean fogcolor);
+void R_ClearScreen(qbool fogcolor);
 
 /*
 ===============================================================================
@@ -161,12 +147,20 @@ for a few moments
 */
 void SCR_CenterPrint(const char *str)
 {
-	strlcpy (scr_centerstring, str, sizeof (scr_centerstring));
 	scr_centertime_off = scr_centertime.value;
 	scr_centertime_start = cl.time;
 
-// count the number of lines for centering
+	// Print the message to the console and update the scr buffer
+	// but only if it's different to the previous message
+	if (strcmp(str, scr_centerstring) == 0)
+		return;
+	dp_strlcpy(scr_centerstring, str, sizeof(scr_centerstring));
 	scr_center_lines = 1;
+	if (str[0] == '\0') // happens when stepping out of a centreprint trigger on alk1.2 start.bsp
+		return;
+	Con_CenterPrint(str);
+
+// count the number of lines for centering
 	while (*str)
 	{
 		if (*str == '\n')
@@ -175,6 +169,51 @@ void SCR_CenterPrint(const char *str)
 	}
 }
 
+/*
+============
+SCR_Centerprint_f
+
+Print something to the center of the screen using SCR_Centerprint
+============
+*/
+static void SCR_Centerprint_f (cmd_state_t *cmd)
+{
+	char msg[MAX_INPUTLINE];
+	unsigned int i, c, p;
+
+	c = Cmd_Argc(cmd);
+	if(c >= 2)
+	{
+		// Merge all the cprint arguments into one string
+		dp_strlcpy(msg, Cmd_Argv(cmd,1), sizeof(msg));
+		for(i = 2; i < c; ++i)
+		{
+			dp_strlcat(msg, " ", sizeof(msg));
+			dp_strlcat(msg, Cmd_Argv(cmd, i), sizeof(msg));
+		}
+
+		c = (unsigned int)strlen(msg);
+		for(p = 0, i = 0; i < c; ++i)
+		{
+			if(msg[i] == '\\')
+			{
+				if(msg[i+1] == 'n')
+					msg[p++] = '\n';
+				else if(msg[i+1] == '\\')
+					msg[p++] = '\\';
+				else {
+					msg[p++] = '\\';
+					msg[p++] = msg[i+1];
+				}
+				++i;
+			} else {
+				msg[p++] = msg[i];
+			}
+		}
+		msg[p] = '\0';
+		SCR_CenterPrint(msg);
+	}
+}
 
 static void SCR_DrawCenterString (void)
 {
@@ -256,21 +295,19 @@ static void SCR_CheckDrawCenterString (void)
 static void SCR_DrawNetGraph_DrawGraph (int graphx, int graphy, int graphwidth, int graphheight, float graphscale, int graphlimit, const char *label, float textsize, int packetcounter, netgraphitem_t *netgraph)
 {
 	netgraphitem_t *graph;
-	int j, x, y, numlines;
+	int j, x, y;
 	int totalbytes = 0;
 	char bytesstring[128];
 	float g[NETGRAPH_PACKETS][7];
 	float *a;
 	float *b;
-	r_vertexgeneric_t vertex[(NETGRAPH_PACKETS+2)*6*2];
-	r_vertexgeneric_t *v;
 	DrawQ_Fill(graphx, graphy, graphwidth, graphheight + textsize * 2, 0, 0, 0, 0.5, 0);
 	// draw the bar graph itself
 	memset(g, 0, sizeof(g));
 	for (j = 0;j < NETGRAPH_PACKETS;j++)
 	{
 		graph = netgraph + j;
-		g[j][0] = 1.0f - 0.25f * (realtime - graph->time);
+		g[j][0] = 1.0f - 0.25f * (host.realtime - graph->time);
 		g[j][1] = 1.0f;
 		g[j][2] = 1.0f;
 		g[j][3] = 1.0f;
@@ -290,7 +327,7 @@ static void SCR_DrawNetGraph_DrawGraph (int graphx, int graphy, int graphwidth, 
 			g[j][4] = g[j][3] - graph->reliablebytes   * graphscale;
 			g[j][5] = g[j][4] - graph->ackbytes        * graphscale;
 			// count bytes in the last second
-			if (realtime - graph->time < 1.0f)
+			if (host.realtime - graph->time < 1.0f)
 				totalbytes += graph->unreliablebytes + graph->reliablebytes + graph->ackbytes;
 		}
 		if(graph->cleartime >= 0)
@@ -303,38 +340,18 @@ static void SCR_DrawNetGraph_DrawGraph (int graphx, int graphy, int graphwidth, 
 		g[j][6] = bound(0.0f, g[j][6], 1.0f);
 	}
 	// render the lines for the graph
-	numlines = 0;
-	v = vertex;
 	for (j = 0;j < NETGRAPH_PACKETS;j++)
 	{
 		a = g[j];
 		b = g[(j+1)%NETGRAPH_PACKETS];
 		if (a[0] < 0.0f || b[0] > 1.0f || b[0] < a[0])
 			continue;
-		VectorSet(v->vertex3f, graphx + graphwidth * a[0], graphy + graphheight * a[2], 0.0f);Vector4Set(v->color4f, 1.0f, 1.0f, 0.0f, 1.0f);Vector2Set(v->texcoord2f, 0.0f, 0.0f);v++;
-		VectorSet(v->vertex3f, graphx + graphwidth * b[0], graphy + graphheight * b[2], 0.0f);Vector4Set(v->color4f, 1.0f, 1.0f, 0.0f, 1.0f);Vector2Set(v->texcoord2f, 0.0f, 0.0f);v++;
-
-		VectorSet(v->vertex3f, graphx + graphwidth * a[0], graphy + graphheight * a[1], 0.0f);Vector4Set(v->color4f, 1.0f, 0.0f, 0.0f, 1.0f);Vector2Set(v->texcoord2f, 0.0f, 0.0f);v++;
-		VectorSet(v->vertex3f, graphx + graphwidth * b[0], graphy + graphheight * b[1], 0.0f);Vector4Set(v->color4f, 1.0f, 0.0f, 0.0f, 1.0f);Vector2Set(v->texcoord2f, 0.0f, 0.0f);v++;
-
-		VectorSet(v->vertex3f, graphx + graphwidth * a[0], graphy + graphheight * a[5], 0.0f);Vector4Set(v->color4f, 0.0f, 1.0f, 0.0f, 1.0f);Vector2Set(v->texcoord2f, 0.0f, 0.0f);v++;
-		VectorSet(v->vertex3f, graphx + graphwidth * b[0], graphy + graphheight * b[5], 0.0f);Vector4Set(v->color4f, 0.0f, 1.0f, 0.0f, 1.0f);Vector2Set(v->texcoord2f, 0.0f, 0.0f);v++;
-
-		VectorSet(v->vertex3f, graphx + graphwidth * a[0], graphy + graphheight * a[4], 0.0f);Vector4Set(v->color4f, 1.0f, 1.0f, 1.0f, 1.0f);Vector2Set(v->texcoord2f, 0.0f, 0.0f);v++;
-		VectorSet(v->vertex3f, graphx + graphwidth * b[0], graphy + graphheight * b[4], 0.0f);Vector4Set(v->color4f, 1.0f, 1.0f, 1.0f, 1.0f);Vector2Set(v->texcoord2f, 0.0f, 0.0f);v++;
-
-		VectorSet(v->vertex3f, graphx + graphwidth * a[0], graphy + graphheight * a[3], 0.0f);Vector4Set(v->color4f, 1.0f, 0.5f, 0.0f, 1.0f);Vector2Set(v->texcoord2f, 0.0f, 0.0f);v++;
-		VectorSet(v->vertex3f, graphx + graphwidth * b[0], graphy + graphheight * b[3], 0.0f);Vector4Set(v->color4f, 1.0f, 0.5f, 0.0f, 1.0f);Vector2Set(v->texcoord2f, 0.0f, 0.0f);v++;
-
-		VectorSet(v->vertex3f, graphx + graphwidth * a[0], graphy + graphheight * a[6], 0.0f);Vector4Set(v->color4f, 0.0f, 0.0f, 1.0f, 1.0f);Vector2Set(v->texcoord2f, 0.0f, 0.0f);v++;
-		VectorSet(v->vertex3f, graphx + graphwidth * b[0], graphy + graphheight * b[6], 0.0f);Vector4Set(v->color4f, 0.0f, 0.0f, 1.0f, 1.0f);Vector2Set(v->texcoord2f, 0.0f, 0.0f);v++;
-
-		numlines += 6;
-	}
-	if (numlines > 0)
-	{
-		R_Mesh_PrepareVertices_Generic(numlines*2, vertex, NULL, 0);
-		DrawQ_Lines(0.0f, numlines, 0, false);
+		DrawQ_Line(1, graphx + graphwidth * a[0], graphy + graphheight * a[2], graphx + graphwidth * b[0], graphy + graphheight * b[2], 1.0f, 1.0f, 1.0f, 1.0f, 0);
+		DrawQ_Line(1, graphx + graphwidth * a[0], graphy + graphheight * a[1], graphx + graphwidth * b[0], graphy + graphheight * b[1], 1.0f, 0.0f, 0.0f, 1.0f, 0);
+		DrawQ_Line(1, graphx + graphwidth * a[0], graphy + graphheight * a[5], graphx + graphwidth * b[0], graphy + graphheight * b[5], 0.0f, 1.0f, 0.0f, 1.0f, 0);
+		DrawQ_Line(1, graphx + graphwidth * a[0], graphy + graphheight * a[4], graphx + graphwidth * b[0], graphy + graphheight * b[4], 1.0f, 1.0f, 1.0f, 1.0f, 0);
+		DrawQ_Line(1, graphx + graphwidth * a[0], graphy + graphheight * a[3], graphx + graphwidth * b[0], graphy + graphheight * b[3], 1.0f, 0.5f, 0.0f, 1.0f, 0);
+		DrawQ_Line(1, graphx + graphwidth * a[0], graphy + graphheight * a[6], graphx + graphwidth * b[0], graphy + graphheight * b[6], 0.0f, 0.0f, 1.0f, 1.0f, 0);
 	}
 	x = graphx;
 	y = graphy + graphheight;
@@ -359,7 +376,7 @@ static void SCR_DrawNetGraph (void)
 		return;
 	if (!cls.netcon)
 		return;
-	if (!shownetgraph.integer)
+	if (!net_graph.integer)
 		return;
 
 	separator1 = 2;
@@ -381,7 +398,7 @@ static void SCR_DrawNetGraph (void)
 	SCR_DrawNetGraph_DrawGraph(netgraph_x + graphwidth + separator1, netgraph_y, graphwidth, graphheight, graphscale, graphlimit, "outgoing", textsize, c->outgoing_packetcounter, c->outgoing_netgraph);
 	index++;
 
-	if (sv.active && shownetgraph.integer >= 2)
+	if (sv.active && net_graph.integer >= 2)
 	{
 		for (i = 0;i < svs.maxclients;i++)
 		{
@@ -434,7 +451,7 @@ static void SCR_DrawNet (void)
 {
 	if (cls.state != ca_connected)
 		return;
-	if (realtime - cl.last_received_message < 0.3)
+	if (host.realtime - cl.last_received_message < 0.3)
 		return;
 	if (cls.demoplayback)
 		return;
@@ -461,7 +478,7 @@ static void SCR_DrawPause (void)
 		return;
 
 	pic = Draw_CachePic ("gfx/pause");
-	DrawQ_Pic ((vid_conwidth.integer - pic->width)/2, (vid_conheight.integer - pic->height)/2, pic, 0, 0, 1, 1, 1, 1, 0);
+	DrawQ_Pic ((vid_conwidth.integer - Draw_GetPicWidth(pic))/2, (vid_conheight.integer - Draw_GetPicHeight(pic))/2, pic, 0, 0, 1, 1, 1, 1, 0);
 }
 
 /*
@@ -483,26 +500,26 @@ static void SCR_DrawBrand (void)
 	{
 	case 1:	// bottom left
 		x = 0;
-		y = vid_conheight.integer - pic->height;
+		y = vid_conheight.integer - Draw_GetPicHeight(pic);
 		break;
 	case 2:	// bottom centre
-		x = (vid_conwidth.integer - pic->width) / 2;
-		y = vid_conheight.integer - pic->height;
+		x = (vid_conwidth.integer - Draw_GetPicWidth(pic)) / 2;
+		y = vid_conheight.integer - Draw_GetPicHeight(pic);
 		break;
 	case 3:	// bottom right
-		x = vid_conwidth.integer - pic->width;
-		y = vid_conheight.integer - pic->height;
+		x = vid_conwidth.integer - Draw_GetPicWidth(pic);
+		y = vid_conheight.integer - Draw_GetPicHeight(pic);
 		break;
 	case 4:	// centre right
-		x = vid_conwidth.integer - pic->width;
-		y = (vid_conheight.integer - pic->height) / 2;
+		x = vid_conwidth.integer - Draw_GetPicWidth(pic);
+		y = (vid_conheight.integer - Draw_GetPicHeight(pic)) / 2;
 		break;
 	case 5:	// top right
-		x = vid_conwidth.integer - pic->width;
+		x = vid_conwidth.integer - Draw_GetPicWidth(pic);
 		y = 0;
 		break;
 	case 6:	// top centre
-		x = (vid_conwidth.integer - pic->width) / 2;
+		x = (vid_conwidth.integer - Draw_GetPicWidth(pic)) / 2;
 		y = 0;
 		break;
 	case 7:	// top left
@@ -511,7 +528,7 @@ static void SCR_DrawBrand (void)
 		break;
 	case 8:	// centre left
 		x = 0;
-		y = (vid_conheight.integer - pic->height) / 2;
+		y = (vid_conheight.integer - Draw_GetPicHeight(pic)) / 2;
 		break;
 	default:
 		return;
@@ -536,14 +553,14 @@ static int SCR_DrawQWDownload(int offset)
 	if (!cls.qw_downloadname[0])
 	{
 		cls.qw_downloadspeedrate = 0;
-		cls.qw_downloadspeedtime = realtime;
+		cls.qw_downloadspeedtime = host.realtime;
 		cls.qw_downloadspeedcount = 0;
 		return 0;
 	}
-	if (realtime >= cls.qw_downloadspeedtime + 1)
+	if (host.realtime >= cls.qw_downloadspeedtime + 1)
 	{
 		cls.qw_downloadspeedrate = cls.qw_downloadspeedcount;
-		cls.qw_downloadspeedtime = realtime;
+		cls.qw_downloadspeedtime = host.realtime;
 		cls.qw_downloadspeedcount = 0;
 	}
 	if (cls.protocol == PROTOCOL_QUAKEWORLD)
@@ -634,11 +651,13 @@ SCR_DrawInfobar
 */
 static void SCR_DrawInfobar(void)
 {
-	int offset = 0;
+	unsigned int offset = 0;
 	offset += SCR_DrawQWDownload(offset);
 	offset += SCR_DrawCurlDownload(offset);
 	if(scr_infobartime_off > 0)
 		offset += SCR_DrawInfobarString(offset);
+	if(!offset && scr_loading)
+		offset = scr_loadingscreen_barheight.integer;
 	if(offset != scr_con_margin_bottom)
 		Con_DPrintf("broken console margin calculation: %d != %d\n", offset, scr_con_margin_bottom);
 }
@@ -674,12 +693,12 @@ static int SCR_InfobarHeight(void)
 SCR_InfoBar_f
 ==============
 */
-static void SCR_InfoBar_f(void)
+static void SCR_InfoBar_f(cmd_state_t *cmd)
 {
-	if(Cmd_Argc() == 3)
+	if(Cmd_Argc(cmd) == 3)
 	{
-		scr_infobartime_off = atof(Cmd_Argv(1));
-		strlcpy(scr_infobarstring, Cmd_Argv(2), sizeof(scr_infobarstring));
+		scr_infobartime_off = atof(Cmd_Argv(cmd, 1));
+		dp_strlcpy(scr_infobarstring, Cmd_Argv(cmd, 2), sizeof(scr_infobarstring));
 	}
 	else
 	{
@@ -695,8 +714,6 @@ SCR_SetUpToDrawConsole
 */
 static void SCR_SetUpToDrawConsole (void)
 {
-	// lines of console to display
-	float conlines;
 #ifdef CONFIG_MENU
 	static int framecounter = 0;
 #endif
@@ -718,19 +735,18 @@ static void SCR_SetUpToDrawConsole (void)
 	// Insanotic: only while really disconnected; connecting, downloading
 	// and loading show the loading screen (the forced console covered it,
 	// e.g. on a phone, where joining closes the menu)
-	if (scr_conforcewhiledisconnected.integer && key_dest == key_game && cls.signon != SIGNONS
-		&& cls.state != ca_connected && !cls.connect_trying)
+	if (scr_conforcewhiledisconnected.integer >= 2 && key_dest == key_game && cls.signon != SIGNONS && cls.state != ca_connected && !cls.connect_trying)
+		key_consoleactive |= KEY_CONSOLEACTIVE_FORCED;
+	else if (scr_conforcewhiledisconnected.integer >= 1 && key_dest == key_game && cls.signon != SIGNONS && !sv.active && cls.state != ca_connected && !cls.connect_trying)
 		key_consoleactive |= KEY_CONSOLEACTIVE_FORCED;
 	else
 		key_consoleactive &= ~KEY_CONSOLEACTIVE_FORCED;
 
-// decide on the height of the console
+	// decide on the height of the console
 	if (key_consoleactive & KEY_CONSOLEACTIVE_USER)
-		conlines = vid_conheight.integer/2;	// half screen
+		scr_con_current = vid_conheight.integer * scr_conheight.value;
 	else
-		conlines = 0;				// none visible
-
-	scr_con_current = conlines;
+		scr_con_current = 0; // none visible
 }
 
 /*
@@ -740,555 +756,22 @@ SCR_DrawConsole
 */
 void SCR_DrawConsole (void)
 {
+	// infobar and loading progress are not drawn simultaneously
 	scr_con_margin_bottom = SCR_InfobarHeight();
+	if (!scr_con_margin_bottom && scr_loading)
+		scr_con_margin_bottom = scr_loadingscreen_barheight.integer;
 	if (key_consoleactive & KEY_CONSOLEACTIVE_FORCED)
 	{
 		// full screen
-		Con_DrawConsole (vid_conheight.integer - scr_con_margin_bottom);
+		Con_DrawConsole (vid_conheight.integer - scr_con_margin_bottom, true);
 	}
 	else if (scr_con_current)
-		Con_DrawConsole (min((int)scr_con_current, vid_conheight.integer - scr_con_margin_bottom));
+		Con_DrawConsole (min(scr_con_current, vid_conheight.integer - scr_con_margin_bottom), false);
 	else
 		con_vislines = 0;
 }
 
-/*
-===============
-SCR_BeginLoadingPlaque
-
-================
-*/
-void SCR_BeginLoadingPlaque (qboolean startup)
-{
-	// save console log up to this point to log_file if it was set by configs
-	Log_Start();
-
-	Host_StartVideo();
-	SCR_UpdateLoadingScreen(false, startup);
-}
-
 //=============================================================================
-
-const char *r_stat_name[r_stat_count] =
-{
-	"timedelta",
-	"quality",
-	"renders",
-	"entities",
-	"entities_surfaces",
-	"entities_triangles",
-	"world_leafs",
-	"world_portals",
-	"world_surfaces",
-	"world_triangles",
-	"lightmapupdates",
-	"lightmapupdatepixels",
-	"particles",
-	"drawndecals",
-	"totaldecals",
-	"draws",
-	"draws_vertices",
-	"draws_elements",
-	"lights",
-	"lights_clears",
-	"lights_scissored",
-	"lights_lighttriangles",
-	"lights_shadowtriangles",
-	"lights_dynamicshadowtriangles",
-	"bouncegrid_lights",
-	"bouncegrid_particles",
-	"bouncegrid_traces",
-	"bouncegrid_hits",
-	"bouncegrid_splats",
-	"bouncegrid_bounces",
-	"photoncache_animated",
-	"photoncache_cached",
-	"photoncache_traced",
-	"bloom",
-	"bloom_copypixels",
-	"bloom_drawpixels",
-	"indexbufferuploadcount",
-	"indexbufferuploadsize",
-	"vertexbufferuploadcount",
-	"vertexbufferuploadsize",
-	"framedatacurrent",
-	"framedatasize",
-	"bufferdatacurrent_vertex", // R_BUFFERDATA_ types are added to this index
-	"bufferdatacurrent_index16",
-	"bufferdatacurrent_index32",
-	"bufferdatacurrent_uniform",
-	"bufferdatasize_vertex", // R_BUFFERDATA_ types are added to this index
-	"bufferdatasize_index16",
-	"bufferdatasize_index32",
-	"bufferdatasize_uniform",
-	"animcache_vertexmesh_count",
-	"animcache_vertexmesh_vertices",
-	"animcache_vertexmesh_maxvertices",
-	"animcache_skeletal_count",
-	"animcache_skeletal_bones",
-	"animcache_skeletal_maxbones",
-	"animcache_shade_count",
-	"animcache_shade_vertices",
-	"animcache_shade_maxvertices",
-	"animcache_shape_count",
-	"animcache_shape_vertices",
-	"animcache_shape_maxvertices",
-	"batch_batches",
-	"batch_withgaps",
-	"batch_surfaces",
-	"batch_vertices",
-	"batch_triangles",
-	"fast_batches",
-	"fast_surfaces",
-	"fast_vertices",
-	"fast_triangles",
-	"copytriangles_batches",
-	"copytriangles_surfaces",
-	"copytriangles_vertices",
-	"copytriangles_triangles",
-	"dynamic_batches",
-	"dynamic_surfaces",
-	"dynamic_vertices",
-	"dynamic_triangles",
-	"dynamicskeletal_batches",
-	"dynamicskeletal_surfaces",
-	"dynamicskeletal_vertices",
-	"dynamicskeletal_triangles",
-	"dynamic_batches_because_cvar",
-	"dynamic_surfaces_because_cvar",
-	"dynamic_vertices_because_cvar",
-	"dynamic_triangles_because_cvar",
-	"dynamic_batches_because_lightmapvertex",
-	"dynamic_surfaces_because_lightmapvertex",
-	"dynamic_vertices_because_lightmapvertex",
-	"dynamic_triangles_because_lightmapvertex",
-	"dynamic_batches_because_deformvertexes_autosprite",
-	"dynamic_surfaces_because_deformvertexes_autosprite",
-	"dynamic_vertices_because_deformvertexes_autosprite",
-	"dynamic_triangles_because_deformvertexes_autosprite",
-	"dynamic_batches_because_deformvertexes_autosprite2",
-	"dynamic_surfaces_because_deformvertexes_autosprite2",
-	"dynamic_vertices_because_deformvertexes_autosprite2",
-	"dynamic_triangles_because_deformvertexes_autosprite2",
-	"dynamic_batches_because_deformvertexes_normal",
-	"dynamic_surfaces_because_deformvertexes_normal",
-	"dynamic_vertices_because_deformvertexes_normal",
-	"dynamic_triangles_because_deformvertexes_normal",
-	"dynamic_batches_because_deformvertexes_wave",
-	"dynamic_surfaces_because_deformvertexes_wave",
-	"dynamic_vertices_because_deformvertexes_wave",
-	"dynamic_triangles_because_deformvertexes_wave",
-	"dynamic_batches_because_deformvertexes_bulge",
-	"dynamic_surfaces_because_deformvertexes_bulge",
-	"dynamic_vertices_because_deformvertexes_bulge",
-	"dynamic_triangles_because_deformvertexes_bulge",
-	"dynamic_batches_because_deformvertexes_move",
-	"dynamic_surfaces_because_deformvertexes_move",
-	"dynamic_vertices_because_deformvertexes_move",
-	"dynamic_triangles_because_deformvertexes_move",
-	"dynamic_batches_because_tcgen_lightmap",
-	"dynamic_surfaces_because_tcgen_lightmap",
-	"dynamic_vertices_because_tcgen_lightmap",
-	"dynamic_triangles_because_tcgen_lightmap",
-	"dynamic_batches_because_tcgen_vector",
-	"dynamic_surfaces_because_tcgen_vector",
-	"dynamic_vertices_because_tcgen_vector",
-	"dynamic_triangles_because_tcgen_vector",
-	"dynamic_batches_because_tcgen_environment",
-	"dynamic_surfaces_because_tcgen_environment",
-	"dynamic_vertices_because_tcgen_environment",
-	"dynamic_triangles_because_tcgen_environment",
-	"dynamic_batches_because_tcmod_turbulent",
-	"dynamic_surfaces_because_tcmod_turbulent",
-	"dynamic_vertices_because_tcmod_turbulent",
-	"dynamic_triangles_because_tcmod_turbulent",
-	"dynamic_batches_because_interleavedarrays",
-	"dynamic_surfaces_because_interleavedarrays",
-	"dynamic_vertices_because_interleavedarrays",
-	"dynamic_triangles_because_interleavedarrays",
-	"dynamic_batches_because_nogaps",
-	"dynamic_surfaces_because_nogaps",
-	"dynamic_vertices_because_nogaps",
-	"dynamic_triangles_because_nogaps",
-	"dynamic_batches_because_derived",
-	"dynamic_surfaces_because_derived",
-	"dynamic_vertices_because_derived",
-	"dynamic_triangles_because_derived",
-	"entitycache_count",
-	"entitycache_surfaces",
-	"entitycache_vertices",
-	"entitycache_triangles",
-	"entityanimate_count",
-	"entityanimate_surfaces",
-	"entityanimate_vertices",
-	"entityanimate_triangles",
-	"entityskeletal_count",
-	"entityskeletal_surfaces",
-	"entityskeletal_vertices",
-	"entityskeletal_triangles",
-	"entitystatic_count",
-	"entitystatic_surfaces",
-	"entitystatic_vertices",
-	"entitystatic_triangles",
-	"entitycustom_count",
-	"entitycustom_surfaces",
-	"entitycustom_vertices",
-	"entitycustom_triangles",
-};
-
-char r_speeds_timestring[4096];
-int speedstringcount, r_timereport_active;
-double r_timereport_temp = 0, r_timereport_current = 0, r_timereport_start = 0;
-int r_speeds_longestitem = 0;
-
-void R_TimeReport(const char *desc)
-{
-	char tempbuf[256];
-	int length;
-	int t;
-
-	if (r_speeds.integer < 2 || !r_timereport_active)
-		return;
-
-	CHECKGLERROR
-	if (r_speeds.integer == 2)
-		GL_Finish();
-	CHECKGLERROR
-	r_timereport_temp = r_timereport_current;
-	r_timereport_current = Sys_DirtyTime();
-	t = (int) ((r_timereport_current - r_timereport_temp) * 1000000.0 + 0.5);
-
-	length = dpsnprintf(tempbuf, sizeof(tempbuf), "%8i %s", t, desc);
-	if (length < 0)
-		length = (int)sizeof(tempbuf) - 1;
-	if (r_speeds_longestitem < length)
-		r_speeds_longestitem = length;
-	for (;length < r_speeds_longestitem;length++)
-		tempbuf[length] = ' ';
-	tempbuf[length] = 0;
-
-	if (speedstringcount + length > (vid_conwidth.integer / 8))
-	{
-		strlcat(r_speeds_timestring, "\n", sizeof(r_speeds_timestring));
-		speedstringcount = 0;
-	}
-	strlcat(r_speeds_timestring, tempbuf, sizeof(r_speeds_timestring));
-	speedstringcount += length;
-}
-
-static void R_TimeReport_BeginFrame(void)
-{
-	speedstringcount = 0;
-	r_speeds_timestring[0] = 0;
-	r_timereport_active = false;
-	memset(&r_refdef.stats, 0, sizeof(r_refdef.stats));
-
-	if (r_speeds.integer >= 2)
-	{
-		r_timereport_active = true;
-		r_timereport_start = r_timereport_current = Sys_DirtyTime();
-	}
-}
-
-static int R_CountLeafTriangles(const dp_model_t *model, const mleaf_t *leaf)
-{
-	int i, triangles = 0;
-	for (i = 0;i < leaf->numleafsurfaces;i++)
-		triangles += model->data_surfaces[leaf->firstleafsurface[i]].num_triangles;
-	return triangles;
-}
-
-#define R_SPEEDS_GRAPH_COLORS 8
-#define R_SPEEDS_GRAPH_TEXTLENGTH 64
-static float r_speeds_graph_colors[R_SPEEDS_GRAPH_COLORS][4] = {{1, 0, 0, 1}, {0, 1, 0, 1}, {0, 0, 1, 1}, {1, 1, 0, 1}, {0, 1, 1, 1}, {1, 0, 1, 1}, {1, 1, 1, 1}, {1, 0.5f, 0, 1}};
-
-extern cvar_t r_viewscale;
-extern float viewscalefpsadjusted;
-static void R_TimeReport_EndFrame(void)
-{
-	int j, lines;
-	cl_locnode_t *loc;
-	char string[1024+4096];
-	mleaf_t *viewleaf;
-	static double oldtime = 0;
-
-	r_refdef.stats[r_stat_timedelta] = (int)((realtime - oldtime) * 1000000.0);
-	oldtime = realtime;
-	r_refdef.stats[r_stat_quality] = (int)(100 * r_refdef.view.quality);
-
-	string[0] = 0;
-	if (r_speeds.integer)
-	{
-		// put the location name in the r_speeds display as it greatly helps
-		// when creating loc files
-		loc = CL_Locs_FindNearest(cl.movement_origin);
-		viewleaf = (r_refdef.scene.worldmodel && r_refdef.scene.worldmodel->brush.PointInLeaf) ? r_refdef.scene.worldmodel->brush.PointInLeaf(r_refdef.scene.worldmodel, r_refdef.view.origin) : NULL;
-		dpsnprintf(string, sizeof(string),
-"%6ius time delta %s%s %.3f cl.time%2.4f brightness\n"
-"%3i renders org:'%+8.2f %+8.2f %+8.2f' dir:'%+2.3f %+2.3f %+2.3f'\n"
-"%5i viewleaf%5i cluster%3i area%4i brushes%4i surfaces(%7i triangles)\n"
-"%7i surfaces%7i triangles %5i entities (%7i surfaces%7i triangles)\n"
-"%5i leafs%5i portals%6i/%6i particles%6i/%6i decals %3i%% quality\n"
-"%7i lightmap updates (%7i pixels)%8i/%8i framedata\n"
-"%4i lights%4i clears%4i scissored%7i light%7i shadow%7i dynamic\n"
-"bouncegrid:%4i lights%6i particles%6i traces%6i hits%6i splats%6i bounces\n"
-"photon cache efficiency:%6i cached%6i traced%6ianimated\n"
-"%6i draws%8i vertices%8i triangles bloompixels%8i copied%8i drawn\n"
-"updated%5i indexbuffers%8i bytes%5i vertexbuffers%8i bytes\n"
-"animcache%5ib gpuskeletal%7i vertices (%7i with normals)\n"
-"fastbatch%5i count%5i surfaces%7i vertices %7i triangles\n"
-"copytris%5i count%5i surfaces%7i vertices %7i triangles\n"
-"dynamic%5i count%5i surfaces%7i vertices%7i triangles\n"
-"%s"
-, r_refdef.stats[r_stat_timedelta], loc ? "Location: " : "", loc ? loc->name : "", cl.time, r_refdef.view.colorscale
-, r_refdef.stats[r_stat_renders], r_refdef.view.origin[0], r_refdef.view.origin[1], r_refdef.view.origin[2], r_refdef.view.forward[0], r_refdef.view.forward[1], r_refdef.view.forward[2]
-, viewleaf ? (int)(viewleaf - r_refdef.scene.worldmodel->brush.data_leafs) : -1, viewleaf ? viewleaf->clusterindex : -1, viewleaf ? viewleaf->areaindex : -1, viewleaf ? viewleaf->numleafbrushes : 0, viewleaf ? viewleaf->numleafsurfaces : 0, viewleaf ? R_CountLeafTriangles(r_refdef.scene.worldmodel, viewleaf) : 0
-, r_refdef.stats[r_stat_world_surfaces], r_refdef.stats[r_stat_world_triangles], r_refdef.stats[r_stat_entities], r_refdef.stats[r_stat_entities_surfaces], r_refdef.stats[r_stat_entities_triangles]
-, r_refdef.stats[r_stat_world_leafs], r_refdef.stats[r_stat_world_portals], r_refdef.stats[r_stat_particles], cl.num_particles, r_refdef.stats[r_stat_drawndecals], r_refdef.stats[r_stat_totaldecals], r_refdef.stats[r_stat_quality]
-, r_refdef.stats[r_stat_lightmapupdates], r_refdef.stats[r_stat_lightmapupdatepixels], r_refdef.stats[r_stat_framedatacurrent], r_refdef.stats[r_stat_framedatasize]
-, r_refdef.stats[r_stat_lights], r_refdef.stats[r_stat_lights_clears], r_refdef.stats[r_stat_lights_scissored], r_refdef.stats[r_stat_lights_lighttriangles], r_refdef.stats[r_stat_lights_shadowtriangles], r_refdef.stats[r_stat_lights_dynamicshadowtriangles]
-, r_refdef.stats[r_stat_bouncegrid_lights], r_refdef.stats[r_stat_bouncegrid_particles], r_refdef.stats[r_stat_bouncegrid_traces], r_refdef.stats[r_stat_bouncegrid_hits], r_refdef.stats[r_stat_bouncegrid_splats], r_refdef.stats[r_stat_bouncegrid_bounces]
-, r_refdef.stats[r_stat_photoncache_cached], r_refdef.stats[r_stat_photoncache_traced], r_refdef.stats[r_stat_photoncache_animated]
-, r_refdef.stats[r_stat_draws], r_refdef.stats[r_stat_draws_vertices], r_refdef.stats[r_stat_draws_elements] / 3, r_refdef.stats[r_stat_bloom_copypixels], r_refdef.stats[r_stat_bloom_drawpixels]
-, r_refdef.stats[r_stat_indexbufferuploadcount], r_refdef.stats[r_stat_indexbufferuploadsize], r_refdef.stats[r_stat_vertexbufferuploadcount], r_refdef.stats[r_stat_vertexbufferuploadsize]
-, r_refdef.stats[r_stat_animcache_skeletal_bones], r_refdef.stats[r_stat_animcache_shape_vertices], r_refdef.stats[r_stat_animcache_shade_vertices]
-, r_refdef.stats[r_stat_batch_fast_batches], r_refdef.stats[r_stat_batch_fast_surfaces], r_refdef.stats[r_stat_batch_fast_vertices], r_refdef.stats[r_stat_batch_fast_triangles]
-, r_refdef.stats[r_stat_batch_copytriangles_batches], r_refdef.stats[r_stat_batch_copytriangles_surfaces], r_refdef.stats[r_stat_batch_copytriangles_vertices], r_refdef.stats[r_stat_batch_copytriangles_triangles]
-, r_refdef.stats[r_stat_batch_dynamic_batches], r_refdef.stats[r_stat_batch_dynamic_surfaces], r_refdef.stats[r_stat_batch_dynamic_vertices], r_refdef.stats[r_stat_batch_dynamic_triangles]
-, r_speeds_timestring);
-	}
-
-	speedstringcount = 0;
-	r_speeds_timestring[0] = 0;
-	r_timereport_active = false;
-
-	if (r_speeds.integer >= 2)
-	{
-		r_timereport_active = true;
-		r_timereport_start = r_timereport_current = Sys_DirtyTime();
-	}
-
-	if (string[0])
-	{
-		int i, y;
-		if (string[strlen(string)-1] == '\n')
-			string[strlen(string)-1] = 0;
-		lines = 1;
-		for (i = 0;string[i];i++)
-			if (string[i] == '\n')
-				lines++;
-		y = vid_conheight.integer - sb_lines - lines * 8;
-		i = j = 0;
-		r_draw2d_force = true;
-		DrawQ_Fill(0, y, vid_conwidth.integer, lines * 8, 0, 0, 0, 0.5, 0);
-		while (string[i])
-		{
-			j = i;
-			while (string[i] && string[i] != '\n')
-				i++;
-			if (i - j > 0)
-				DrawQ_String(0, y, string + j, i - j, 8, 8, 1, 1, 1, 1, 0, NULL, true, FONT_DEFAULT);
-			if (string[i] == '\n')
-				i++;
-			y += 8;
-		}
-		r_draw2d_force = false;
-	}
-
-	if (r_speeds_graph_length.integer != bound(4, r_speeds_graph_length.integer, 8192))
-		Cvar_SetValueQuick(&r_speeds_graph_length, bound(4, r_speeds_graph_length.integer, 8192));
-	if (fabs(r_speeds_graph_seconds.value - bound(0.1f, r_speeds_graph_seconds.value, 120.0f)) > 0.01f)
-		Cvar_SetValueQuick(&r_speeds_graph_seconds, bound(0.1f, r_speeds_graph_seconds.value, 120.0f));
-	if (r_speeds_graph.integer)
-	{
-		// if we currently have no graph data, reset the graph data entirely
-		int i;
-		if (!cls.r_speeds_graph_data)
-			for (i = 0;i < r_stat_count;i++)
-				cls.r_speeds_graph_datamin[i] = cls.r_speeds_graph_datamax[i] = 0;
-		if (cls.r_speeds_graph_length != r_speeds_graph_length.integer)
-		{
-			int stat, index, d, graph_length, *graph_data;
-			cls.r_speeds_graph_length = r_speeds_graph_length.integer;
-			cls.r_speeds_graph_current = 0;
-			if (cls.r_speeds_graph_data)
-				Mem_Free(cls.r_speeds_graph_data);
-			cls.r_speeds_graph_data = (int *)Mem_Alloc(cls.permanentmempool, cls.r_speeds_graph_length * sizeof(r_refdef.stats));
-			// initialize the graph to have the current values throughout history
-			graph_data = cls.r_speeds_graph_data;
-			graph_length = cls.r_speeds_graph_length;
-			index = 0;
-			for (stat = 0;stat < r_stat_count;stat++)
-			{
-				d = r_refdef.stats[stat];
-				if (stat == r_stat_timedelta)
-					d = 0;
-				for (i = 0;i < graph_length;i++)
-					graph_data[index++] = d;
-			}
-		}
-	}
-	else
-	{
-		if (cls.r_speeds_graph_length)
-		{
-			cls.r_speeds_graph_length = 0;
-			Mem_Free(cls.r_speeds_graph_data);
-			cls.r_speeds_graph_data = NULL;
-			cls.r_speeds_graph_current = 0;
-		}
-	}
-
-	if (cls.r_speeds_graph_length)
-	{
-		char legend[128];
-		r_vertexgeneric_t *v;
-		int i, numlines;
-		const int *data;
-		float x, y, width, height, scalex, scaley;
-		int range_default = max(r_speeds_graph_maxdefault.integer, 1);
-		int color, stat, stats, index, range_min, range_max;
-		int graph_current, graph_length, *graph_data;
-		int statindex[R_SPEEDS_GRAPH_COLORS];
-		int sum;
-
-		// add current stats to the graph_data
-		cls.r_speeds_graph_current++;
-		if (cls.r_speeds_graph_current >= cls.r_speeds_graph_length)
-			cls.r_speeds_graph_current = 0;
-		// poke each new stat into the current offset of its graph
-		graph_data = cls.r_speeds_graph_data;
-		graph_current = cls.r_speeds_graph_current;
-		graph_length = cls.r_speeds_graph_length;
-		for (stat = 0;stat < r_stat_count;stat++)
-			graph_data[stat * graph_length + graph_current] = r_refdef.stats[stat];
-
-		// update the graph ranges
-		for (stat = 0;stat < r_stat_count;stat++)
-		{
-			if (cls.r_speeds_graph_datamin[stat] > r_refdef.stats[stat])
-				cls.r_speeds_graph_datamin[stat] = r_refdef.stats[stat];
-			if (cls.r_speeds_graph_datamax[stat] < r_refdef.stats[stat])
-				cls.r_speeds_graph_datamax[stat] = r_refdef.stats[stat];
-		}
-
-		// force 2D drawing to occur even if r_render is 0
-		r_draw2d_force = true;
-
-		// position the graph
-		width = r_speeds_graph_width.value;
-		height = r_speeds_graph_height.value;
-		x = bound(0, r_speeds_graph_x.value, vid_conwidth.value - width);
-		y = bound(0, r_speeds_graph_y.value, vid_conheight.value - height);
-
-		// fill background with a pattern of gray and black at one second intervals
-		scalex = (float)width / (float)r_speeds_graph_seconds.value;
-		for (i = 0;i < r_speeds_graph_seconds.integer + 1;i++)
-		{
-			float x1 = x + width - (i + 1) * scalex;
-			float x2 = x + width - i * scalex;
-			if (x1 < x)
-				x1 = x;
-			if (i & 1)
-				DrawQ_Fill(x1, y, x2 - x1, height, 0.0f, 0.0f, 0.0f, 0.5f, 0);
-			else
-				DrawQ_Fill(x1, y, x2 - x1, height, 0.2f, 0.2f, 0.2f, 0.5f, 0);
-		}
-
-		// count how many stats match our pattern
-		stats = 0;
-		color = 0;
-		for (color = 0;color < R_SPEEDS_GRAPH_COLORS;color++)
-		{
-			// look at all stat names and find ones matching the filter
-			statindex[color] = -1;
-			if (!r_speeds_graph_filter[color].string)
-				continue;
-			for (stat = 0;stat < r_stat_count;stat++)
-				if (!strcmp(r_stat_name[stat], r_speeds_graph_filter[color].string))
-					break;
-			if (stat >= r_stat_count)
-				continue;
-			// record that this color is this stat for the line drawing loop
-			statindex[color] = stat;
-			// draw the legend text in the background of the graph
-			dpsnprintf(legend, sizeof(legend), "%10i :%s", graph_data[stat * graph_length + graph_current], r_stat_name[stat]);
-			DrawQ_String(x, y + stats * 8, legend, 0, 8, 8, r_speeds_graph_colors[color][0], r_speeds_graph_colors[color][1], r_speeds_graph_colors[color][2], r_speeds_graph_colors[color][3] * 1.00f, 0, NULL, true, FONT_DEFAULT);
-			// count how many stats we need to graph in vertex buffer
-			stats++;
-		}
-
-		if (stats)
-		{
-			// legend text is drawn after the graphs
-			// render the graph lines, we'll go back and render the legend text later
-			scalex = (float)width / (1000000.0 * r_speeds_graph_seconds.value);
-			// get space in a vertex buffer to draw this
-			numlines = stats * (graph_length - 1);
-			v = R_Mesh_PrepareVertices_Generic_Lock(numlines * 2);
-			stats = 0;
-			for (color = 0;color < R_SPEEDS_GRAPH_COLORS;color++)
-			{
-				// look at all stat names and find ones matching the filter
-				stat = statindex[color];
-				if (stat < 0)
-					continue;
-				// prefer to graph stats with 0 base, but if they are
-				// negative we have no choice
-				range_min = cls.r_speeds_graph_datamin[stat];
-				range_max = max(cls.r_speeds_graph_datamax[stat], range_min + range_default);
-				// some stats we specifically override the graph scale on
-				if (stat == r_stat_timedelta)
-					range_max = r_speeds_graph_maxtimedelta.integer;
-				scaley = height / (range_max - range_min);
-				// generate lines (2 vertices each)
-				// to deal with incomplete data we walk right to left
-				data = graph_data + stat * graph_length;
-				index = graph_current;
-				sum = 0;
-				for (i = 0;i < graph_length - 1;)
-				{
-					v->vertex3f[0] = x + width - sum * scalex;
-					if (v->vertex3f[0] < x)
-						v->vertex3f[0] = x;
-					v->vertex3f[1] = y + height - (data[index] - range_min) * scaley;
-					v->vertex3f[2] = 0;
-					v->color4f[0] = r_speeds_graph_colors[color][0];
-					v->color4f[1] = r_speeds_graph_colors[color][1];
-					v->color4f[2] = r_speeds_graph_colors[color][2];
-					v->color4f[3] = r_speeds_graph_colors[color][3];
-					v->texcoord2f[0] = 0;
-					v->texcoord2f[1] = 0;
-					v++;
-					sum += graph_data[r_stat_timedelta * graph_length + index];
-					index--;
-					if (index < 0)
-						index = graph_length - 1;
-					i++;
-					v->vertex3f[0] = x + width - sum * scalex;
-					if (v->vertex3f[0] < x)
-						v->vertex3f[0] = x;
-					v->vertex3f[1] = y + height - (data[index] - range_min) * scaley;
-					v->vertex3f[2] = 0;
-					v->color4f[0] = r_speeds_graph_colors[color][0];
-					v->color4f[1] = r_speeds_graph_colors[color][1];
-					v->color4f[2] = r_speeds_graph_colors[color][2];
-					v->color4f[3] = r_speeds_graph_colors[color][3];
-					v->texcoord2f[0] = 0;
-					v->texcoord2f[1] = 0;
-					v++;
-				}
-			}
-			R_Mesh_PrepareVertices_Generic_Unlock();
-			DrawQ_Lines(0.0f, numlines, 0, false);
-		}
-
-		// return to not drawing anything if r_render is 0
-		r_draw2d_force = false;
-	}
-
-	memset(&r_refdef.stats, 0, sizeof(r_refdef.stats));
-}
 
 /*
 =================
@@ -1297,9 +780,9 @@ SCR_SizeUp_f
 Keybinding command
 =================
 */
-static void SCR_SizeUp_f (void)
+static void SCR_SizeUp_f(cmd_state_t *cmd)
 {
-	Cvar_SetValue ("viewsize",scr_viewsize.value+10);
+	Cvar_SetValueQuick(&scr_viewsize, scr_viewsize.value + 10);
 }
 
 
@@ -1310,9 +793,9 @@ SCR_SizeDown_f
 Keybinding command
 =================
 */
-static void SCR_SizeDown_f (void)
+static void SCR_SizeDown_f(cmd_state_t *cmd)
 {
-	Cvar_SetValue ("viewsize",scr_viewsize.value-10);
+	Cvar_SetValueQuick(&scr_viewsize, scr_viewsize.value - 10);
 }
 
 #ifdef CONFIG_VIDEO_CAPTURE
@@ -1342,6 +825,7 @@ void CL_Screen_Init(void)
 	Cvar_RegisterVariable (&scr_conscroll3_y);
 	Cvar_RegisterVariable (&scr_conbrightness);
 	Cvar_RegisterVariable (&scr_conforcewhiledisconnected);
+	Cvar_RegisterVariable (&scr_conheight);
 #ifdef CONFIG_MENU
 	Cvar_RegisterVariable (&scr_menuforcewhiledisconnected);
 #endif
@@ -1364,9 +848,11 @@ void CL_Screen_Init(void)
 	Cvar_RegisterVariable (&scr_showbrand);
 	Cvar_RegisterVariable (&scr_centertime);
 	Cvar_RegisterVariable (&scr_printspeed);
+	Cvar_RegisterVariable (&scr_sbarscale);
 	Cvar_RegisterVariable (&vid_conwidth);
 	Cvar_RegisterVariable (&vid_conheight);
 	Cvar_RegisterVariable (&vid_pixelheight);
+	Cvar_RegisterVariable (&vid_conwidthauto);
 	Cvar_RegisterVariable (&scr_screenshot_jpeg);
 	Cvar_RegisterVariable (&scr_screenshot_jpeg_quality);
 	Cvar_RegisterVariable (&scr_screenshot_png);
@@ -1398,7 +884,8 @@ void CL_Screen_Init(void)
 	Cvar_RegisterVariable(&r_stereo_angle);
 	Cvar_RegisterVariable(&scr_stipple);
 	Cvar_RegisterVariable(&scr_refresh);
-	Cvar_RegisterVariable(&shownetgraph);
+	Cvar_RegisterVariable(&net_graph);
+	Cvar_RegisterVirtual(&net_graph, "shownetgraph");
 	Cvar_RegisterVariable(&cl_demo_mousegrab);
 	Cvar_RegisterVariable(&timedemo_screenshotframelist);
 	Cvar_RegisterVariable(&vid_touchscreen_outlinealpha);
@@ -1416,14 +903,15 @@ void CL_Screen_Init(void)
 	Cvar_RegisterVariable(&r_speeds_graph_maxdefault);
 
 	// if we want no console, turn it off here too
-	if (COM_CheckParm ("-noconsole"))
+	if (Sys_CheckParm ("-noconsole"))
 		Cvar_SetQuick(&scr_conforcewhiledisconnected, "0");
 
-	Cmd_AddCommand ("sizeup",SCR_SizeUp_f, "increase view size (increases viewsize cvar)");
-	Cmd_AddCommand ("sizedown",SCR_SizeDown_f, "decrease view size (decreases viewsize cvar)");
-	Cmd_AddCommand ("screenshot",SCR_ScreenShot_f, "takes a screenshot of the next rendered frame");
-	Cmd_AddCommand ("envmap", R_Envmap_f, "render a cubemap (skybox) of the current scene");
-	Cmd_AddCommand ("infobar", SCR_InfoBar_f, "display a text in the infobar (usage: infobar expiretime string)");
+	Cmd_AddCommand(CF_CLIENT, "cprint", SCR_Centerprint_f, "print something at the screen center");
+	Cmd_AddCommand(CF_CLIENT, "sizeup",SCR_SizeUp_f, "increase view size (increases viewsize cvar)");
+	Cmd_AddCommand(CF_CLIENT, "sizedown",SCR_SizeDown_f, "decrease view size (decreases viewsize cvar)");
+	Cmd_AddCommand(CF_CLIENT, "screenshot",SCR_ScreenShot_f, "takes a screenshot of the next rendered frame");
+	Cmd_AddCommand(CF_CLIENT, "envmap", R_Envmap_f, "render a cubemap (skybox) of the current scene");
+	Cmd_AddCommand(CF_CLIENT, "infobar", SCR_InfoBar_f, "display a text in the infobar (usage: infobar expiretime string)");
 
 #ifdef CONFIG_VIDEO_CAPTURE
 	SCR_CaptureVideo_Ogg_Init();
@@ -1437,7 +925,7 @@ void CL_Screen_Init(void)
 SCR_ScreenShot_f
 ==================
 */
-void SCR_ScreenShot_f (void)
+void SCR_ScreenShot_f(cmd_state_t *cmd)
 {
 	static int shotnumber;
 	static char old_prefix_name[MAX_QPATH];
@@ -1445,14 +933,14 @@ void SCR_ScreenShot_f (void)
 	char filename[MAX_QPATH];
 	unsigned char *buffer1;
 	unsigned char *buffer2;
-	qboolean jpeg = (scr_screenshot_jpeg.integer != 0);
-	qboolean png = (scr_screenshot_png.integer != 0) && !jpeg;
+	qbool jpeg = (scr_screenshot_jpeg.integer != 0);
+	qbool png = (scr_screenshot_png.integer != 0) && !jpeg;
 	char vabuf[1024];
 
-	if (Cmd_Argc() == 2)
+	if (Cmd_Argc(cmd) == 2)
 	{
 		const char *ext;
-		strlcpy(filename, Cmd_Argv(1), sizeof(filename));
+		dp_strlcpy(filename, Cmd_Argv(cmd, 1), sizeof(filename));
 		ext = FS_FileExtension(filename);
 		if (!strcasecmp(ext, "jpg"))
 		{
@@ -1480,10 +968,11 @@ void SCR_ScreenShot_f (void)
 		int shotnumber100;
 
 		// TODO maybe make capturevideo and screenshot use similar name patterns?
+		Sys_TimeString(vabuf, sizeof(vabuf), "%Y%m%d%H%M%S");
 		if (scr_screenshot_name_in_mapdir.integer && cl.worldbasename[0])
-			dpsnprintf(prefix_name, sizeof(prefix_name), "%s/%s%s", cl.worldbasename, scr_screenshot_name.string, Sys_TimeString("%Y%m%d%H%M%S"));
+			dpsnprintf(prefix_name, sizeof(prefix_name), "%s/%s%s", cl.worldbasename, scr_screenshot_name.string, vabuf);
 		else
-			dpsnprintf(prefix_name, sizeof(prefix_name), "%s%s", scr_screenshot_name.string, Sys_TimeString("%Y%m%d%H%M%S"));
+			dpsnprintf(prefix_name, sizeof(prefix_name), "%s%s", scr_screenshot_name.string, vabuf);
 
 		// find a file name to save it to
 		for (shotnumber100 = 0;shotnumber100 < 100;shotnumber100++)
@@ -1502,10 +991,11 @@ void SCR_ScreenShot_f (void)
 	else
 	{
 		// TODO maybe make capturevideo and screenshot use similar name patterns?
+		Sys_TimeString(vabuf, sizeof(vabuf), scr_screenshot_name.string);
 		if (scr_screenshot_name_in_mapdir.integer && cl.worldbasename[0])
-			dpsnprintf(prefix_name, sizeof(prefix_name), "%s/%s", cl.worldbasename, Sys_TimeString(scr_screenshot_name.string));
+			dpsnprintf(prefix_name, sizeof(prefix_name), "%s/%s", cl.worldbasename, vabuf);
 		else
-			dpsnprintf(prefix_name, sizeof(prefix_name), "%s", Sys_TimeString(scr_screenshot_name.string));
+			dpsnprintf(prefix_name, sizeof(prefix_name), "%s", vabuf);
 
 		// if prefix changed, gamedir or map changed, reset the shotnumber so
 		// we scan again
@@ -1533,19 +1023,19 @@ void SCR_ScreenShot_f (void)
 		shotnumber++;
 	}
 
-	buffer1 = (unsigned char *)Mem_Alloc(tempmempool, vid.width * vid.height * 4);
-	buffer2 = (unsigned char *)Mem_Alloc(tempmempool, vid.width * vid.height * (scr_screenshot_alpha.integer ? 4 : 3));
+	buffer1 = (unsigned char *)Mem_Alloc(tempmempool, vid.mode.width * vid.mode.height * 4);
+	buffer2 = (unsigned char *)Mem_Alloc(tempmempool, vid.mode.width * vid.mode.height * (scr_screenshot_alpha.integer ? 4 : 3));
 
-	if (SCR_ScreenShot (filename, buffer1, buffer2, 0, 0, vid.width, vid.height, false, false, false, jpeg, png, true, scr_screenshot_alpha.integer != 0))
+	if (SCR_ScreenShot (filename, buffer1, buffer2, 0, 0, vid.mode.width, vid.mode.height, false, false, false, jpeg, png, true, scr_screenshot_alpha.integer != 0))
 		Con_Printf("Wrote %s\n", filename);
 	else
 	{
-		Con_Printf("Unable to write %s\n", filename);
+		Con_Printf(CON_ERROR "Unable to write %s\n", filename);
 		if(jpeg || png)
 		{
-			if(SCR_ScreenShot (filename, buffer1, buffer2, 0, 0, vid.width, vid.height, false, false, false, false, false, true, scr_screenshot_alpha.integer != 0))
+			if(SCR_ScreenShot (filename, buffer1, buffer2, 0, 0, vid.mode.width, vid.mode.height, false, false, false, false, false, true, scr_screenshot_alpha.integer != 0))
 			{
-				strlcpy(filename + strlen(filename) - 3, "tga", 4);
+				dp_strlcpy(filename + strlen(filename) - 3, "tga", 4);
 				Con_Printf("Wrote %s\n", filename);
 			}
 		}
@@ -1561,20 +1051,22 @@ static void SCR_CaptureVideo_BeginVideo(void)
 	double r, g, b;
 	unsigned int i;
 	int width = cl_capturevideo_width.integer, height = cl_capturevideo_height.integer;
+	char timestring[128];
+
 	if (cls.capturevideo.active)
 		return;
 	memset(&cls.capturevideo, 0, sizeof(cls.capturevideo));
 	// soundrate is figured out on the first SoundFrame
 
 	if(width == 0 && height != 0)
-		width = (int) (height * (double)vid.width / ((double)vid.height * vid_pixelheight.value)); // keep aspect
+		width = (int) (height * (double)vid.mode.width / ((double)vid.mode.height * vid_pixelheight.value)); // keep aspect
 	if(width != 0 && height == 0)
-		height = (int) (width * ((double)vid.height * vid_pixelheight.value) / (double)vid.width); // keep aspect
+		height = (int) (width * ((double)vid.mode.height * vid_pixelheight.value) / (double)vid.mode.width); // keep aspect
 
-	if(width < 2 || width > vid.width) // can't scale up
-		width = vid.width;
-	if(height < 2 || height > vid.height) // can't scale up
-		height = vid.height;
+	if(width < 2 || width > vid.mode.width) // can't scale up
+		width = vid.mode.width;
+	if(height < 2 || height > vid.mode.height) // can't scale up
+		height = vid.mode.height;
 
 	// ensure it's all even; if not, scale down a little
 	if(width % 1)
@@ -1589,15 +1081,18 @@ static void SCR_CaptureVideo_BeginVideo(void)
 	cls.capturevideo.framestep = cl_capturevideo_framestep.integer;
 	cls.capturevideo.soundrate = S_GetSoundRate();
 	cls.capturevideo.soundchannels = S_GetSoundChannels();
-	cls.capturevideo.startrealtime = realtime;
+	cls.capturevideo.startrealtime = host.realtime;
 	cls.capturevideo.frame = cls.capturevideo.lastfpsframe = 0;
-	cls.capturevideo.starttime = cls.capturevideo.lastfpstime = realtime;
+	cls.capturevideo.starttime = cls.capturevideo.lastfpstime = host.realtime;
 	cls.capturevideo.soundsampleframe = 0;
 	cls.capturevideo.realtime = cl_capturevideo_realtime.integer != 0;
-	cls.capturevideo.screenbuffer = (unsigned char *)Mem_Alloc(tempmempool, vid.width * vid.height * 4);
-	cls.capturevideo.outbuffer = (unsigned char *)Mem_Alloc(tempmempool, width * height * (4+4) + 18);
-	dpsnprintf(cls.capturevideo.basename, sizeof(cls.capturevideo.basename), "video/%s%03i", Sys_TimeString(cl_capturevideo_nameformat.string), cl_capturevideo_number.integer);
+	cls.capturevideo.outbuffer = (unsigned char *)Mem_Alloc(tempmempool, width * height * 4 + 18); // +18 ?
+	Sys_TimeString(timestring, sizeof(timestring), cl_capturevideo_nameformat.string);
+	dpsnprintf(cls.capturevideo.basename, sizeof(cls.capturevideo.basename), "video/%s%03i", timestring, cl_capturevideo_number.integer);
 	Cvar_SetValueQuick(&cl_capturevideo_number, cl_capturevideo_number.integer + 1);
+
+	// capture demos as fast as possible
+	host.restless = !cls.capturevideo.realtime;
 
 	/*
 	for (i = 0;i < 256;i++)
@@ -1652,6 +1147,8 @@ Cr = R *  .500 + G * -.419 + B * -.0813 + 128.;
 		cls.capturevideo.yuvnormalizetable[2][i] = 16 + i * (240-16) / 256;
 	}
 
+	GL_CaptureVideo_BeginVideo();
+
 	if (cl_capturevideo_ogg.integer)
 	{
 		if(SCR_CaptureVideo_Ogg_Available())
@@ -1671,19 +1168,14 @@ void SCR_CaptureVideo_EndVideo(void)
 	if (!cls.capturevideo.active)
 		return;
 	cls.capturevideo.active = false;
+	host.restless = false;
 
 	Con_Printf("Finishing capture of %s.%s (%d frames, %d audio frames)\n", cls.capturevideo.basename, cls.capturevideo.formatextension, cls.capturevideo.frame, cls.capturevideo.soundsampleframe);
 
-	if (cls.capturevideo.videofile)
-	{
-		cls.capturevideo.endvideo();
-	}
+	GL_CaptureVideo_EndVideo(); // must be called before writeEndVideo !
 
-	if (cls.capturevideo.screenbuffer)
-	{
-		Mem_Free (cls.capturevideo.screenbuffer);
-		cls.capturevideo.screenbuffer = NULL;
-	}
+	if (cls.capturevideo.videofile)
+		cls.capturevideo.writeEndVideo();
 
 	if (cls.capturevideo.outbuffer)
 	{
@@ -1691,107 +1183,40 @@ void SCR_CaptureVideo_EndVideo(void)
 		cls.capturevideo.outbuffer = NULL;
 	}
 
+	// If demo capture failed don't leave the demo playing.
+	// CL_StopPlayback shuts down when demo capture finishes successfully.
+	if (cls.capturevideo.error && Sys_CheckParm("-capturedemo"))
+		host.state = host_shutdown;
+
 	memset(&cls.capturevideo, 0, sizeof(cls.capturevideo));
-}
-
-static void SCR_ScaleDownBGRA(unsigned char *in, int inw, int inh, unsigned char *out, int outw, int outh)
-{
-	// TODO optimize this function
-
-	int x, y;
-	float area;
-
-	// memcpy is faster than me
-	if(inw == outw && inh == outh)
-	{
-		memcpy(out, in, 4 * inw * inh);
-		return;
-	}
-
-	// otherwise: a box filter
-	area = (float)outw * (float)outh / (float)inw / (float)inh;
-	for(y = 0; y < outh; ++y)
-	{
-		float iny0 =  y    / (float)outh * inh; int iny0_i = (int) floor(iny0);
-		float iny1 = (y+1) / (float)outh * inh; int iny1_i = (int) ceil(iny1);
-		for(x = 0; x < outw; ++x)
-		{
-			float inx0 =  x    / (float)outw * inw; int inx0_i = (int) floor(inx0);
-			float inx1 = (x+1) / (float)outw * inw; int inx1_i = (int) ceil(inx1);
-			float r = 0, g = 0, b = 0, alpha = 0;
-			int xx, yy;
-
-			for(yy = iny0_i; yy < iny1_i; ++yy)
-			{
-				float ya = min(yy+1, iny1) - max(iny0, yy);
-				for(xx = inx0_i; xx < inx1_i; ++xx)
-				{
-					float a = ya * (min(xx+1, inx1) - max(inx0, xx));
-					r += a * in[4*(xx + inw * yy)+0];
-					g += a * in[4*(xx + inw * yy)+1];
-					b += a * in[4*(xx + inw * yy)+2];
-					alpha += a * in[4*(xx + inw * yy)+3];
-				}
-			}
-
-			out[4*(x + outw * y)+0] = (unsigned char) (r * area);
-			out[4*(x + outw * y)+1] = (unsigned char) (g * area);
-			out[4*(x + outw * y)+2] = (unsigned char) (b * area);
-			out[4*(x + outw * y)+3] = (unsigned char) (alpha * area);
-		}
-	}
-}
-
-static void SCR_CaptureVideo_VideoFrame(int newframestepframenum)
-{
-	int x = 0, y = 0;
-	int width = cls.capturevideo.width, height = cls.capturevideo.height;
-
-	if(newframestepframenum == cls.capturevideo.framestepframe)
-		return;
-
-	CHECKGLERROR
-	// speed is critical here, so do saving as directly as possible
-
-	GL_ReadPixelsBGRA(x, y, vid.width, vid.height, cls.capturevideo.screenbuffer);
-
-	SCR_ScaleDownBGRA (cls.capturevideo.screenbuffer, vid.width, vid.height, cls.capturevideo.outbuffer, width, height);
-
-	cls.capturevideo.videoframes(newframestepframenum - cls.capturevideo.framestepframe);
-	cls.capturevideo.framestepframe = newframestepframenum;
-
-	if(cl_capturevideo_printfps.integer)
-	{
-		char buf[80];
-		double t = realtime;
-		if(t > cls.capturevideo.lastfpstime + 1)
-		{
-			double fps1 = (cls.capturevideo.frame - cls.capturevideo.lastfpsframe) / (t - cls.capturevideo.lastfpstime + 0.0000001);
-			double fps  = (cls.capturevideo.frame                                ) / (t - cls.capturevideo.starttime   + 0.0000001);
-			dpsnprintf(buf, sizeof(buf), "capturevideo: (%.1fs) last second %.3ffps, total %.3ffps\n", cls.capturevideo.frame / cls.capturevideo.framerate, fps1, fps);
-			Sys_PrintToTerminal(buf);
-			cls.capturevideo.lastfpstime = t;
-			cls.capturevideo.lastfpsframe = cls.capturevideo.frame;
-		}
-	}
 }
 
 void SCR_CaptureVideo_SoundFrame(const portable_sampleframe_t *paintbuffer, size_t length)
 {
 	cls.capturevideo.soundsampleframe += (int)length;
-	cls.capturevideo.soundframe(paintbuffer, length);
+	cls.capturevideo.writeSoundFrame(paintbuffer, length);
 }
 
 static void SCR_CaptureVideo(void)
 {
 	int newframenum;
+	int newframestepframenum;
+
 	if (cl_capturevideo.integer)
 	{
 		if (!cls.capturevideo.active)
 			SCR_CaptureVideo_BeginVideo();
+		if (cls.capturevideo.error)
+		{
+			// specific error message was printed already
+			Cvar_SetValueQuick(&cl_capturevideo, 0);
+			SCR_CaptureVideo_EndVideo();
+			return;
+		}
+
 		if (cls.capturevideo.framerate != cl_capturevideo_fps.value * cl_capturevideo_framestep.integer)
 		{
-			Con_Printf("You can not change the video framerate while recording a video.\n");
+			Con_Printf(CON_WARN "You can not change the video framerate while recording a video.\n");
 			Cvar_SetValueQuick(&cl_capturevideo_fps, cls.capturevideo.framerate / (double) cl_capturevideo_framestep.integer);
 		}
 		// for AVI saving we have to make sure that sound is saved before video
@@ -1800,7 +1225,7 @@ static void SCR_CaptureVideo(void)
 		if (cls.capturevideo.realtime)
 		{
 			// preserve sound sync by duplicating frames when running slow
-			newframenum = (int)((realtime - cls.capturevideo.startrealtime) * cls.capturevideo.framerate);
+			newframenum = (int)((host.realtime - cls.capturevideo.startrealtime) * cls.capturevideo.framerate);
 		}
 		else
 			newframenum = cls.capturevideo.frame + 1;
@@ -1808,17 +1233,32 @@ static void SCR_CaptureVideo(void)
 		if (newframenum - cls.capturevideo.frame > 60 * (int)ceil(cls.capturevideo.framerate))
 		{
 			Cvar_SetValueQuick(&cl_capturevideo, 0);
-			Con_Printf("video saving failed on frame %i, your machine is too slow for this capture speed.\n", cls.capturevideo.frame);
+			Con_Printf(CON_ERROR "video saving failed on frame %i, your machine is too slow for this capture speed.\n", cls.capturevideo.frame);
 			SCR_CaptureVideo_EndVideo();
 			return;
 		}
 		// write frames
-		SCR_CaptureVideo_VideoFrame(newframenum / cls.capturevideo.framestep);
+		newframestepframenum = newframenum / cls.capturevideo.framestep;
+		if (newframestepframenum != cls.capturevideo.framestepframe)
+			GL_CaptureVideo_VideoFrame(newframestepframenum);
+		cls.capturevideo.framestepframe = newframestepframenum;
+		// report progress
+		if(cl_capturevideo_printfps.value && host.realtime > cls.capturevideo.lastfpstime + cl_capturevideo_printfps.value)
+		{
+			double fps1 = (cls.capturevideo.frame - cls.capturevideo.lastfpsframe) / (host.realtime - cls.capturevideo.lastfpstime + 0.0000001);
+			double fps  = (cls.capturevideo.frame                                ) / (host.realtime - cls.capturevideo.starttime   + 0.0000001);
+			Sys_Printf("captured %.1fs of video, last second %.3ffps (%.1fx), total %.3ffps (%.1fx)\n",
+					cls.capturevideo.frame / cls.capturevideo.framerate,
+					fps1, fps1 / cls.capturevideo.framerate,
+					fps, fps / cls.capturevideo.framerate);
+			cls.capturevideo.lastfpstime = host.realtime;
+			cls.capturevideo.lastfpsframe = cls.capturevideo.frame;
+		}
 		cls.capturevideo.frame = newframenum;
 		if (cls.capturevideo.error)
 		{
 			Cvar_SetValueQuick(&cl_capturevideo, 0);
-			Con_Printf("video saving failed on frame %i, out of disk space? stopping video capture.\n", cls.capturevideo.frame);
+			Con_Printf(CON_ERROR "video saving failed on frame %i, out of disk space? stopping video capture.\n", cls.capturevideo.frame);
 			SCR_CaptureVideo_EndVideo();
 		}
 	}
@@ -1838,7 +1278,7 @@ struct envmapinfo_s
 {
 	float angles[3];
 	const char *name;
-	qboolean flipx, flipy, flipdiagonaly;
+	qbool flipx, flipy, flipdiagonaly;
 }
 envmapinfo[12] =
 {
@@ -1857,27 +1297,33 @@ envmapinfo[12] =
 	{{ 90, 180, 0}, "nz", false, false,  true}
 };
 
-static void R_Envmap_f (void)
+static void R_Envmap_f(cmd_state_t *cmd)
 {
 	int j, size;
 	char filename[MAX_QPATH], basename[MAX_QPATH];
 	unsigned char *buffer1;
 	unsigned char *buffer2;
+	r_rendertarget_t *rt;
 
-	if (Cmd_Argc() != 3)
+	if (Cmd_Argc(cmd) != 3)
 	{
 		Con_Print("envmap <basename> <size>: save out 6 cubic environment map images, usable with loadsky, note that size must one of 128, 256, 512, or 1024 and can't be bigger than your current resolution\n");
 		return;
 	}
 
-	strlcpy (basename, Cmd_Argv(1), sizeof (basename));
-	size = atoi(Cmd_Argv(2));
+	if(cls.state != ca_connected) {
+		Con_Printf("envmap: No map loaded\n");
+		return;
+	}
+
+	dp_strlcpy (basename, Cmd_Argv(cmd, 1), sizeof (basename));
+	size = atoi(Cmd_Argv(cmd, 2));
 	if (size != 128 && size != 256 && size != 512 && size != 1024)
 	{
 		Con_Print("envmap: size must be one of 128, 256, 512, or 1024\n");
 		return;
 	}
-	if (size > vid.width || size > vid.height)
+	if (size > vid.mode.width || size > vid.mode.height)
 	{
 		Con_Print("envmap: your resolution is not big enough to render that size\n");
 		return;
@@ -1895,6 +1341,8 @@ static void R_Envmap_f (void)
 	r_refdef.view.depth = 1;
 	r_refdef.view.useperspective = true;
 	r_refdef.view.isoverlay = false;
+	r_refdef.view.ismain = true;
+	VectorClear(r_refdef.view.velocity);
 
 	r_refdef.view.frustum_x = 1; // tan(45 * M_PI / 180.0);
 	r_refdef.view.frustum_y = 1; // tan(45 * M_PI / 180.0);
@@ -1904,6 +1352,8 @@ static void R_Envmap_f (void)
 	buffer1 = (unsigned char *)Mem_Alloc(tempmempool, size * size * 4);
 	buffer2 = (unsigned char *)Mem_Alloc(tempmempool, size * size * 3);
 
+	// TODO: use TEXTYPE_COLORBUFFER16F and output to .exr files as well?
+	rt = R_RenderTarget_Get(size, size, TEXTYPE_DEPTHBUFFER24STENCIL8, true, TEXTYPE_COLORBUFFER, TEXTYPE_UNUSED, TEXTYPE_UNUSED, TEXTYPE_UNUSED);
 	CL_UpdateEntityShading();
 	for (j = 0;j < 12;j++)
 	{
@@ -1912,9 +1362,9 @@ static void R_Envmap_f (void)
 		r_refdef.view.quality = 1;
 		r_refdef.view.clear = true;
 		R_Mesh_Start();
-		R_RenderView();
+		R_RenderView(rt->fbo, rt->depthtexture, rt->colortexture[0], 0, 0, size, size);
 		R_Mesh_Finish();
-		SCR_ScreenShot(filename, buffer1, buffer2, 0, vid.height - (r_refdef.view.y + r_refdef.view.height), size, size, envmapinfo[j].flipx, envmapinfo[j].flipy, envmapinfo[j].flipdiagonaly, false, false, false, false);
+		SCR_ScreenShot(filename, buffer1, buffer2, 0, vid.mode.height - (r_refdef.view.y + r_refdef.view.height), size, size, envmapinfo[j].flipx, envmapinfo[j].flipy, envmapinfo[j].flipdiagonaly, false, false, false, false);
 	}
 
 	Mem_Free (buffer1);
@@ -1943,9 +1393,9 @@ void SHOWLMP_decodeshow(void)
 	int k;
 	char lmplabel[256], picname[256];
 	float x, y;
-	strlcpy (lmplabel,MSG_ReadString(&cl_message, cl_readstring, sizeof(cl_readstring)), sizeof (lmplabel));
-	strlcpy (picname, MSG_ReadString(&cl_message, cl_readstring, sizeof(cl_readstring)), sizeof (picname));
-	if (gamemode == GAME_NEHAHRA) // LordHavoc: nasty old legacy junk
+	dp_strlcpy (lmplabel,MSG_ReadString(&cl_message, cl_readstring, sizeof(cl_readstring)), sizeof (lmplabel));
+	dp_strlcpy (picname, MSG_ReadString(&cl_message, cl_readstring, sizeof(cl_readstring)), sizeof (picname));
+	if (gamemode == GAME_NEHAHRA) // LadyHavoc: nasty old legacy junk
 	{
 		x = MSG_ReadByte(&cl_message);
 		y = MSG_ReadByte(&cl_message);
@@ -1975,8 +1425,8 @@ void SHOWLMP_decodeshow(void)
 			if (!cl.showlmps[k].isactive)
 				break;
 	cl.showlmps[k].isactive = true;
-	strlcpy (cl.showlmps[k].label, lmplabel, sizeof (cl.showlmps[k].label));
-	strlcpy (cl.showlmps[k].pic, picname, sizeof (cl.showlmps[k].pic));
+	dp_strlcpy (cl.showlmps[k].label, lmplabel, sizeof (cl.showlmps[k].label));
+	dp_strlcpy (cl.showlmps[k].pic, picname, sizeof (cl.showlmps[k].pic));
 	cl.showlmps[k].x = x;
 	cl.showlmps[k].y = y;
 	cl.num_showlmps = max(cl.num_showlmps, k + 1);
@@ -2000,10 +1450,10 @@ void SHOWLMP_drawall(void)
 
 // buffer1: 4*w*h
 // buffer2: 3*w*h (or 4*w*h if screenshotting alpha too)
-qboolean SCR_ScreenShot(char *filename, unsigned char *buffer1, unsigned char *buffer2, int x, int y, int width, int height, qboolean flipx, qboolean flipy, qboolean flipdiagonal, qboolean jpeg, qboolean png, qboolean gammacorrect, qboolean keep_alpha)
+qbool SCR_ScreenShot(char *filename, unsigned char *buffer1, unsigned char *buffer2, int x, int y, int width, int height, qbool flipx, qbool flipy, qbool flipdiagonal, qbool jpeg, qbool png, qbool gammacorrect, qbool keep_alpha)
 {
 	int	indices[4] = {0,1,2,3}; // BGRA
-	qboolean ret;
+	qbool ret;
 
 	GL_ReadPixelsBGRA(x, y, width, height, buffer1);
 
@@ -2080,9 +1530,9 @@ static void SCR_DrawTouchscreenOverlay(void)
 			DrawQ_Fill(a->rect[0] +              1, a->rect[1] + a->rect[3] - 2, a->rect[2] - 2,          1    , 1, 1, 1, vid_touchscreen_outlinealpha.value * (0.5f + 0.5f * a->active), 0);
 			DrawQ_Fill(a->rect[0] +              2, a->rect[1] + a->rect[3] - 1, a->rect[2] - 4,          1    , 1, 1, 1, vid_touchscreen_outlinealpha.value * (0.5f + 0.5f * a->active), 0);
 		}
-		pic = a->pic ? Draw_CachePic(a->pic) : NULL;
-		if (pic && pic->tex != r_texture_notexture)
-			DrawQ_Pic(a->rect[0], a->rect[1], Draw_CachePic(a->pic), a->rect[2], a->rect[3], 1, 1, 1, vid_touchscreen_overlayalpha.value * (0.5f + 0.5f * a->active), 0);
+		pic = a->pic ? Draw_CachePic_Flags(a->pic, CACHEPICFLAG_FAILONMISSING) : NULL;
+		if (Draw_IsPicLoaded(pic))
+			DrawQ_Pic(a->rect[0], a->rect[1], pic, a->rect[2], a->rect[3], 1, 1, 1, vid_touchscreen_overlayalpha.value * (0.5f + 0.5f * a->active), 0);
 		if (a->text && a->text[0])
 		{
 			int textwidth = DrawQ_TextWidth(a->text, 0, a->textheight, a->textheight, false, FONT_CHAT);
@@ -2091,7 +1541,7 @@ static void SCR_DrawTouchscreenOverlay(void)
 	}
 }
 
-void R_ClearScreen(qboolean fogcolor)
+void R_ClearScreen(qbool fogcolor)
 {
 	float clearcolor[4];
 	if (scr_screenshot_alpha.integer)
@@ -2106,28 +1556,45 @@ void R_ClearScreen(qboolean fogcolor)
 		VectorCopy(r_refdef.fogcolor, clearcolor);
 	}
 	// clear depth is 1.0
-	// LordHavoc: we use a stencil centered around 128 instead of 0,
-	// to avoid clamping interfering with strange shadow volume
-	// drawing orders
 	// clear the screen
-	GL_Clear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | (vid.stencil ? GL_STENCIL_BUFFER_BIT : 0), clearcolor, 1.0f, 128);
+	GL_Clear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | (vid.stencil ? GL_STENCIL_BUFFER_BIT : 0), clearcolor, 1.0f, 0);
 }
 
 int r_stereo_side;
+extern cvar_t v_isometric;
+extern cvar_t v_isometric_verticalfov;
 
+typedef struct loadingscreenstack_s
+{
+	struct loadingscreenstack_s *prev;
+	char msg[MAX_QPATH];
+	float absolute_loading_amount_min; // this corresponds to relative completion 0 of this item
+	float absolute_loading_amount_len; // this corresponds to relative completion 1 of this item
+	float relative_completion; // 0 .. 1
+}
+loadingscreenstack_t;
+static loadingscreenstack_t *loadingscreenstack = NULL;
+rtexture_t *loadingscreentexture = NULL; // last framebuffer before loading screen, kept for the background
+static float loadingscreentexture_vertex3f[12];
+static float loadingscreentexture_texcoord2f[8];
+static int loadingscreenpic_number = 0;
+/// User-friendly connection status for the menu and/or loading screen,
+/// colours and \n not supported.
+char cl_connect_status[MAX_QPATH]; // should match size of loadingscreenstack_t msg[]
+
+static void SCR_DrawLoadingScreen(void);
 static void SCR_DrawScreen (void)
 {
 	Draw_Frame();
-
+	DrawQ_Start();
 	R_Mesh_Start();
-
 	R_UpdateVariables();
 
 	// Quake uses clockwise winding, so these are swapped
 	r_refdef.view.cullface_front = GL_BACK;
 	r_refdef.view.cullface_back = GL_FRONT;
 
-	if (cls.signon == SIGNONS)
+	if (!scr_loading && cls.signon == SIGNONS)
 	{
 		float size;
 
@@ -2136,55 +1603,55 @@ static void SCR_DrawScreen (void)
 
 		if (r_stereo_sidebyside.integer)
 		{
-			r_refdef.view.width = (int)(vid.width * size / 2.5);
-			r_refdef.view.height = (int)(vid.height * size / 2.5 * (1 - bound(0, r_letterbox.value, 100) / 100));
+			r_refdef.view.width = (int)(vid.mode.width * size / 2.5);
+			r_refdef.view.height = (int)(vid.mode.height * size / 2.5 * (1 - bound(0, r_letterbox.value, 100) / 100));
 			r_refdef.view.depth = 1;
-			r_refdef.view.x = (int)((vid.width - r_refdef.view.width * 2.5) * 0.5);
-			r_refdef.view.y = (int)((vid.height - r_refdef.view.height)/2);
+			r_refdef.view.x = (int)((vid.mode.width - r_refdef.view.width * 2.5) * 0.5);
+			r_refdef.view.y = (int)((vid.mode.height - r_refdef.view.height)/2);
 			r_refdef.view.z = 0;
 			if (r_stereo_side)
 				r_refdef.view.x += (int)(r_refdef.view.width * 1.5);
 		}
 		else if (r_stereo_horizontal.integer)
 		{
-			r_refdef.view.width = (int)(vid.width * size / 2);
-			r_refdef.view.height = (int)(vid.height * size * (1 - bound(0, r_letterbox.value, 100) / 100));
+			r_refdef.view.width = (int)(vid.mode.width * size / 2);
+			r_refdef.view.height = (int)(vid.mode.height * size * (1 - bound(0, r_letterbox.value, 100) / 100));
 			r_refdef.view.depth = 1;
-			r_refdef.view.x = (int)((vid.width - r_refdef.view.width * 2.0)/2);
-			r_refdef.view.y = (int)((vid.height - r_refdef.view.height)/2);
+			r_refdef.view.x = (int)((vid.mode.width - r_refdef.view.width * 2.0)/2);
+			r_refdef.view.y = (int)((vid.mode.height - r_refdef.view.height)/2);
 			r_refdef.view.z = 0;
 			if (r_stereo_side)
 				r_refdef.view.x += (int)(r_refdef.view.width);
 		}
 		else if (r_stereo_vertical.integer)
 		{
-			r_refdef.view.width = (int)(vid.width * size);
-			r_refdef.view.height = (int)(vid.height * size * (1 - bound(0, r_letterbox.value, 100) / 100) / 2);
+			r_refdef.view.width = (int)(vid.mode.width * size);
+			r_refdef.view.height = (int)(vid.mode.height * size * (1 - bound(0, r_letterbox.value, 100) / 100) / 2);
 			r_refdef.view.depth = 1;
-			r_refdef.view.x = (int)((vid.width - r_refdef.view.width)/2);
-			r_refdef.view.y = (int)((vid.height - r_refdef.view.height * 2.0)/2);
+			r_refdef.view.x = (int)((vid.mode.width - r_refdef.view.width)/2);
+			r_refdef.view.y = (int)((vid.mode.height - r_refdef.view.height * 2.0)/2);
 			r_refdef.view.z = 0;
 			if (r_stereo_side)
 				r_refdef.view.y += (int)(r_refdef.view.height);
 		}
 		else
 		{
-			r_refdef.view.width = (int)(vid.width * size);
-			r_refdef.view.height = (int)(vid.height * size * (1 - bound(0, r_letterbox.value, 100) / 100));
+			r_refdef.view.width = (int)(vid.mode.width * size);
+			r_refdef.view.height = (int)(vid.mode.height * size * (1 - bound(0, r_letterbox.value, 100) / 100));
 			r_refdef.view.depth = 1;
-			r_refdef.view.x = (int)((vid.width - r_refdef.view.width)/2);
-			r_refdef.view.y = (int)((vid.height - r_refdef.view.height)/2);
+			r_refdef.view.x = (int)((vid.mode.width - r_refdef.view.width)/2);
+			r_refdef.view.y = (int)((vid.mode.height - r_refdef.view.height)/2);
 			r_refdef.view.z = 0;
 		}
 
-		// LordHavoc: viewzoom (zoom in for sniper rifles, etc)
-		// LordHavoc: this is designed to produce widescreen fov values
+		// LadyHavoc: viewzoom (zoom in for sniper rifles, etc)
+		// LadyHavoc: this is designed to produce widescreen fov values
 		// when the screen is wider than 4/3 width/height aspect, to do
 		// this it simply assumes the requested fov is the vertical fov
 		// for a 4x3 display, if the ratio is not 4x3 this makes the fov
 		// higher/lower according to the ratio
 		r_refdef.view.useperspective = true;
-		r_refdef.view.frustum_y = tan(scr_fov.value * M_PI / 360.0) * (3.0/4.0) * cl.viewzoom;
+		r_refdef.view.frustum_y = tan(scr_fov.value * M_PI / 360.0) * (3.0 / 4.0) * cl.viewzoom;
 		r_refdef.view.frustum_x = r_refdef.view.frustum_y * (float)r_refdef.view.width / (float)r_refdef.view.height / vid_pixelheight.value;
 
 		r_refdef.view.frustum_x *= r_refdef.frustumscale_x;
@@ -2192,21 +1659,29 @@ static void SCR_DrawScreen (void)
 		r_refdef.view.ortho_x = atan(r_refdef.view.frustum_x) * (360.0 / M_PI); // abused as angle by VM_CL_R_SetView
 		r_refdef.view.ortho_y = atan(r_refdef.view.frustum_y) * (360.0 / M_PI); // abused as angle by VM_CL_R_SetView
 
+		r_refdef.view.ismain = true;
+
 		// if CSQC is loaded, it is required to provide the CSQC_UpdateView function,
 		// and won't render a view if it does not call that.
-		if (cl.csqc_loaded)
+		if (CLVM_prog->loaded && !(CLVM_prog->flag & PRVM_CSQC_SIMPLE))
 			CL_VM_UpdateView(r_stereo_side ? 0.0 : max(0.0, cl.time - cl.oldtime));
 		else
 		{
+			// Prepare the scene mesh for rendering - this is lightning beams and other effects rendered as normal surfaces
+			CL_MeshEntities_Scene_FinalizeRenderEntity();
+
 			CL_UpdateEntityShading();
-			R_RenderView();
+			R_RenderView(0, NULL, NULL, r_refdef.view.x, r_refdef.view.y, r_refdef.view.width, r_refdef.view.height);
 		}
 	}
 
+	// Don't apply debugging stuff like r_showsurfaces to the UI
+	r_refdef.view.showdebug = false;
+
 	if (!r_stereo_sidebyside.integer && !r_stereo_horizontal.integer && !r_stereo_vertical.integer)
 	{
-		r_refdef.view.width = vid.width;
-		r_refdef.view.height = vid.height;
+		r_refdef.view.width = vid.mode.width;
+		r_refdef.view.height = vid.mode.height;
 		r_refdef.view.depth = 1;
 		r_refdef.view.x = 0;
 		r_refdef.view.y = 0;
@@ -2238,76 +1713,90 @@ static void SCR_DrawScreen (void)
 			unsigned char *buffer1;
 			unsigned char *buffer2;
 			dpsnprintf(filename, sizeof(filename), "timedemoscreenshots/%s%06d.tga", cls.demoname, cls.td_frames);
-			buffer1 = (unsigned char *)Mem_Alloc(tempmempool, vid.width * vid.height * 4);
-			buffer2 = (unsigned char *)Mem_Alloc(tempmempool, vid.width * vid.height * 3);
-			SCR_ScreenShot(filename, buffer1, buffer2, 0, 0, vid.width, vid.height, false, false, false, false, false, true, false);
+			buffer1 = (unsigned char *)Mem_Alloc(tempmempool, vid.mode.width * vid.mode.height * 4);
+			buffer2 = (unsigned char *)Mem_Alloc(tempmempool, vid.mode.width * vid.mode.height * 3);
+			SCR_ScreenShot(filename, buffer1, buffer2, 0, 0, vid.mode.width, vid.mode.height, false, false, false, false, false, true, false);
 			Mem_Free(buffer1);
 			Mem_Free(buffer2);
 		}
 	}
 
 	// draw 2D stuff
+
 	if(!scr_con_current && !(key_consoleactive & KEY_CONSOLEACTIVE_FORCED))
-		if ((key_dest == key_game || key_dest == key_message) && !r_letterbox.value)
+		if ((key_dest == key_game || key_dest == key_message) && !r_letterbox.value && !scr_loading)
 			Con_DrawNotify ();	// only draw notify in game
 
-	if (cls.signon == SIGNONS)
+	if (cl.islocalgame && (key_dest != key_game || key_consoleactive))
+		host.paused = true;
+	else
+		host.paused = false;
+
+	if (!scr_loading && cls.signon == SIGNONS)
 	{
 		SCR_DrawNet ();
 		SCR_DrawTurtle ();
 		SCR_DrawPause ();
 		if (!r_letterbox.value)
+		{
 			Sbar_Draw();
+			if (CLVM_prog->loaded && CLVM_prog->flag & PRVM_CSQC_SIMPLE)
+				CL_VM_DrawHud(r_stereo_side ? 0.0 : max(0.0, cl.time - cl.oldtime));
+		}
 		SHOWLMP_drawall();
 		SCR_CheckDrawCenterString();
 	}
 	CL_Lua_DrawHUD();
 	SCR_DrawNetGraph ();
 #ifdef CONFIG_MENU
-	MR_Draw();
-	UI_RML_Draw(); // Insanotic: RmlUi documents above the QuakeC menu
+	if(!scr_loading)
+	{
+		MR_Draw();
+		UI_RML_Draw(); // Insanotic: RmlUi documents above the QuakeC menu
+	}
 #endif
 	CL_DrawVideo();
 	R_Shadow_EditLights_DrawSelectedLightProperties();
 
+	if (scr_loading)
+	{
+		// connect_status replaces any dummy_status
+		if ((!loadingscreenstack || loadingscreenstack->msg[0] == '\0') && cl_connect_status[0] != '\0')
+		{
+			loadingscreenstack_t connect_status, *og_ptr = loadingscreenstack;
+
+			connect_status.absolute_loading_amount_min = 0;
+			dp_strlcpy(connect_status.msg, cl_connect_status, sizeof(cl_connect_status));
+			loadingscreenstack = &connect_status;
+			SCR_DrawLoadingScreen();
+			loadingscreenstack = og_ptr;
+		}
+		else
+			SCR_DrawLoadingScreen();
+	}
+
 	SCR_DrawConsole();
-
-	SCR_DrawBrand();
-
 	SCR_DrawInfobar();
 
-	if (!cl_lua_touch_captured)
-		SCR_DrawTouchscreenOverlay();
-
+	if (!scr_loading)
+	{
+		SCR_DrawBrand();
+		if (!cl_lua_touch_captured)
+			SCR_DrawTouchscreenOverlay();
+	}
 	if (r_timereport_active)
 		R_TimeReport("2d");
 
 	R_TimeReport_EndFrame();
 	R_TimeReport_BeginFrame();
-	Sbar_ShowFPS();
-
-	DrawQ_Finish();
+	
+	if(!scr_loading)
+		Sbar_ShowFPS();
 
 	R_Mesh_Finish();
+	DrawQ_Finish();
+	R_RenderTarget_FreeUnused(false);
 }
-
-typedef struct loadingscreenstack_s
-{
-	struct loadingscreenstack_s *prev;
-	char msg[MAX_QPATH];
-	float absolute_loading_amount_min; // this corresponds to relative completion 0 of this item
-	float absolute_loading_amount_len; // this corresponds to relative completion 1 of this item
-	float relative_completion; // 0 .. 1
-}
-loadingscreenstack_t;
-static loadingscreenstack_t *loadingscreenstack = NULL;
-static qboolean loadingscreendone = false;
-static qboolean loadingscreencleared = false;
-static float loadingscreenheight = 0;
-rtexture_t *loadingscreentexture = NULL;
-static float loadingscreentexture_vertex3f[12];
-static float loadingscreentexture_texcoord2f[8];
-static int loadingscreenpic_number = 0;
 
 static void SCR_ClearLoadingScreenTexture(void)
 {
@@ -2325,20 +1814,11 @@ static void SCR_SetLoadingScreenTexture(void)
 
 	SCR_ClearLoadingScreenTexture();
 
-	if (vid.support.arb_texture_non_power_of_two)
-	{
-		w = vid.width; h = vid.height;
-		loadingscreentexture_w = loadingscreentexture_h = 1;
-	}
-	else
-	{
-		w = CeilPowerOf2(vid.width); h = CeilPowerOf2(vid.height);
-		loadingscreentexture_w = vid.width / (float) w;
-		loadingscreentexture_h = vid.height / (float) h;
-	}
+	w = vid.mode.width; h = vid.mode.height;
+	loadingscreentexture_w = loadingscreentexture_h = 1;
 
 	loadingscreentexture = R_LoadTexture2D(r_main_texturepool, "loadingscreentexture", w, h, NULL, TEXTYPE_COLORBUFFER, TEXF_RENDERTARGET | TEXF_FORCENEAREST | TEXF_CLAMP, -1, NULL);
-	R_Mesh_CopyToTexture(loadingscreentexture, 0, 0, 0, 0, vid.width, vid.height);
+	R_Mesh_CopyToTexture(loadingscreentexture, 0, 0, 0, 0, vid.mode.width, vid.mode.height);
 
 	loadingscreentexture_vertex3f[2] = loadingscreentexture_vertex3f[5] = loadingscreentexture_vertex3f[8] = loadingscreentexture_vertex3f[11] = 0;
 	loadingscreentexture_vertex3f[0] = loadingscreentexture_vertex3f[9] = 0;
@@ -2351,19 +1831,84 @@ static void SCR_SetLoadingScreenTexture(void)
 	loadingscreentexture_texcoord2f[6] = 0;loadingscreentexture_texcoord2f[7] = 0;
 }
 
-void SCR_UpdateLoadingScreenIfShown(void)
+static void SCR_ChooseLoadingPic(qbool startup)
 {
-	if(loadingscreendone)
-		SCR_UpdateLoadingScreen(loadingscreencleared, false);
+	if(startup && scr_loadingscreen_firstforstartup.integer)
+		loadingscreenpic_number = 0;
+	else if(scr_loadingscreen_firstforstartup.integer)
+		if(scr_loadingscreen_count.integer > 1)
+			loadingscreenpic_number = rand() % (scr_loadingscreen_count.integer - 1) + 1;
+		else
+			loadingscreenpic_number = 0;
+	else
+		loadingscreenpic_number = rand() % (scr_loadingscreen_count.integer > 1 ? scr_loadingscreen_count.integer : 1);
 }
 
-void SCR_PushLoadingScreen (qboolean redraw, const char *msg, float len_in_parent)
+/*
+===============
+SCR_BeginLoadingPlaque
+
+================
+*/
+void SCR_BeginLoadingPlaque(qbool startup)
+{
+	loadingscreenstack_t dummy_status;
+
+	// we need to push a dummy status so CL_UpdateScreen knows we have things to load...
+	if (!loadingscreenstack)
+	{
+		dummy_status.msg[0] = '\0';
+		dummy_status.absolute_loading_amount_min = 0;
+		loadingscreenstack = &dummy_status;
+	}
+
+	SCR_DeferLoadingPlaque(startup);
+	if (scr_loadingscreen_background.integer)
+		SCR_SetLoadingScreenTexture();
+	CL_UpdateScreen();
+
+	if (loadingscreenstack == &dummy_status)
+		loadingscreenstack = NULL;
+}
+
+static float loading_progress;           // shown fraction, never decreases
+static qbool loading_isstartup;       // the game is starting (no map)
+static double loading_starttime;
+static char loading_levelshot_map[MAX_QPATH];
+static cachepic_t *loading_levelshot;    // NULL when the map has none
+
+void SCR_DeferLoadingPlaque(qbool startup)
+{
+	if (!scr_loading)
+	{
+		loading_isstartup = startup;
+		loading_starttime = Sys_DirtyTime();
+		loading_progress = 0;
+	}
+	SCR_ChooseLoadingPic(startup);
+	scr_loading = true;
+}
+
+void SCR_EndLoadingPlaque(void)
+{
+	// remember how long the game took to start, for the next start's bar
+	if (scr_loading && loading_isstartup)
+		Cvar_SetValueQuick(&scr_loadingscreen_startuptime, (float)(Sys_DirtyTime() - loading_starttime));
+	loading_isstartup = false;
+	loading_progress = 0;
+	scr_loading = false;
+	SCR_ClearLoadingScreenTexture();
+}
+
+//=============================================================================
+
+void SCR_PushLoadingScreen (const char *msg, float len_in_parent)
 {
 	loadingscreenstack_t *s = (loadingscreenstack_t *) Z_Malloc(sizeof(loadingscreenstack_t));
 	s->prev = loadingscreenstack;
 	loadingscreenstack = s;
 
-	strlcpy(s->msg, msg, sizeof(s->msg));
+	dp_strlcpy(s->msg, msg, sizeof(s->msg));
 	s->relative_completion = 0;
 
 	if(s->prev)
@@ -2379,11 +1924,11 @@ void SCR_PushLoadingScreen (qboolean redraw, const char *msg, float len_in_paren
 		s->absolute_loading_amount_len = 1;
 	}
 
-	if(redraw)
-		SCR_UpdateLoadingScreenIfShown();
+	if (scr_loading)
+		CL_UpdateScreen();
 }
 
-void SCR_PopLoadingScreen (qboolean redraw)
+void SCR_PopLoadingScreen (qbool redraw)
 {
 	loadingscreenstack_t *s = loadingscreenstack;
 
@@ -2398,11 +1943,11 @@ void SCR_PopLoadingScreen (qboolean redraw)
 		s->prev->relative_completion = (s->absolute_loading_amount_min + s->absolute_loading_amount_len - s->prev->absolute_loading_amount_min) / s->prev->absolute_loading_amount_len;
 	Z_Free(s);
 
-	if(redraw)
-		SCR_UpdateLoadingScreenIfShown();
+	if (scr_loading && redraw)
+		CL_UpdateScreen();
 }
 
-void SCR_ClearLoadingScreen (qboolean redraw)
+void SCR_ClearLoadingScreen (qbool redraw)
 {
 	while(loadingscreenstack)
 		SCR_PopLoadingScreen(redraw && !loadingscreenstack->prev);
@@ -2425,7 +1970,6 @@ static float SCR_DrawLoadingStack_r(loadingscreenstack_t *s, float y, float size
 			len = strlen(s->msg);
 			x = (vid_conwidth.integer - DrawQ_TextWidth(s->msg, len, size, size, true, FONT_INFOBAR)) / 2;
 			y -= size;
-			DrawQ_Fill(0, y, vid_conwidth.integer, size, 0, 0, 0, 1, 0);
 			DrawQ_String(x, y, s->msg, len, size, size, 1, 1, 1, 1, 0, NULL, true, FONT_INFOBAR);
 			total += size;
 		}
@@ -2436,7 +1980,6 @@ static float SCR_DrawLoadingStack_r(loadingscreenstack_t *s, float y, float size
 		len = strlen(s->msg);
 		x = (vid_conwidth.integer - DrawQ_TextWidth(s->msg, len, size, size, true, FONT_INFOBAR)) / 2;
 		y -= size;
-		DrawQ_Fill(0, y, vid_conwidth.integer, size, 0, 0, 0, 1, 0);
 		DrawQ_String(x, y, s->msg, len, size, size, 1, 1, 1, 1, 0, NULL, true, FONT_INFOBAR);
 		total += size;
 	}
@@ -2449,7 +1992,7 @@ static void SCR_DrawLoadingStack(void)
 	float verts[12];
 	float colors[16];
 
-	loadingscreenheight = SCR_DrawLoadingStack_r(loadingscreenstack, vid_conheight.integer, scr_loadingscreen_barheight.value);
+	SCR_DrawLoadingStack_r(loadingscreenstack, vid_conheight.integer, scr_loadingscreen_barheight.value);
 	if(loadingscreenstack)
 	{
 		// height = 32; // sorry, using the actual one is ugly
@@ -2457,7 +2000,7 @@ static void SCR_DrawLoadingStack(void)
 		GL_DepthRange(0, 1);
 		GL_PolygonOffset(0, 0);
 		GL_DepthTest(false);
-//		R_Mesh_ResetTextureState();
+		//R_Mesh_ResetTextureState();
 		verts[2] = verts[5] = verts[8] = verts[11] = 0;
 		verts[0] = verts[9] = 0;
 		verts[1] = verts[4] = vid_conheight.integer - scr_loadingscreen_barheight.value;
@@ -2467,9 +2010,6 @@ static void SCR_DrawLoadingStack(void)
 #if _MSC_VER >= 1400
 #define sscanf sscanf_s
 #endif
-		//                                        ^^^^^^^^^^ blue component
-		//                              ^^^^^^ bottom row
-		//          ^^^^^^^^^^^^ alpha is always on
 		colors[0] = 0; colors[1] = 0; colors[2] = 0; colors[3] = 1;
 		colors[4] = 0; colors[5] = 0; colors[6] = 0; colors[7] = 1;
 		sscanf(scr_loadingscreen_barcolor.string, "%f %f %f", &colors[8], &colors[9], &colors[10]); colors[11] = 1;
@@ -2478,42 +2018,373 @@ static void SCR_DrawLoadingStack(void)
 		R_Mesh_PrepareVertices_Generic_Arrays(4, verts, colors, NULL);
 		R_SetupShader_Generic_NoTexture(true, true);
 		R_Mesh_Draw(0, 4, 0, 2, polygonelement3i, NULL, 0, polygonelement3s, NULL, 0);
-
-		// make sure everything is cleared, including the progress indicator
-		if(loadingscreenheight < 8)
-			loadingscreenheight = 8;
 	}
 }
 
-static cachepic_t *loadingscreenpic;
-static float loadingscreenpic_vertex3f[12];
-static float loadingscreenpic_texcoord2f[8];
+//============================================================================
+// Insanotic loading screen: one screen from "connect" or "map" until the
+// game is drawn, with the map's picture, the current stage and a single
+// progress bar that only moves forward across all stages
 
-static void SCR_DrawLoadingScreen_SharedSetup (qboolean clear)
+
+// map being loaded, "" while unknown
+static const char *SCR_LoadingMapName(void)
 {
-	r_viewport_t viewport;
+	if (cls.connect_trying)
+		return "";
+	if (sv.active || sv.state == ss_loading)
+		if (sv.worldbasename[0])
+			return sv.worldbasename;
+	if (cls.state == ca_connected && cl.worldbasename[0])
+		return cl.worldbasename;
+	return "";
+}
+
+// stage (what the player is waiting for), detail (file being loaded) and
+// the fraction of the whole load
+// download speed as "450 KB/s" / "1.2 MB/s"
+static void SCR_FormatRate(char *out, size_t outsize, double bytes_per_second)
+{
+	if (bytes_per_second <= 0)
+		dp_strlcpy(out, "", outsize);
+	else if (bytes_per_second >= 1048576)
+		dpsnprintf(out, outsize, "%.1f MB/s", bytes_per_second / 1048576.0);
+	else
+		dpsnprintf(out, outsize, "%.0f KB/s", bytes_per_second / 1024.0);
+}
+
+// when the current batch of HTTP downloads started (0: none running)
+static double scr_download_batch_start;
+
+// time left as "0:42 left" / "12:05 left" ("" when unknown)
+static void SCR_FormatTimeLeft(char *out, size_t outsize, double seconds)
+{
+	int t;
+	if (seconds < 0 || seconds > 99 * 3600)
+	{
+		dp_strlcpy(out, "", outsize);
+		return;
+	}
+	t = (int)(seconds + 0.5);
+	if (t >= 3600)
+		dpsnprintf(out, outsize, "%i:%02i:%02i left", t / 3600, (t / 60) % 60, t % 60);
+	else
+		dpsnprintf(out, outsize, "%i:%02i left", t / 60, t % 60);
+}
+
+static float SCR_LoadingStage(char *stage, size_t stagesize, char *detail, size_t detailsize)
+{
+	loadingscreenstack_t *s = loadingscreenstack;
+	float stack = s ? s->absolute_loading_amount_min : 0;
+	detail[0] = 0;
+	if (s && strcmp(s->msg, "world model setup"))
+	{
+		const char *slash = strrchr(s->msg, '/');
+		dp_strlcpy(detail, slash ? slash + 1 : s->msg, detailsize);
+	}
+	if (cls.connect_trying)
+	{
+		dp_strlcpy(stage, "Connecting", stagesize);
+		return 0.02f;
+	}
+	if (cls.state == ca_connected)
+	{
+		// downloads first, at any signon stage: the game connection's own
+		// download (the only one where libcurl is missing, as on Android)
+		// and HTTP downloads through libcurl
+		if (cls.qw_downloadname[0])
+		{
+			// the game connection's own download: one file at a time
+			const char *slash = strrchr(cls.qw_downloadname, '/');
+			char rate[32], left[32];
+			int have = cls.qw_downloadmemorycursize, total = cls.qw_downloadmemorymaxsize;
+			SCR_FormatRate(rate, sizeof(rate), cls.qw_downloadspeedrate);
+			SCR_FormatTimeLeft(left, sizeof(left), total > have && cls.qw_downloadspeedrate > 0 ? (total - have) / (double)cls.qw_downloadspeedrate : -1);
+			dp_strlcpy(stage, "Downloading", stagesize);
+			if (total > 0)
+				dpsnprintf(detail, detailsize, "%s   %.1f / %.1f MB   %s   %s", slash ? slash + 1 : cls.qw_downloadname,
+					have / 1048576.0, total / 1048576.0, rate, left);
+			else
+				dpsnprintf(detail, detailsize, "%s   %s", slash ? slash + 1 : cls.qw_downloadname, rate);
+			// downloads fill 20 % to 40 % of the bar (it never moves back,
+			// and connecting already reached 20 %)
+			return 0.20f + 0.20f * bound(0, cls.qw_downloadpercent, 100) / 100.0f;
+		}
+		if (!Curl_Running())
+			scr_download_batch_start = 0;
+		if (Curl_Running())
+		{
+			// HTTP downloads, several at once (cl_curl_maxdownloads): the
+			// whole batch as one progress, the speed of all together and the
+			// time left from how fast the batch has moved so far
+			int n = 0, i, done_or_running = 0;
+			double sum = 0, speed = 0, f, elapsed;
+			char rate[32], left[32];
+			Curl_downloadinfo_t *info = Curl_GetDownloadInfo(&n, NULL, NULL, 0);
+			if (!scr_download_batch_start)
+				scr_download_batch_start = host.realtime;
+			dp_strlcpy(stage, "Downloading", stagesize);
+			for (i = 0; info && i < n; i++)
+			{
+				if (!info[i].queued)
+				{
+					done_or_running++;
+					sum += bound(0, info[i].progress, 1);
+					speed += info[i].speed;
+				}
+			}
+			f = n > 0 ? sum / n : 0;
+			elapsed = host.realtime - scr_download_batch_start;
+			SCR_FormatRate(rate, sizeof(rate), speed);
+			SCR_FormatTimeLeft(left, sizeof(left), f > 0.01 && elapsed > 1 ? elapsed * (1 - f) / f : -1);
+			dpsnprintf(detail, detailsize, "%i file%s   %i%%   %s   %s", n, n == 1 ? "" : "s", (int)(100 * f), rate, left);
+			if (info)
+				Z_Free(info);
+			(void)done_or_running;
+			return 0.20f + 0.20f * (float)f;
+		}
+		switch (cls.signon)
+		{
+		case 0:
+			// only our own listen server is "starting"; sv.state can be left
+			// over from an earlier local game while joining someone else's
+			if (sv.active && sv.state == ss_loading)
+			{
+				dp_strlcpy(stage, "Starting the server", stagesize);
+				return 0.02f + 0.18f * stack;
+			}
+			dp_strlcpy(stage, "Receiving server info", stagesize);
+			return 0.20f;
+		case 1:
+			if (s)
+			{
+				// the stage is the entry just above the bottom one
+				// ("Loading precaches" > "Loading precached models" > file)
+				loadingscreenstack_t *bottom = s, *above = NULL;
+				const char *msg;
+				while (bottom->prev)
+				{
+					above = bottom;
+					bottom = bottom->prev;
+				}
+				msg = above ? above->msg : bottom->msg;
+				if (!strcmp(msg, "Loading precached models"))
+					msg = "Loading models";
+				else if (!strcmp(msg, "Loading precached sounds"))
+					msg = "Loading sounds";
+				else if (!strcmp(msg, "world model setup"))
+					msg = "Preparing the map";
+				dp_strlcpy(stage, msg, stagesize);
+			}
+			else
+				dp_strlcpy(stage, "Loading", stagesize);
+			return 0.22f + 0.70f * stack;
+		case 2:
+			dp_strlcpy(stage, "Joining the game", stagesize);
+			return 0.94f;
+		default:
+			dp_strlcpy(stage, "Joining the game", stagesize);
+			return 0.97f;
+		}
+	}
+	if (sv.active && sv.state == ss_loading)
+	{
+		dp_strlcpy(stage, "Starting the server", stagesize);
+		return 0.02f + 0.18f * stack;
+	}
+	dp_strlcpy(stage, s ? s->msg : "Loading", stagesize);
+	return stack;
+}
+
+// the main menu's earth background with the Xonotic logo centered (cut
+// from the menu's logo layer, which has no "Loading" text). When the menu
+// opens, it glides the logo from here to its place in the menu
+// (menu.qc, drawMenuIntroLogo: keep the numbers in step). A dark gradient
+// when the pictures are missing.
+#define LOADING_MENU_BACKGROUND "gfx/menu/luma/background"
+#define LOADING_MENU_LOGO "gfx/menu/luma/background_l2"
+// logo bounds inside the 2560x2048 logo layer
+#define LOADING_LOGO_S0 (30.0f / 2560)
+#define LOADING_LOGO_T0 (10.0f / 2048)
+#define LOADING_LOGO_S1 (1420.0f / 2560)
+#define LOADING_LOGO_T1 (470.0f / 2048)
+#define LOADING_LOGO_WIDTH 0.55f   // of the screen width
+#define LOADING_LOGO_Y 0.42f       // centre, of the screen height
+static void SCR_DrawInsanoticBackdrop(void)
+{
+	static int checked;
+	static cachepic_t *background, *logo;
+	float w = vid_conwidth.integer, h = vid_conheight.integer, f, lw, lh;
+	// console units are not always square pixels (the UI size need not have
+	// the window's shape): px is how many units wide one unit high is on
+	// screen, so pictures keep their proportions
+	float px = (vid.mode.width > 0 && vid.mode.height > 0) ? ((float)vid.mode.height / vid.mode.width) * (w / h) : 1;
+	int i, strips = 32;
+
+	if (!checked)
+	{
+		checked = true;
+		if (FS_FileExists(LOADING_MENU_BACKGROUND ".jpg") || FS_FileExists(LOADING_MENU_BACKGROUND ".tga"))
+			background = Draw_CachePic_Flags(LOADING_MENU_BACKGROUND, CACHEPICFLAG_QUIET);
+		if (FS_FileExists(LOADING_MENU_LOGO ".jpg") || FS_FileExists(LOADING_MENU_LOGO ".tga"))
+			logo = Draw_CachePic_Flags(LOADING_MENU_LOGO, CACHEPICFLAG_QUIET);
+	}
+	if (background && Draw_GetPicWidth(background) > 0 && Draw_GetPicHeight(background) > 0)
+	{
+		float bw = Draw_GetPicWidth(background) * px, bh = Draw_GetPicHeight(background);
+		f = max(w / bw, h / bh);
+		DrawQ_Pic((w - bw * f) / 2, (h - bh * f) / 2, background, bw * f, bh * f, 1, 1, 1, 1, 0);
+	}
+	else
+	{
+		for (i = 0; i < strips; i++)
+		{
+			// navy at the top fading to black, lighter in the middle
+			float y0 = floor(h * i / strips), y1 = floor(h * (i + 1) / strips);
+			float t = (float)i / (strips - 1), glow = 1 - fabs(t - 0.45f) * 2;
+			DrawQ_Fill(0, y0, w, y1 - y0, 0.02f + 0.04f * glow, 0.03f + 0.06f * glow, 0.06f + 0.12f * glow, 1, 0);
+		}
+	}
+	if (logo && Draw_GetPicWidth(logo) > 0 && Draw_GetPicHeight(logo) > 0)
+	{
+		lw = w * LOADING_LOGO_WIDTH;
+		// the layer is a 2560x2048 picture; use its real proportions (the
+		// texture may be stored at another size) so the logo keeps the
+		// shape the menu draws it with
+		lh = lw / px * ((LOADING_LOGO_T1 - LOADING_LOGO_T0) * 2048.0f) / ((LOADING_LOGO_S1 - LOADING_LOGO_S0) * 2560.0f);
+		DrawQ_SuperPic((w - lw) / 2, h * LOADING_LOGO_Y - lh / 2, logo, lw, lh,
+			LOADING_LOGO_S0, LOADING_LOGO_T0, 1, 1, 1, 1,
+			LOADING_LOGO_S1, LOADING_LOGO_T0, 1, 1, 1, 1,
+			LOADING_LOGO_S0, LOADING_LOGO_T1, 1, 1, 1, 1,
+			LOADING_LOGO_S1, LOADING_LOGO_T1, 1, 1, 1, 1, 0);
+	}
+}
+
+// game start: the menu's background with a thin bar near the bottom that
+// follows the time the last start took
+static void SCR_DrawInsanoticStartupScreen(void)
+{
+	float w = vid_conwidth.integer, h = vid_conheight.integer;
+	float barw = floor(w * 0.3f), barh = max(2, floor(h * 0.005f)), x, y, f;
+	float bar[3] = { 0.2f, 0.6f, 1.0f };
+
+	SCR_DrawInsanoticBackdrop();
+	sscanf(scr_loadingscreen_barcolor.string, "%f %f %f", &bar[0], &bar[1], &bar[2]);
+
+	f = (float)((Sys_DirtyTime() - loading_starttime) / max(0.2f, scr_loadingscreen_startuptime.value));
+	f = min(f, 0.95f);
+	if (f > loading_progress)
+		loading_progress = f;
+
+	y = floor(h * 0.9f);
+	x = (w - barw) / 2;
+	DrawQ_Fill(x, y, barw, barh, 0, 0, 0, 0.4f, 0);
+	DrawQ_Fill(x, y, barw * loading_progress, barh, bar[0], bar[1], bar[2], 1, 0);
+}
+
+static void SCR_DrawInsanoticLoadingScreen(void)
+{
+	float w = vid_conwidth.integer, h = vid_conheight.integer;
+	float margin = floor(h * 0.05f), title = floor(h * 0.055f), text = floor(h * 0.03f);
+	float barh = max(3, floor(h * 0.008f)), bary = h - margin - barh, f, x, y;
+	float bar[3] = { 0.2f, 0.6f, 1.0f };
+	const char *map = SCR_LoadingMapName();
+	char stage[128], detail[128], percent[16];
+	int i, strips = 24;
+
+	if (loading_isstartup && !map[0] && cls.state != ca_connected && !cls.connect_trying)
+	{
+		SCR_DrawInsanoticStartupScreen();
+		return;
+	}
+
+	// the map's own picture (maps/<name>.jpg ships with every map), else
+	// the game's loading picture
+	if (strcmp(map, loading_levelshot_map))
+	{
+		char name[MAX_QPATH + 8];
+		dp_strlcpy(loading_levelshot_map, map, sizeof(loading_levelshot_map));
+		loading_levelshot = NULL;
+		if (map[0])
+		{
+			dpsnprintf(name, sizeof(name), "maps/%s", map);
+			if (FS_FileExists(va(stage, sizeof(stage), "%s.jpg", name)) || FS_FileExists(va(stage, sizeof(stage), "%s.tga", name)) || FS_FileExists(va(stage, sizeof(stage), "%s.png", name)))
+				loading_levelshot = Draw_CachePic_Flags(name, CACHEPICFLAG_NOTPERSISTENT | CACHEPICFLAG_QUIET);
+		}
+	}
+	if (loading_levelshot && Draw_GetPicWidth(loading_levelshot) > 0 && Draw_GetPicHeight(loading_levelshot) > 0)
+	{
+		// cover the screen, keep the aspect
+		f = max(w / Draw_GetPicWidth(loading_levelshot), h / Draw_GetPicHeight(loading_levelshot));
+		DrawQ_Pic((w - Draw_GetPicWidth(loading_levelshot) * f) / 2, (h - Draw_GetPicHeight(loading_levelshot) * f) / 2, loading_levelshot, Draw_GetPicWidth(loading_levelshot) * f, Draw_GetPicHeight(loading_levelshot) * f, 0.75f, 0.75f, 0.75f, 1, 0);
+	}
+	else
+		SCR_DrawInsanoticBackdrop();
+
+	// darken the lower part for the text
+	for (i = 0; i < strips; i++)
+	{
+		float y0 = floor(h * 0.55f + (h * 0.45f) * i / strips);
+		float y1 = floor(h * 0.55f + (h * 0.45f) * (i + 1) / strips);
+		DrawQ_Fill(0, y0, w, y1 - y0, 0, 0, 0, 0.85f * (i + 1) / strips, 0);
+	}
+
+	f = SCR_LoadingStage(stage, sizeof(stage), detail, sizeof(detail));
+	if (f > loading_progress)
+		loading_progress = min(f, 1);
+	dpsnprintf(percent, sizeof(percent), "%d%%", (int)(loading_progress * 100));
+	sscanf(scr_loadingscreen_barcolor.string, "%f %f %f", &bar[0], &bar[1], &bar[2]);
+
+	// map name, stage and file on the left, percentage on the right
+	x = margin;
+	y = bary - margin * 0.5f - text - title;
+	if (map[0])
+	{
+		// the map's title once the server sent it, else its file name
+		const char *name = cls.state == ca_connected && cls.signon >= 1 && cl.worldmessage[0] ? cl.worldmessage : map;
+		DrawQ_String(x, y, name, 0, title, title, 1, 1, 1, 1, 0, NULL, false, FONT_INFOBAR);
+	}
+	y += title + text * 0.25f;
+	DrawQ_String(x, y, stage, 0, text, text, 0.85f, 0.85f, 0.85f, 1, 0, NULL, true, FONT_INFOBAR);
+	if (detail[0] && strcmp(detail, stage))
+		DrawQ_String(x + DrawQ_TextWidth(stage, 0, text, text, true, FONT_INFOBAR) + text, y, detail, 0, text, text, 0.55f, 0.55f, 0.55f, 1, 0, NULL, true, FONT_INFOBAR);
+	DrawQ_String(w - margin - DrawQ_TextWidth(percent, 0, title, title, true, FONT_INFOBAR), bary - margin * 0.5f - title, percent, 0, title, title, 1, 1, 1, 1, 0, NULL, true, FONT_INFOBAR);
+
+	// the bar
+	DrawQ_Fill(margin, bary, w - 2 * margin, barh, 1, 1, 1, 0.15f, 0);
+	DrawQ_Fill(margin, bary, (w - 2 * margin) * loading_progress, barh, bar[0], bar[1], bar[2], 1, 0);
+}
+
+static void SCR_DrawLoadingScreen (void)
+{
+	cachepic_t *loadingscreenpic;
+	float loadingscreenpic_vertex3f[12];
+	float loadingscreenpic_texcoord2f[8];
 	float x, y, w, h, sw, sh, f;
 	char vabuf[1024];
-	// release mouse grab while loading
-	if (!vid.fullscreen)
-		VID_SetMouse(false, false, false);
-//	CHECKGLERROR
-	r_refdef.draw2dstage = true;
-	R_Viewport_InitOrtho(&viewport, &identitymatrix, 0, 0, vid.width, vid.height, 0, 0, vid_conwidth.integer, vid_conheight.integer, -10, 100, NULL);
-	R_Mesh_SetRenderTargets(0, NULL, NULL, NULL, NULL, NULL);
-	R_SetViewport(&viewport);
-	GL_ColorMask(1,1,1,1);
-	// when starting up a new video mode, make sure the screen is cleared to black
-	if (clear || loadingscreentexture)
-		GL_Clear(GL_COLOR_BUFFER_BIT, NULL, 1.0f, 0);
-	R_Textures_Frame();
-	R_Mesh_Start();
-	R_EntityMatrix(&identitymatrix);
-	// draw the loading plaque
-	loadingscreenpic = Draw_CachePic_Flags (loadingscreenpic_number ? va(vabuf, sizeof(vabuf), "%s%d", scr_loadingscreen_picture.string, loadingscreenpic_number+1) : scr_loadingscreen_picture.string, loadingscreenpic_number ? CACHEPICFLAG_NOTPERSISTENT : 0);
 
-	w = loadingscreenpic->width;
-	h = loadingscreenpic->height;
+	GL_BlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+	GL_DepthRange(0, 1);
+	GL_PolygonOffset(0, 0);
+	GL_DepthTest(false);
+	GL_Color(1,1,1,1);
+
+	if(loadingscreentexture)
+	{
+		R_Mesh_PrepareVertices_Generic_Arrays(4, loadingscreentexture_vertex3f, NULL, loadingscreentexture_texcoord2f);
+		R_SetupShader_Generic(loadingscreentexture, false, true, true);
+		R_Mesh_Draw(0, 4, 0, 2, polygonelement3i, NULL, 0, polygonelement3s, NULL, 0);
+	}
+
+	if (scr_loadingscreen_insanotic.integer)
+	{
+		SCR_DrawInsanoticLoadingScreen();
+		return;
+	}
+
+	loadingscreenpic = Draw_CachePic_Flags(loadingscreenpic_number ? va(vabuf, sizeof(vabuf), "%s%d", scr_loadingscreen_picture.string, loadingscreenpic_number+1) : scr_loadingscreen_picture.string, loadingscreenpic_number ? CACHEPICFLAG_NOTPERSISTENT : 0);
+	w = Draw_GetPicWidth(loadingscreenpic);
+	h = Draw_GetPicHeight(loadingscreenpic);
 
 	// apply scale
 	w *= scr_loadingscreen_scale.value;
@@ -2522,8 +2393,8 @@ static void SCR_DrawLoadingScreen_SharedSetup (qboolean clear)
 	// apply scale base
 	if(scr_loadingscreen_scale_base.integer)
 	{
-		w *= vid_conwidth.integer / (float) vid.width;
-		h *= vid_conheight.integer / (float) vid.height;
+		w *= vid_conwidth.integer / (float) vid.mode.width;
+		h *= vid_conheight.integer / (float) vid.mode.height;
 	}
 
 	// apply scale limit
@@ -2562,484 +2433,62 @@ static void SCR_DrawLoadingScreen_SharedSetup (qboolean clear)
 	loadingscreenpic_texcoord2f[2] = 1;loadingscreenpic_texcoord2f[3] = 0;
 	loadingscreenpic_texcoord2f[4] = 1;loadingscreenpic_texcoord2f[5] = 1;
 	loadingscreenpic_texcoord2f[6] = 0;loadingscreenpic_texcoord2f[7] = 1;
-}
 
-//============================================================================
-// Insanotic loading screen: one screen from "connect" or "map" until the
-// game is drawn, with the map's picture, the current stage and a single
-// progress bar that only moves forward across all stages
-
-static float loading_progress;           // shown fraction, never decreases
-static qboolean loading_isstartup;       // the game is starting (no map)
-static double loading_starttime;
-static char loading_levelshot_map[MAX_QPATH];
-static cachepic_t *loading_levelshot;    // NULL when the map has none
-
-// map being loaded, "" while unknown
-static const char *SCR_LoadingMapName(void)
-{
-	if (cls.connect_trying)
-		return "";
-	if (sv.active || sv.state == ss_loading)
-		if (sv.name[0])
-			return sv.name;
-	if (cls.state == ca_connected && cl.worldbasename[0])
-		return cl.worldbasename;
-	return "";
-}
-
-// stage (what the player is waiting for), detail (file being loaded) and
-// the fraction of the whole load
-// download speed as "450 KB/s" / "1.2 MB/s"
-static void SCR_FormatRate(char *out, size_t outsize, double bytes_per_second)
-{
-	if (bytes_per_second <= 0)
-		strlcpy(out, "", outsize);
-	else if (bytes_per_second >= 1048576)
-		dpsnprintf(out, outsize, "%.1f MB/s", bytes_per_second / 1048576.0);
-	else
-		dpsnprintf(out, outsize, "%.0f KB/s", bytes_per_second / 1024.0);
-}
-
-// when the current batch of HTTP downloads started (0: none running)
-static double scr_download_batch_start;
-
-// time left as "0:42 left" / "12:05 left" ("" when unknown)
-static void SCR_FormatTimeLeft(char *out, size_t outsize, double seconds)
-{
-	int t;
-	if (seconds < 0 || seconds > 99 * 3600)
-	{
-		strlcpy(out, "", outsize);
-		return;
-	}
-	t = (int)(seconds + 0.5);
-	if (t >= 3600)
-		dpsnprintf(out, outsize, "%i:%02i:%02i left", t / 3600, (t / 60) % 60, t % 60);
-	else
-		dpsnprintf(out, outsize, "%i:%02i left", t / 60, t % 60);
-}
-
-static float SCR_LoadingStage(char *stage, size_t stagesize, char *detail, size_t detailsize)
-{
-	loadingscreenstack_t *s = loadingscreenstack;
-	float stack = s ? s->absolute_loading_amount_min : 0;
-	detail[0] = 0;
-	if (s && strcmp(s->msg, "world model setup"))
-	{
-		const char *slash = strrchr(s->msg, '/');
-		strlcpy(detail, slash ? slash + 1 : s->msg, detailsize);
-	}
-	if (cls.connect_trying)
-	{
-		strlcpy(stage, "Connecting", stagesize);
-		return 0.02f;
-	}
-	if (cls.state == ca_connected)
-	{
-		// downloads first, at any signon stage: the game connection's own
-		// download (the only one where libcurl is missing, as on Android)
-		// and HTTP downloads through libcurl
-		if (cls.qw_downloadname[0])
-		{
-			// the game connection's own download: one file at a time
-			const char *slash = strrchr(cls.qw_downloadname, '/');
-			char rate[32], left[32];
-			int have = cls.qw_downloadmemorycursize, total = cls.qw_downloadmemorymaxsize;
-			SCR_FormatRate(rate, sizeof(rate), cls.qw_downloadspeedrate);
-			SCR_FormatTimeLeft(left, sizeof(left), total > have && cls.qw_downloadspeedrate > 0 ? (total - have) / (double)cls.qw_downloadspeedrate : -1);
-			strlcpy(stage, "Downloading", stagesize);
-			if (total > 0)
-				dpsnprintf(detail, detailsize, "%s   %.1f / %.1f MB   %s   %s", slash ? slash + 1 : cls.qw_downloadname,
-					have / 1048576.0, total / 1048576.0, rate, left);
-			else
-				dpsnprintf(detail, detailsize, "%s   %s", slash ? slash + 1 : cls.qw_downloadname, rate);
-			// downloads fill 20 % to 40 % of the bar (it never moves back,
-			// and connecting already reached 20 %)
-			return 0.20f + 0.20f * bound(0, cls.qw_downloadpercent, 100) / 100.0f;
-		}
-		if (!Curl_Running())
-			scr_download_batch_start = 0;
-		if (Curl_Running())
-		{
-			// HTTP downloads, several at once (cl_curl_maxdownloads): the
-			// whole batch as one progress, the speed of all together and the
-			// time left from how fast the batch has moved so far
-			int n = 0, i, done_or_running = 0;
-			double sum = 0, speed = 0, f, elapsed;
-			char rate[32], left[32];
-			Curl_downloadinfo_t *info = Curl_GetDownloadInfo(&n, NULL, NULL, 0);
-			if (!scr_download_batch_start)
-				scr_download_batch_start = realtime;
-			strlcpy(stage, "Downloading", stagesize);
-			for (i = 0; info && i < n; i++)
-			{
-				if (!info[i].queued)
-				{
-					done_or_running++;
-					sum += bound(0, info[i].progress, 1);
-					speed += info[i].speed;
-				}
-			}
-			f = n > 0 ? sum / n : 0;
-			elapsed = realtime - scr_download_batch_start;
-			SCR_FormatRate(rate, sizeof(rate), speed);
-			SCR_FormatTimeLeft(left, sizeof(left), f > 0.01 && elapsed > 1 ? elapsed * (1 - f) / f : -1);
-			dpsnprintf(detail, detailsize, "%i file%s   %i%%   %s   %s", n, n == 1 ? "" : "s", (int)(100 * f), rate, left);
-			if (info)
-				Z_Free(info);
-			(void)done_or_running;
-			return 0.20f + 0.20f * (float)f;
-		}
-		switch (cls.signon)
-		{
-		case 0:
-			// only our own listen server is "starting"; sv.state can be left
-			// over from an earlier local game while joining someone else's
-			if (sv.active && sv.state == ss_loading)
-			{
-				strlcpy(stage, "Starting the server", stagesize);
-				return 0.02f + 0.18f * stack;
-			}
-			strlcpy(stage, "Receiving server info", stagesize);
-			return 0.20f;
-		case 1:
-			if (s)
-			{
-				// the stage is the entry just above the bottom one
-				// ("Loading precaches" > "Loading precached models" > file)
-				loadingscreenstack_t *bottom = s, *above = NULL;
-				const char *msg;
-				while (bottom->prev)
-				{
-					above = bottom;
-					bottom = bottom->prev;
-				}
-				msg = above ? above->msg : bottom->msg;
-				if (!strcmp(msg, "Loading precached models"))
-					msg = "Loading models";
-				else if (!strcmp(msg, "Loading precached sounds"))
-					msg = "Loading sounds";
-				else if (!strcmp(msg, "world model setup"))
-					msg = "Preparing the map";
-				strlcpy(stage, msg, stagesize);
-			}
-			else
-				strlcpy(stage, "Loading", stagesize);
-			return 0.22f + 0.70f * stack;
-		case 2:
-			strlcpy(stage, "Joining the game", stagesize);
-			return 0.94f;
-		default:
-			strlcpy(stage, "Joining the game", stagesize);
-			return 0.97f;
-		}
-	}
-	if (sv.active && sv.state == ss_loading)
-	{
-		strlcpy(stage, "Starting the server", stagesize);
-		return 0.02f + 0.18f * stack;
-	}
-	strlcpy(stage, s ? s->msg : "Loading", stagesize);
-	return stack;
-}
-
-// the main menu's earth background with the Xonotic logo centered (cut
-// from the menu's logo layer, which has no "Loading" text). When the menu
-// opens, it glides the logo from here to its place in the menu
-// (menu.qc, drawMenuIntroLogo: keep the numbers in step). A dark gradient
-// when the pictures are missing.
-#define LOADING_MENU_BACKGROUND "gfx/menu/luma/background"
-#define LOADING_MENU_LOGO "gfx/menu/luma/background_l2"
-// logo bounds inside the 2560x2048 logo layer
-#define LOADING_LOGO_S0 (30.0f / 2560)
-#define LOADING_LOGO_T0 (10.0f / 2048)
-#define LOADING_LOGO_S1 (1420.0f / 2560)
-#define LOADING_LOGO_T1 (470.0f / 2048)
-#define LOADING_LOGO_WIDTH 0.55f   // of the screen width
-#define LOADING_LOGO_Y 0.42f       // centre, of the screen height
-static void SCR_DrawInsanoticBackdrop(void)
-{
-	static int checked;
-	static cachepic_t *background, *logo;
-	float w = vid_conwidth.integer, h = vid_conheight.integer, f, lw, lh;
-	// console units are not always square pixels (the UI size need not have
-	// the window's shape): px is how many units wide one unit high is on
-	// screen, so pictures keep their proportions
-	float px = (vid.width > 0 && vid.height > 0) ? ((float)vid.height / vid.width) * (w / h) : 1;
-	int i, strips = 32;
-
-	if (!checked)
-	{
-		checked = true;
-		if (FS_FileExists(LOADING_MENU_BACKGROUND ".jpg") || FS_FileExists(LOADING_MENU_BACKGROUND ".tga"))
-			background = Draw_CachePic_Flags(LOADING_MENU_BACKGROUND, CACHEPICFLAG_QUIET);
-		if (FS_FileExists(LOADING_MENU_LOGO ".jpg") || FS_FileExists(LOADING_MENU_LOGO ".tga"))
-			logo = Draw_CachePic_Flags(LOADING_MENU_LOGO, CACHEPICFLAG_QUIET);
-	}
-	if (background && background->width > 0 && background->height > 0)
-	{
-		float bw = background->width * px, bh = background->height;
-		f = max(w / bw, h / bh);
-		DrawQ_Pic((w - bw * f) / 2, (h - bh * f) / 2, background, bw * f, bh * f, 1, 1, 1, 1, 0);
-	}
-	else
-	{
-		for (i = 0; i < strips; i++)
-		{
-			// navy at the top fading to black, lighter in the middle
-			float y0 = floor(h * i / strips), y1 = floor(h * (i + 1) / strips);
-			float t = (float)i / (strips - 1), glow = 1 - fabs(t - 0.45f) * 2;
-			DrawQ_Fill(0, y0, w, y1 - y0, 0.02f + 0.04f * glow, 0.03f + 0.06f * glow, 0.06f + 0.12f * glow, 1, 0);
-		}
-	}
-	if (logo && logo->width > 0 && logo->height > 0)
-	{
-		lw = w * LOADING_LOGO_WIDTH;
-		// the layer is a 2560x2048 picture; use its real proportions (the
-		// texture may be stored at another size) so the logo keeps the
-		// shape the menu draws it with
-		lh = lw / px * ((LOADING_LOGO_T1 - LOADING_LOGO_T0) * 2048.0f) / ((LOADING_LOGO_S1 - LOADING_LOGO_S0) * 2560.0f);
-		DrawQ_SuperPic((w - lw) / 2, h * LOADING_LOGO_Y - lh / 2, logo, lw, lh,
-			LOADING_LOGO_S0, LOADING_LOGO_T0, 1, 1, 1, 1,
-			LOADING_LOGO_S1, LOADING_LOGO_T0, 1, 1, 1, 1,
-			LOADING_LOGO_S0, LOADING_LOGO_T1, 1, 1, 1, 1,
-			LOADING_LOGO_S1, LOADING_LOGO_T1, 1, 1, 1, 1, 0);
-	}
-}
-
-// game start: the menu's background with a thin bar near the bottom that
-// follows the time the last start took
-static void SCR_DrawInsanoticStartupScreen(void)
-{
-	float w = vid_conwidth.integer, h = vid_conheight.integer;
-	float barw = floor(w * 0.3f), barh = max(2, floor(h * 0.005f)), x, y, f;
-	float bar[3] = { 0.2f, 0.6f, 1.0f };
-
-	SCR_DrawInsanoticBackdrop();
-	sscanf(scr_loadingscreen_barcolor.string, "%f %f %f", &bar[0], &bar[1], &bar[2]);
-
-	f = (float)((Sys_DirtyTime() - loading_starttime) / max(0.2f, scr_loadingscreen_startuptime.value));
-	f = min(f, 0.95f);
-	if (f > loading_progress)
-		loading_progress = f;
-
-	y = floor(h * 0.9f);
-	x = (w - barw) / 2;
-	DrawQ_Fill(x, y, barw, barh, 0, 0, 0, 0.4f, 0);
-	DrawQ_Fill(x, y, barw * loading_progress, barh, bar[0], bar[1], bar[2], 1, 0);
-	loadingscreenheight = h;
-}
-
-static void SCR_DrawInsanoticLoadingScreen(void)
-{
-	float w = vid_conwidth.integer, h = vid_conheight.integer;
-	float margin = floor(h * 0.05f), title = floor(h * 0.055f), text = floor(h * 0.03f);
-	float barh = max(3, floor(h * 0.008f)), bary = h - margin - barh, f, x, y;
-	float bar[3] = { 0.2f, 0.6f, 1.0f };
-	const char *map = SCR_LoadingMapName();
-	char stage[128], detail[128], percent[16];
-	int i, strips = 24;
-
-	if (loading_isstartup && !map[0] && cls.state != ca_connected && !cls.connect_trying)
-	{
-		SCR_DrawInsanoticStartupScreen();
-		return;
-	}
-
-	// the map's own picture (maps/<name>.jpg ships with every map), else
-	// the game's loading picture
-	if (strcmp(map, loading_levelshot_map))
-	{
-		char name[MAX_QPATH + 8];
-		strlcpy(loading_levelshot_map, map, sizeof(loading_levelshot_map));
-		loading_levelshot = NULL;
-		if (map[0])
-		{
-			dpsnprintf(name, sizeof(name), "maps/%s", map);
-			if (FS_FileExists(va(stage, sizeof(stage), "%s.jpg", name)) || FS_FileExists(va(stage, sizeof(stage), "%s.tga", name)) || FS_FileExists(va(stage, sizeof(stage), "%s.png", name)))
-				loading_levelshot = Draw_CachePic_Flags(name, CACHEPICFLAG_NOTPERSISTENT | CACHEPICFLAG_QUIET);
-		}
-	}
-	if (loading_levelshot && loading_levelshot->width > 0 && loading_levelshot->height > 0)
-	{
-		// cover the screen, keep the aspect
-		f = max(w / loading_levelshot->width, h / loading_levelshot->height);
-		DrawQ_Pic((w - loading_levelshot->width * f) / 2, (h - loading_levelshot->height * f) / 2, loading_levelshot, loading_levelshot->width * f, loading_levelshot->height * f, 0.75f, 0.75f, 0.75f, 1, 0);
-	}
-	else
-		SCR_DrawInsanoticBackdrop();
-
-	// darken the lower part for the text
-	for (i = 0; i < strips; i++)
-	{
-		float y0 = floor(h * 0.55f + (h * 0.45f) * i / strips);
-		float y1 = floor(h * 0.55f + (h * 0.45f) * (i + 1) / strips);
-		DrawQ_Fill(0, y0, w, y1 - y0, 0, 0, 0, 0.85f * (i + 1) / strips, 0);
-	}
-
-	f = SCR_LoadingStage(stage, sizeof(stage), detail, sizeof(detail));
-	if (f > loading_progress)
-		loading_progress = min(f, 1);
-	dpsnprintf(percent, sizeof(percent), "%d%%", (int)(loading_progress * 100));
-	sscanf(scr_loadingscreen_barcolor.string, "%f %f %f", &bar[0], &bar[1], &bar[2]);
-
-	// map name, stage and file on the left, percentage on the right
-	x = margin;
-	y = bary - margin * 0.5f - text - title;
-	if (map[0])
-	{
-		// the map's title once the server sent it, else its file name
-		const char *name = cls.state == ca_connected && cls.signon >= 1 && cl.worldmessage[0] ? cl.worldmessage : map;
-		DrawQ_String(x, y, name, 0, title, title, 1, 1, 1, 1, 0, NULL, false, FONT_INFOBAR);
-	}
-	y += title + text * 0.25f;
-	DrawQ_String(x, y, stage, 0, text, text, 0.85f, 0.85f, 0.85f, 1, 0, NULL, true, FONT_INFOBAR);
-	if (detail[0] && strcmp(detail, stage))
-		DrawQ_String(x + DrawQ_TextWidth(stage, 0, text, text, true, FONT_INFOBAR) + text, y, detail, 0, text, text, 0.55f, 0.55f, 0.55f, 1, 0, NULL, true, FONT_INFOBAR);
-	DrawQ_String(w - margin - DrawQ_TextWidth(percent, 0, title, title, true, FONT_INFOBAR), bary - margin * 0.5f - title, percent, 0, title, title, 1, 1, 1, 1, 0, NULL, true, FONT_INFOBAR);
-
-	// the bar
-	DrawQ_Fill(margin, bary, w - 2 * margin, barh, 1, 1, 1, 0.15f, 0);
-	DrawQ_Fill(margin, bary, (w - 2 * margin) * loading_progress, barh, bar[0], bar[1], bar[2], 1, 0);
-	loadingscreenheight = h;
-}
-
-static void SCR_DrawLoadingScreen (qboolean clear)
-{
-	// we only need to draw the image if it isn't already there
-	GL_BlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-	GL_DepthRange(0, 1);
-	GL_PolygonOffset(0, 0);
-	GL_DepthTest(false);
-//	R_Mesh_ResetTextureState();
-	GL_Color(1,1,1,1);
-	if(loadingscreentexture)
-	{
-		R_Mesh_PrepareVertices_Generic_Arrays(4, loadingscreentexture_vertex3f, NULL, loadingscreentexture_texcoord2f);
-		R_SetupShader_Generic(loadingscreentexture, NULL, GL_MODULATE, 1, true, true, true);
-		R_Mesh_Draw(0, 4, 0, 2, polygonelement3i, NULL, 0, polygonelement3s, NULL, 0);
-	}
-	if (scr_loadingscreen_insanotic.integer)
-	{
-		SCR_DrawInsanoticLoadingScreen();
-		return;
-	}
 	R_Mesh_PrepareVertices_Generic_Arrays(4, loadingscreenpic_vertex3f, NULL, loadingscreenpic_texcoord2f);
-	R_SetupShader_Generic(Draw_GetPicTexture(loadingscreenpic), NULL, GL_MODULATE, 1, true, true, false);
+	R_SetupShader_Generic(Draw_GetPicTexture(loadingscreenpic), true, true, false);
 	R_Mesh_Draw(0, 4, 0, 2, polygonelement3i, NULL, 0, polygonelement3s, NULL, 0);
+
 	SCR_DrawLoadingStack();
 }
 
-static void SCR_DrawLoadingScreen_SharedFinish (qboolean clear)
-{
-	R_Mesh_Finish();
-	// refresh
-	VID_Finish();
-}
-
-static double loadingscreen_lastupdate;
-
-void SCR_UpdateLoadingScreen (qboolean clear, qboolean startup)
-{
-	keydest_t	old_key_dest;
-	int			old_key_consoleactive;
-
-	// don't do anything if not initialized yet
-	if (vid_hidden || cls.state == ca_dedicated)
-		return;
-
-	// limit update rate
-	if (scr_loadingscreen_maxfps.value)
-	{
-		double t = Sys_DirtyTime();
-		if ((t - loadingscreen_lastupdate) < 1.0f/scr_loadingscreen_maxfps.value)
-			return;
-		loadingscreen_lastupdate = t;
-	}
-
-	// set up the r_texture_gammaramps texture which we need for rendering the loadingscreenpic
-	VID_UpdateGamma();
-	R_UpdateVariables();
-
-	if(!scr_loadingscreen_background.integer)
-		clear = true;
-	
-	if(loadingscreendone)
-		clear |= loadingscreencleared;
-
-	if(!loadingscreendone)
-	{
-		if(startup && scr_loadingscreen_firstforstartup.integer)
-			loadingscreenpic_number = 0;
-		else if(scr_loadingscreen_firstforstartup.integer)
-			if(scr_loadingscreen_count.integer > 1)
-				loadingscreenpic_number = rand() % (scr_loadingscreen_count.integer - 1) + 1;
-			else
-				loadingscreenpic_number = 0;
-		else
-			loadingscreenpic_number = rand() % (scr_loadingscreen_count.integer > 1 ? scr_loadingscreen_count.integer : 1);
-	}
-
-	if(clear)
-	        SCR_ClearLoadingScreenTexture();
-	else if(!loadingscreendone)
-	        SCR_SetLoadingScreenTexture();
-
-	if(!loadingscreendone)
-	{
-		loadingscreendone = true;
-		loadingscreenheight = 0;
-		loading_isstartup = startup;
-		loading_starttime = Sys_DirtyTime();
-	}
-	loadingscreencleared = clear;
-
-#ifdef USE_GLES2
-	SCR_DrawLoadingScreen_SharedSetup(clear);
-	SCR_DrawLoadingScreen(clear);
-#else
-	if (qglDrawBuffer)
-		qglDrawBuffer(GL_BACK);
-	SCR_DrawLoadingScreen_SharedSetup(clear);
-	if (vid.stereobuffer && qglDrawBuffer)
-	{
-		qglDrawBuffer(GL_BACK_LEFT);
-		SCR_DrawLoadingScreen(clear);
-		qglDrawBuffer(GL_BACK_RIGHT);
-		SCR_DrawLoadingScreen(clear);
-	}
-	else
-	{
-		if (qglDrawBuffer)
-			qglDrawBuffer(GL_BACK);
-		SCR_DrawLoadingScreen(clear);
-	}
-#endif
-	SCR_DrawLoadingScreen_SharedFinish(clear);
-
-	// the load is waiting anyway: get font sizes ready for the menus
-	if (!loading_isstartup) // the start itself must stay fast
-		Font_WarmUp(0.02);
-
-	// this goes into the event loop, and should prevent unresponsive cursor on vista
-	old_key_dest = key_dest;
-	old_key_consoleactive = key_consoleactive;
-	key_dest = key_void;
-	key_consoleactive = false;
-	Key_EventQueue_Block(); Sys_SendKeyEvents();
-	key_dest = old_key_dest;
-	key_consoleactive = old_key_consoleactive;
-}
-
-qboolean R_Stereo_ColorMasking(void)
+qbool R_Stereo_ColorMasking(void)
 {
 	return r_stereo_redblue.integer || r_stereo_redgreen.integer || r_stereo_redcyan.integer;
 }
 
-qboolean R_Stereo_Active(void)
+qbool R_Stereo_Active(void)
 {
-	return (vid.stereobuffer || r_stereo_sidebyside.integer || r_stereo_horizontal.integer || r_stereo_vertical.integer || R_Stereo_ColorMasking());
+	return (vid.mode.stereobuffer || r_stereo_sidebyside.integer || r_stereo_horizontal.integer || r_stereo_vertical.integer || R_Stereo_ColorMasking());
+}
+
+static void SCR_UpdateVars(void)
+{
+	float conwidth = bound(160, vid_conwidth.value, 32768);
+	float conheight = bound(90, vid_conheight.value, 24576);
+	float conscale = vid.mode.height / vid_conheight.value;
+	if (vid_conwidthauto.integer)
+		conwidth = floor(conheight * vid.mode.width / (vid.mode.height * vid_pixelheight.value));
+	if (vid_conwidth.value != conwidth)
+		Cvar_SetValueQuick(&vid_conwidth, conwidth);
+	if (vid_conheight.value != conheight)
+		Cvar_SetValueQuick(&vid_conheight, conheight);
+	if (scr_sbarscale.value != conscale)
+		Cvar_SetValueQuick(&scr_sbarscale, conscale);
+
+	// bound viewsize
+	if (scr_viewsize.value < 30)
+		Cvar_SetValueQuick(&scr_viewsize, 30);
+	if (scr_viewsize.value > 120)
+		Cvar_SetValueQuick(&scr_viewsize, 120);
+
+	// bound field of view
+	if (scr_fov.value < 1)
+		Cvar_SetValueQuick(&scr_fov, 1);
+	if (scr_fov.value > 170)
+		Cvar_SetValueQuick(&scr_fov, 170);
+
+	// intermission is always full screen
+	if (cl.intermission)
+		sb_lines = 0;
+	else
+	{
+		if (scr_viewsize.value >= 120)
+			sb_lines = 0;		// no status bar at all
+		else if (scr_viewsize.value >= 110)
+			sb_lines = 24;		// no inventory
+		else
+			sb_lines = 24 + 16 + 8;
+	}
 }
 
 extern cvar_t cl_minfps;
@@ -3050,19 +2499,26 @@ extern cvar_t cl_minfps_qualitymultiply;
 extern cvar_t cl_minfps_qualityhysteresis;
 extern cvar_t cl_minfps_qualitystepmax;
 extern cvar_t cl_minfps_force;
-static double cl_updatescreen_quality = 1;
 void CL_UpdateScreen(void)
 {
+	static double cl_updatescreen_quality = 1;
+
 	vec3_t vieworigin;
 	static double drawscreenstart = 0.0;
 	double drawscreendelta;
-	float conwidth, conheight;
 	r_viewport_t viewport;
+
+	// TODO: Move to a better place.
+	cl_punchangle_applied = 0;
 
 	if(drawscreenstart)
 	{
 		drawscreendelta = Sys_DirtyTime() - drawscreenstart;
+#ifdef CONFIG_VIDEO_CAPTURE
 		if (cl_minfps.value > 0 && (cl_minfps_force.integer || !(cls.timedemo || (cls.capturevideo.active && !cls.capturevideo.realtime))) && drawscreendelta >= 0 && drawscreendelta < 60)
+#else
+		if (cl_minfps.value > 0 && (cl_minfps_force.integer || !cls.timedemo) && drawscreendelta >= 0 && drawscreendelta < 60)
+#endif
 		{
 			// quality adjustment according to render time
 			double actualframetime;
@@ -3139,21 +2595,11 @@ void CL_UpdateScreen(void)
 	// client's loading phases, and during the network handshake) keep the
 	// loading screen up instead of drawing the empty world, which was black
 	if (((cls.state == ca_connected && cls.signon < SIGNONS) || cls.connect_trying) && !(key_consoleactive & KEY_CONSOLEACTIVE_USER) && !cls.demoplayback)
-	{
-		SCR_UpdateLoadingScreen(loadingscreendone ? loadingscreencleared : false, false);
-		return;
-	}
-
-	// remember how long the game took to start, for the next start's bar
-	if (loadingscreendone && loading_isstartup)
-		Cvar_SetValueQuick(&scr_loadingscreen_startuptime, (float)(Sys_DirtyTime() - loading_starttime));
-	loading_isstartup = false;
-	loadingscreendone = false;
-	loading_progress = 0;
+		scr_loading = true;
 
 	// idle at the menu (not in a game): render waiting font sizes a few
 	// milliseconds per frame
-	if (key_dest == key_menu && cls.state != ca_connected)
+	if (key_dest == key_menu && cls.state != ca_connected && !scr_loading)
 		Font_WarmUp(0.003);
 
 	if(IS_NEXUIZ_DERIVED(gamemode))
@@ -3169,46 +2615,35 @@ void CL_UpdateScreen(void)
 		memcpy(palette_rgb_shirtscoreboard[15], palette_rgb_shirtcolormap[15], sizeof(*palette_rgb_shirtcolormap));
 	}
 
+#ifdef CONFIG_VIDEO_CAPTURE
+	if (vid_hidden && !cls.capturevideo.active
+	&& !cl_capturevideo.integer) // so we can start capturing while hidden
+#else
 	if (vid_hidden)
+#endif
 	{
 		VID_Finish();
 		return;
 	}
 
-	conwidth = bound(160, vid_conwidth.value, 32768);
-	conheight = bound(90, vid_conheight.value, 24576);
-	if (vid_conwidth.value != conwidth)
-		Cvar_SetValue("vid_conwidth", conwidth);
-	if (vid_conheight.value != conheight)
-		Cvar_SetValue("vid_conheight", conheight);
-
-	// bound viewsize
-	if (scr_viewsize.value < 30)
-		Cvar_Set ("viewsize","30");
-	if (scr_viewsize.value > 120)
-		Cvar_Set ("viewsize","120");
-
-	// bound field of view
-	if (scr_fov.value < 1)
-		Cvar_Set ("fov","1");
-	if (scr_fov.value > 170)
-		Cvar_Set ("fov","170");
-
-	// intermission is always full screen
-	if (cl.intermission)
-		sb_lines = 0;
-	else
+	if (scr_loading)
 	{
-		if (scr_viewsize.value >= 120)
-			sb_lines = 0;		// no status bar at all
-		else if (scr_viewsize.value >= 110)
-			sb_lines = 24;		// no inventory
-		else
-			sb_lines = 24+16+8;
+		if(!loadingscreenstack && !cls.connect_trying && (cls.state != ca_connected || cls.signon == SIGNONS))
+			SCR_EndLoadingPlaque();
+		else if (scr_loadingscreen_maxfps.value > 0)
+		{
+			static double lastupdate;
+			if (host.realtime - lastupdate < min(1.0f / scr_loadingscreen_maxfps.value, 0.1))
+				return;
+			lastupdate = host.realtime;
+		}
 	}
+
+	SCR_UpdateVars();
 
 	R_FrameData_NewFrame();
 	R_BufferData_NewFrame();
+	R_View_WorldVisibility_NewFrame();
 
 	Matrix4x4_OriginFromMatrix(&r_refdef.view.matrix, vieworigin);
 	R_HDR_UpdateIrisAdaptation(vieworigin);
@@ -3220,24 +2655,12 @@ void CL_UpdateScreen(void)
 	SCR_SetUpToDrawConsole();
 
 #ifndef USE_GLES2
-	if (qglDrawBuffer)
-	{
-		CHECKGLERROR
-		qglDrawBuffer(GL_BACK);CHECKGLERROR
-		// set dithering mode
-		if (gl_dither.integer)
-		{
-			qglEnable(GL_DITHER);CHECKGLERROR
-		}
-		else
-		{
-			qglDisable(GL_DITHER);CHECKGLERROR
-		}
-	}
+	CHECKGLERROR
+	qglDrawBuffer(GL_BACK);CHECKGLERROR
 #endif
 
-	R_Viewport_InitOrtho(&viewport, &identitymatrix, 0, 0, vid.width, vid.height, 0, 0, vid_conwidth.integer, vid_conheight.integer, -10, 100, NULL);
-	R_Mesh_SetRenderTargets(0, NULL, NULL, NULL, NULL, NULL);
+	R_Viewport_InitOrtho(&viewport, &identitymatrix, 0, 0, vid.mode.width, vid.mode.height, 0, 0, vid_conwidth.integer, vid_conheight.integer, -10, 100, NULL);
+	R_Mesh_SetRenderTargets(0);
 	R_SetViewport(&viewport);
 	GL_ScissorTest(false);
 	GL_ColorMask(1,1,1,1);
@@ -3250,34 +2673,11 @@ void CL_UpdateScreen(void)
 	// calculate r_refdef.view.quality
 	r_refdef.view.quality = cl_updatescreen_quality;
 
-#ifndef USE_GLES2
-	if (qglPolygonStipple)
+	if(scr_stipple.integer)
 	{
-		if(scr_stipple.integer)
-		{
-			GLubyte stipple[128];
-			int i, s, width, parts;
-			static int frame = 0;
-			++frame;
-	
-			s = scr_stipple.integer;
-			parts = (s & 007);
-			width = (s & 070) >> 3;
-	
-			qglEnable(GL_POLYGON_STIPPLE);CHECKGLERROR // 0x0B42
-			for(i = 0; i < 128; ++i)
-			{
-				int line = i/4;
-				stipple[i] = (((line >> width) + frame) & ((1 << parts) - 1)) ? 0x00 : 0xFF;
-			}
-			qglPolygonStipple(stipple);CHECKGLERROR
-		}
-		else
-		{
-			qglDisable(GL_POLYGON_STIPPLE);CHECKGLERROR
-		}
+		Con_Print("FIXME: scr_stipple not implemented\n");
+		Cvar_SetValueQuick(&scr_stipple, 0);
 	}
-#endif
 
 #ifndef USE_GLES2
 	if (R_Stereo_Active())
@@ -3291,7 +2691,7 @@ void CL_UpdateScreen(void)
 			r_refdef.view.colormask[2] = 0;
 		}
 
-		if (vid.stereobuffer)
+		if (vid.mode.stereobuffer)
 			qglDrawBuffer(GL_BACK_RIGHT);
 
 		SCR_DrawScreen();
@@ -3306,7 +2706,7 @@ void CL_UpdateScreen(void)
 			r_refdef.view.colormask[2] = r_stereo_redcyan.integer || r_stereo_redblue.integer;
 		}
 
-		if (vid.stereobuffer)
+		if (vid.mode.stereobuffer)
 			qglDrawBuffer(GL_BACK_LEFT);
 
 		SCR_DrawScreen();
@@ -3323,20 +2723,7 @@ void CL_UpdateScreen(void)
 	SCR_CaptureVideo();
 #endif
 
-	if (qglFlush)
-		qglFlush(); // FIXME: should we really be using qglFlush here?
-
-	if (!vid_activewindow)
-		VID_SetMouse(false, false, false);
-	else if (key_consoleactive)
-		VID_SetMouse(vid.fullscreen, false, false);
-	else if (key_dest == key_menu_grabbed)
-		VID_SetMouse(true, vid_mouse.integer && !in_client_mouse && !UI_RML_Modal() && !vid_touchscreen.integer, !vid_touchscreen.integer);
-	else if (key_dest == key_menu)
-		VID_SetMouse(vid.fullscreen, vid_mouse.integer && !in_client_mouse && !UI_RML_Modal() && !vid_touchscreen.integer, !vid_touchscreen.integer);
-	else
-		VID_SetMouse(vid.fullscreen, vid_mouse.integer && !UI_RML_Modal() && !cl.csqc_wantsmousemove && cl_prydoncursor.integer <= 0 && (!cls.demoplayback || cl_demo_mousegrab.integer) && !vid_touchscreen.integer, !vid_touchscreen.integer);
-
+	qglFlush(); // ensure that the commands are submitted to the GPU before we do other things
 	VID_Finish();
 }
 

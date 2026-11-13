@@ -1,6 +1,3 @@
-#ifndef _MSC_VER
-#include <stdint.h>
-#endif
 #include <sys/types.h>
 
 #include "quakedef.h"
@@ -8,31 +5,16 @@
 #include "cap_ogg.h"
 
 // video capture cvars
-static cvar_t cl_capturevideo_ogg_theora_vp3compat = {CVAR_SAVE, "cl_capturevideo_ogg_theora_vp3compat", "1", "make VP3 compatible theora streams"};
-static cvar_t cl_capturevideo_ogg_theora_quality = {CVAR_SAVE, "cl_capturevideo_ogg_theora_quality", "48", "video quality factor (0 to 63), or -1 to use bitrate only; higher is better; setting both to -1 achieves unlimited quality"};
-static cvar_t cl_capturevideo_ogg_theora_bitrate = {CVAR_SAVE, "cl_capturevideo_ogg_theora_bitrate", "-1", "video bitrate (45 to 2000 kbps), or -1 to use quality only; higher is better; setting both to -1 achieves unlimited quality"};
-static cvar_t cl_capturevideo_ogg_theora_keyframe_bitrate_multiplier = {CVAR_SAVE, "cl_capturevideo_ogg_theora_keyframe_bitrate_multiplier", "1.5", "how much more bit rate to use for keyframes, specified as a factor of at least 1"};
-static cvar_t cl_capturevideo_ogg_theora_keyframe_maxinterval = {CVAR_SAVE, "cl_capturevideo_ogg_theora_keyframe_maxinterval", "64", "maximum keyframe interval (1 to 1000)"};
-static cvar_t cl_capturevideo_ogg_theora_keyframe_mininterval = {CVAR_SAVE, "cl_capturevideo_ogg_theora_keyframe_mininterval", "8", "minimum keyframe interval (1 to 1000)"};
-static cvar_t cl_capturevideo_ogg_theora_keyframe_auto_threshold = {CVAR_SAVE, "cl_capturevideo_ogg_theora_keyframe_auto_threshold", "80", "threshold for key frame decision (0 to 100)"};
-static cvar_t cl_capturevideo_ogg_theora_noise_sensitivity = {CVAR_SAVE, "cl_capturevideo_ogg_theora_noise_sensitivity", "1", "video noise sensitivity (0 to 6); lower is better"};
-static cvar_t cl_capturevideo_ogg_theora_sharpness = {CVAR_SAVE, "cl_capturevideo_ogg_theora_sharpness", "0", "sharpness (0 to 2); lower is sharper"};
-static cvar_t cl_capturevideo_ogg_vorbis_quality = {CVAR_SAVE, "cl_capturevideo_ogg_vorbis_quality", "3", "audio quality (-1 to 10); higher is better"};
-
-// ogg.h stuff
-#ifdef _MSC_VER
-typedef __int16 ogg_int16_t;
-typedef unsigned __int16 ogg_uint16_t;
-typedef __int32 ogg_int32_t;
-typedef unsigned __int32 ogg_uint32_t;
-typedef __int64 ogg_int64_t;
-#else
-typedef int16_t ogg_int16_t;
-typedef uint16_t ogg_uint16_t;
-typedef int32_t ogg_int32_t;
-typedef uint32_t ogg_uint32_t;
-typedef int64_t ogg_int64_t;
-#endif
+static cvar_t cl_capturevideo_ogg_theora_vp3compat = {CF_CLIENT | CF_ARCHIVE, "cl_capturevideo_ogg_theora_vp3compat", "1", "make VP3 compatible theora streams"};
+static cvar_t cl_capturevideo_ogg_theora_quality = {CF_CLIENT | CF_ARCHIVE, "cl_capturevideo_ogg_theora_quality", "48", "video quality factor (0 to 63), or -1 to use bitrate only; higher is better; setting both to -1 achieves unlimited quality"};
+static cvar_t cl_capturevideo_ogg_theora_bitrate = {CF_CLIENT | CF_ARCHIVE, "cl_capturevideo_ogg_theora_bitrate", "-1", "video bitrate (45 to 2000 kbps), or -1 to use quality only; higher is better; setting both to -1 achieves unlimited quality"};
+static cvar_t cl_capturevideo_ogg_theora_keyframe_bitrate_multiplier = {CF_CLIENT | CF_ARCHIVE, "cl_capturevideo_ogg_theora_keyframe_bitrate_multiplier", "1.5", "how much more bit rate to use for keyframes, specified as a factor of at least 1"};
+static cvar_t cl_capturevideo_ogg_theora_keyframe_maxinterval = {CF_CLIENT | CF_ARCHIVE, "cl_capturevideo_ogg_theora_keyframe_maxinterval", "64", "maximum keyframe interval (1 to 1000)"};
+static cvar_t cl_capturevideo_ogg_theora_keyframe_mininterval = {CF_CLIENT | CF_ARCHIVE, "cl_capturevideo_ogg_theora_keyframe_mininterval", "8", "minimum keyframe interval (1 to 1000)"};
+static cvar_t cl_capturevideo_ogg_theora_keyframe_auto_threshold = {CF_CLIENT | CF_ARCHIVE, "cl_capturevideo_ogg_theora_keyframe_auto_threshold", "80", "threshold for key frame decision (0 to 100)"};
+static cvar_t cl_capturevideo_ogg_theora_noise_sensitivity = {CF_CLIENT | CF_ARCHIVE, "cl_capturevideo_ogg_theora_noise_sensitivity", "1", "video noise sensitivity (0 to 6); lower is better"};
+static cvar_t cl_capturevideo_ogg_theora_sharpness = {CF_CLIENT | CF_ARCHIVE, "cl_capturevideo_ogg_theora_sharpness", "0", "sharpness (0 to 2); lower is sharper"};
+static cvar_t cl_capturevideo_ogg_vorbis_quality = {CF_CLIENT | CF_ARCHIVE, "cl_capturevideo_ogg_vorbis_quality", "3", "audio quality (-1 to 10); higher is better"};
 
 typedef struct {
   long endbyte;
@@ -63,7 +45,7 @@ typedef struct {
 
 
   int     *lacing_vals;      /* The values that will go to the segment table */
-  ogg_int64_t *granule_vals; /* granulepos values for headers. Not compact
+  int64_t *granule_vals; /* granulepos values for headers. Not compact
 				this way, but it is simple coupled to the
 				lacing fifo */
   long    lacing_storage;
@@ -80,12 +62,12 @@ typedef struct {
                              of a logical bitstream */
   long    serialno;
   long    pageno;
-  ogg_int64_t  packetno;      /* sequence number for decode; the framing
+  int64_t  packetno;      /* sequence number for decode; the framing
                              knows where there's a hole in the data,
                              but we need coupling so that the codec
                              (which is in a seperate abstraction
                              layer) also knows about the gap */
-  ogg_int64_t   granulepos;
+  int64_t   granulepos;
 
 } ogg_stream_state;
 
@@ -98,9 +80,9 @@ typedef struct {
   long  b_o_s;
   long  e_o_s;
 
-  ogg_int64_t  granulepos;
+  int64_t  granulepos;
   
-  ogg_int64_t  packetno;     /* sequence number for decode; the framing
+  int64_t  packetno;     /* sequence number for decode; the framing
 				knows where there's a hole in the data,
 				but we need coupling so that the codec
 				(which is in a seperate abstraction
@@ -128,7 +110,7 @@ static int      (*qogg_stream_flush) (ogg_stream_state *os, ogg_page *og);
 
 static int      (*qogg_stream_init) (ogg_stream_state *os,int serialno);
 static int      (*qogg_stream_clear) (ogg_stream_state *os);
-static ogg_int64_t  (*qogg_page_granulepos) (ogg_page *og);
+static int64_t  (*qogg_page_granulepos) (ogg_page *og);
 
 // end of ogg.h stuff
 
@@ -182,13 +164,13 @@ typedef struct vorbis_dsp_state{
   long nW;
   long centerW;
 
-  ogg_int64_t granulepos;
-  ogg_int64_t sequence;
+  int64_t granulepos;
+  int64_t sequence;
 
-  ogg_int64_t glue_bits;
-  ogg_int64_t time_bits;
-  ogg_int64_t floor_bits;
-  ogg_int64_t res_bits;
+  int64_t glue_bits;
+  int64_t time_bits;
+  int64_t floor_bits;
+  int64_t res_bits;
 
   void       *backend_state;
 } vorbis_dsp_state;
@@ -205,8 +187,8 @@ typedef struct vorbis_block{
   int   mode;
 
   int         eofflag;
-  ogg_int64_t granulepos;
-  ogg_int64_t sequence;
+  int64_t granulepos;
+  int64_t sequence;
   vorbis_dsp_state *vd; /* For read-only access of configuration */
 
   /* local storage to avoid remallocing; it's up to the mapping to
@@ -279,7 +261,7 @@ static int      (*qvorbis_block_init) (vorbis_dsp_state *v, vorbis_block *vb);
 static int      (*qvorbis_block_clear) (vorbis_block *vb);
 static void     (*qvorbis_dsp_clear) (vorbis_dsp_state *v);
 static double   (*qvorbis_granule_time) (vorbis_dsp_state *v,
-				    ogg_int64_t granulepos);
+				    int64_t granulepos);
 
 /* Vorbis PRIMITIVES: analysis/DSP layer ****************************/
 
@@ -373,16 +355,16 @@ typedef enum {
  * other paramters and good default settings for the encoder parameters.
  */
 typedef struct {
-  ogg_uint32_t  width;      /**< encoded frame width  */
-  ogg_uint32_t  height;     /**< encoded frame height */
-  ogg_uint32_t  frame_width;    /**< display frame width  */
-  ogg_uint32_t  frame_height;   /**< display frame height */
-  ogg_uint32_t  offset_x;   /**< horizontal offset of the displayed frame */
-  ogg_uint32_t  offset_y;   /**< vertical offset of the displayed frame */
-  ogg_uint32_t  fps_numerator;      /**< frame rate numerator **/
-  ogg_uint32_t  fps_denominator;    /**< frame rate denominator **/
-  ogg_uint32_t  aspect_numerator;   /**< pixel aspect ratio numerator */
-  ogg_uint32_t  aspect_denominator; /**< pixel aspect ratio denominator */
+  uint32_t  width;      /**< encoded frame width  */
+  uint32_t  height;     /**< encoded frame height */
+  uint32_t  frame_width;    /**< display frame width  */
+  uint32_t  frame_height;   /**< display frame height */
+  uint32_t  offset_x;   /**< horizontal offset of the displayed frame */
+  uint32_t  offset_y;   /**< vertical offset of the displayed frame */
+  uint32_t  fps_numerator;      /**< frame rate numerator **/
+  uint32_t  fps_denominator;    /**< frame rate denominator **/
+  uint32_t  aspect_numerator;   /**< pixel aspect ratio numerator */
+  uint32_t  aspect_denominator; /**< pixel aspect ratio denominator */
   theora_colorspace colorspace;     /**< colorspace */
   int           target_bitrate;     /**< nominal bitrate in bits per second */
   int           quality;  /**< Nominal quality setting, 0-63 */
@@ -398,14 +380,14 @@ typedef struct {
   /* encode only */
   int           dropframes_p;
   int           keyframe_auto_p;
-  ogg_uint32_t  keyframe_frequency;
-  ogg_uint32_t  keyframe_frequency_force;  /* also used for decode init to
+  uint32_t  keyframe_frequency;
+  uint32_t  keyframe_frequency_force;  /* also used for decode init to
                                               get granpos shift correct */
-  ogg_uint32_t  keyframe_data_target_bitrate;
-  ogg_int32_t   keyframe_auto_threshold;
-  ogg_uint32_t  keyframe_mindistance;
-  ogg_int32_t   noise_sensitivity;
-  ogg_int32_t   sharpness;
+  uint32_t  keyframe_data_target_bitrate;
+  int32_t   keyframe_auto_threshold;
+  uint32_t  keyframe_mindistance;
+  int32_t   noise_sensitivity;
+  int32_t   sharpness;
 
   theora_pixelformat pixelformat;   /**< chroma subsampling mode to expect */
 
@@ -415,7 +397,7 @@ typedef struct {
  */
 typedef struct{
   theora_info *i;
-  ogg_int64_t granulepos;
+  int64_t granulepos;
 
   void *internal_encode;
   void *internal_decode;
@@ -460,7 +442,7 @@ static void (*qtheora_info_clear) (theora_info *c);
 static void (*qtheora_clear) (theora_state *t);
 static void (*qtheora_comment_init) (theora_comment *tc);
 static void  (*qtheora_comment_clear) (theora_comment *tc);
-static double (*qtheora_granule_time) (theora_state *th,ogg_int64_t granulepos);
+static double (*qtheora_granule_time) (theora_state *th,int64_t granulepos);
 static int (*qtheora_control) (theora_state *th,int req,void *buf,size_t buf_sz);
 // end of theora.h stuff
 
@@ -523,7 +505,7 @@ static dllfunction_t theorafuncs[] =
 
 static dllhandle_t og_dll = NULL, vo_dll = NULL, ve_dll = NULL, th_dll = NULL;
 
-static qboolean SCR_CaptureVideo_Ogg_OpenLibrary(void)
+static qbool SCR_CaptureVideo_Ogg_OpenLibrary(void)
 {
 	const char* dllnames_og [] =
 	{
@@ -583,13 +565,13 @@ static qboolean SCR_CaptureVideo_Ogg_OpenLibrary(void)
 	};
 
 	return
-		Sys_LoadLibrary (dllnames_og, &og_dll, oggfuncs)
+		Sys_LoadDependency (dllnames_og, &og_dll, oggfuncs)
 		&&
-		Sys_LoadLibrary (dllnames_th, &th_dll, theorafuncs)
+		Sys_LoadDependency (dllnames_th, &th_dll, theorafuncs)
 		&&
-		Sys_LoadLibrary (dllnames_vo, &vo_dll, vorbisfuncs)
+		Sys_LoadDependency (dllnames_vo, &vo_dll, vorbisfuncs)
 		&&
-		Sys_LoadLibrary (dllnames_ve, &ve_dll, vorbisencfuncs);
+		Sys_LoadDependency (dllnames_ve, &ve_dll, vorbisencfuncs);
 }
 
 void SCR_CaptureVideo_Ogg_Init(void)
@@ -604,20 +586,21 @@ void SCR_CaptureVideo_Ogg_Init(void)
 	Cvar_RegisterVariable(&cl_capturevideo_ogg_theora_keyframe_mininterval);
 	Cvar_RegisterVariable(&cl_capturevideo_ogg_theora_keyframe_auto_threshold);
 	Cvar_RegisterVariable(&cl_capturevideo_ogg_theora_noise_sensitivity);
+	Cvar_RegisterVariable(&cl_capturevideo_ogg_theora_sharpness);
 	Cvar_RegisterVariable(&cl_capturevideo_ogg_vorbis_quality);
 }
 
-qboolean SCR_CaptureVideo_Ogg_Available(void)
+qbool SCR_CaptureVideo_Ogg_Available(void)
 {
 	return og_dll && th_dll && vo_dll && ve_dll;
 }
 
 void SCR_CaptureVideo_Ogg_CloseDLL(void)
 {
-	Sys_UnloadLibrary (&ve_dll);
-	Sys_UnloadLibrary (&vo_dll);
-	Sys_UnloadLibrary (&th_dll);
-	Sys_UnloadLibrary (&og_dll);
+	Sys_FreeLibrary (&ve_dll);
+	Sys_FreeLibrary (&vo_dll);
+	Sys_FreeLibrary (&th_dll);
+	Sys_FreeLibrary (&og_dll);
 }
 
 // this struct should not be needed
@@ -822,7 +805,7 @@ static void SCR_CaptureVideo_Ogg_EndVideo(void)
 	cls.capturevideo.videofile = NULL;
 }
 
-static void SCR_CaptureVideo_Ogg_ConvertFrame_BGRA_to_YUV(void)
+static void SCR_CaptureVideo_Ogg_ConvertFrame_BGRA_to_YUV(u8 *in)
 {
 	LOAD_FORMATSPECIFIC_OGG();
 	yuv_buffer *yuv;
@@ -837,7 +820,7 @@ static void SCR_CaptureVideo_Ogg_ConvertFrame_BGRA_to_YUV(void)
 
 	for(y = 0; y < h; ++y)
 	{
-		for(b = cls.capturevideo.outbuffer + (h-1-y)*w*4, x = 0; x < w; ++x)
+		for(b = in + (h-1-y)*w*4, x = 0; x < w; ++x)
 		{
 			blockr = b[2];
 			blockg = b[1];
@@ -849,7 +832,7 @@ static void SCR_CaptureVideo_Ogg_ConvertFrame_BGRA_to_YUV(void)
 
 		if ((y & 1) == 0 && y/2 < h/2) // if h is odd, this skips the last row
 		{
-			for(b = cls.capturevideo.outbuffer + (h-2-y)*w*4, x = 0; x < w/2; ++x)
+			for(b = in + (h-2-y)*w*4, x = 0; x < w/2; ++x)
 			{
 				blockr = (b[2] + b[6] + b[inpitch+2] + b[inpitch+6]) >> 2;
 				blockg = (b[1] + b[5] + b[inpitch+1] + b[inpitch+5]) >> 2;
@@ -864,7 +847,7 @@ static void SCR_CaptureVideo_Ogg_ConvertFrame_BGRA_to_YUV(void)
 	}
 }
 
-static void SCR_CaptureVideo_Ogg_VideoFrames(int num)
+static void SCR_CaptureVideo_Ogg_VideoFrames(int num, u8 *in)
 {
 	LOAD_FORMATSPECIFIC_OGG();
 	ogg_packet pt;
@@ -886,7 +869,7 @@ static void SCR_CaptureVideo_Ogg_VideoFrames(int num)
 	}
 
 	format->yuvi = (format->yuvi + 1) % 2;
-	SCR_CaptureVideo_Ogg_ConvertFrame_BGRA_to_YUV();
+	SCR_CaptureVideo_Ogg_ConvertFrame_BGRA_to_YUV(in);
 	format->lastnum = num;
 
 	// TODO maybe send num-1 frames from here already
@@ -941,9 +924,15 @@ void SCR_CaptureVideo_Ogg_BeginVideo(void)
 	cls.capturevideo.format = CAPTUREVIDEOFORMAT_OGG_VORBIS_THEORA;
 	cls.capturevideo.formatextension = "ogv";
 	cls.capturevideo.videofile = FS_OpenRealFile(va(vabuf, sizeof(vabuf), "%s.%s", cls.capturevideo.basename, cls.capturevideo.formatextension), "wb", false);
-	cls.capturevideo.endvideo = SCR_CaptureVideo_Ogg_EndVideo;
-	cls.capturevideo.videoframes = SCR_CaptureVideo_Ogg_VideoFrames;
-	cls.capturevideo.soundframe = SCR_CaptureVideo_Ogg_SoundFrame;
+	if (!cls.capturevideo.videofile)
+	{
+		Con_Printf(CON_ERROR "Failed to open video file \"%s\", cancelling video capture.\n", vabuf);
+		cls.capturevideo.error = true;
+		return;
+	}
+	cls.capturevideo.writeEndVideo = SCR_CaptureVideo_Ogg_EndVideo;
+	cls.capturevideo.writeVideoFrame = SCR_CaptureVideo_Ogg_VideoFrames;
+	cls.capturevideo.writeSoundFrame = SCR_CaptureVideo_Ogg_SoundFrame;
 	cls.capturevideo.formatspecific = Mem_Alloc(tempmempool, sizeof(capturevideostate_ogg_formatspecific_t));
 	{
 		LOAD_FORMATSPECIFIC_OGG();

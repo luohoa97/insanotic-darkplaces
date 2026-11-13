@@ -29,27 +29,27 @@ is the team, and the CSQC's own "teamplay" global says whether it is one.
 #include "lua_sandbox.h"
 #include "cl_lua.h"
 
-cvar_t cl_lua = {CVAR_SAVE, "cl_lua", "1", "load client Lua mods from mods/<name>/init.lua"};
+cvar_t cl_lua = {CF_CLIENT | CF_ARCHIVE, "cl_lua", "1", "load client Lua mods from mods/<name>/init.lua"};
 cvar_t cl_lua_instruction_limit = {0, "cl_lua_instruction_limit", "500000", "Lua VM instructions one client mod may execute per entry (loading, or one hook call) before it is killed and disabled"};
 cvar_t cl_lua_memory_limit = {0, "cl_lua_memory_limit", "32", "memory in MB one client mod may allocate before it is killed and disabled"};
-cvar_t cl_lua_disabled = {CVAR_SAVE, "cl_lua_disabled", "", "space separated list of client mod folder names not to load (mods/<name>)"};
+cvar_t cl_lua_disabled = {CF_CLIENT | CF_ARCHIVE, "cl_lua_disabled", "", "space separated list of client mod folder names not to load (mods/<name>)"};
 cvar_t cl_lua_touch_mouse = {0, "cl_lua_touch_mouse", "0", "development aid: the left mouse button acts as a finger on the touchscreen while a mod captures touch input"};
 
-qboolean cl_lua_touch_captured;
+qbool cl_lua_touch_captured;
 
 static void CL_Lua_RegisterAPI(lua_State *L);
 
 static luahost_t cl_luahost =
 {
 	"mod", "mods", "mod.json", "game",
-	&cl_lua_instruction_limit, &cl_lua_memory_limit, CVAR_SAVE, // mod settings persist in config.cfg
+	&cl_lua_instruction_limit, &cl_lua_memory_limit, CF_CLIENT | CF_ARCHIVE, // mod settings persist in config.cfg
 	CL_Lua_RegisterAPI,
 	{NULL}, 0, NULL
 };
 
-static qboolean cl_lua_loaded;
-static qboolean cl_lua_drawing;
-static qboolean cl_lua_was_connected;
+static qbool cl_lua_loaded;
+static qbool cl_lua_drawing;
+static qbool cl_lua_was_connected;
 
 //============================================================================
 // dispatch
@@ -59,9 +59,9 @@ static qboolean cl_lua_was_connected;
 // returned true.
 typedef void (*cl_lua_evfunc_t)(lua_State *L, int ev, void *data);
 
-static qboolean CL_Lua_Dispatch(const char *hook, cl_lua_evfunc_t push, cl_lua_evfunc_t pull, void *data)
+static qbool CL_Lua_Dispatch(const char *hook, cl_lua_evfunc_t push, cl_lua_evfunc_t pull, void *data)
 {
-	qboolean ret = false;
+	qbool ret = false;
 	int i, j;
 	if (LuaSandbox_HookCount(&cl_luahost, hook) <= 0)
 		return false;
@@ -99,7 +99,7 @@ static qboolean CL_Lua_Dispatch(const char *hook, cl_lua_evfunc_t push, cl_lua_e
 	return ret;
 }
 
-static qboolean CL_Lua_InGame(void)
+static qbool CL_Lua_InGame(void)
 {
 	return cls.state == ca_connected && cls.signon == SIGNONS && key_dest == key_game && !key_consoleactive;
 }
@@ -108,7 +108,7 @@ static qboolean CL_Lua_InGame(void)
 // loading
 
 // is name listed in cl_lua_disabled?
-static qboolean CL_Lua_IsDisabled(const char *name)
+static qbool CL_Lua_IsDisabled(const char *name)
 {
 	const char *p = cl_lua_disabled.string;
 	size_t len = strlen(name);
@@ -155,7 +155,7 @@ static void CL_Lua_LoadAll(void)
 	cl_lua_loaded = true;
 	if (!cl_lua.integer)
 		return;
-	search = FS_Search("mods/*/init.lua", true, true);
+	search = FS_Search("mods/*/init.lua", true, true, NULL);
 	if (search)
 	{
 		for (i = 0; i < search->numfilenames && n < LUASANDBOX_MAX; i++)
@@ -163,7 +163,7 @@ static void CL_Lua_LoadAll(void)
 			char dir[MAX_QPATH];
 			const char *path = search->filenames[i];
 			float order;
-			strlcpy(dir, path, sizeof(dir));
+			dp_strlcpy(dir, path, sizeof(dir));
 			if (strlen(dir) > 9)
 				dir[strlen(dir) - 9] = 0; // strip "/init.lua"
 			if (CL_Lua_IsDisabled(dir + 5)) // after "mods/"
@@ -207,7 +207,7 @@ static void CL_Lua_PushFrame(lua_State *L, int ev, void *data)
 
 void CL_Lua_Frame(void)
 {
-	qboolean connected;
+	qbool connected;
 	if (!cl_lua_loaded)
 		CL_Lua_LoadAll();
 	if (!cl_luahost.num)
@@ -292,7 +292,7 @@ void CL_Lua_DrawHUD(void)
 
 void CL_Lua_Disconnected(void)
 {
-	cvar_t *c = Cvar_FindVar("_cl_assist_allowed");
+	cvar_t *c = Cvar_FindVar(&cvars_all, "_cl_assist_allowed", CF_CLIENT | CF_SERVER);
 	if (c)
 		Cvar_SetQuick(c, "0");
 }
@@ -308,7 +308,7 @@ static int LuaCl_time(lua_State *L)
 
 static int LuaCl_realtime(lua_State *L)
 {
-	lua_pushnumber(L, realtime);
+	lua_pushnumber(L, host.realtime);
 	return 1;
 }
 
@@ -337,7 +337,7 @@ static int LuaCl_screen_size(lua_State *L)
 // aim assistance is allowed in local games and on servers that say so
 static int LuaCl_assist_allowed(lua_State *L)
 {
-	cvar_t *c = Cvar_FindVar("_cl_assist_allowed");
+	cvar_t *c = Cvar_FindVar(&cvars_all, "_cl_assist_allowed", CF_CLIENT | CF_SERVER);
 	lua_pushboolean(L, sv.active || (c && c->integer));
 	return 1;
 }
@@ -377,7 +377,7 @@ static int LuaCl_traceline(lua_State *L)
 static int CL_Lua_TeamPlay(void)
 {
 	prvm_prog_t *prog = CLVM_prog;
-	ddef_t *d;
+	mdef_t *d;
 	if (!prog->loaded)
 		return -1;
 	d = PRVM_ED_FindGlobal(prog, "teamplay");
@@ -396,13 +396,13 @@ static int LuaCl_teamplay(lua_State *L)
 	return 1;
 }
 
-static qboolean CL_Lua_PlayerInfo(int entnum, int *team, qboolean *dead, qboolean *spectator);
+static qbool CL_Lua_PlayerInfo(int entnum, int *team, qbool *dead, qbool *spectator);
 
-static void CL_Lua_PushPlayer(lua_State *L, int entnum, const vec3_t origin, const vec3_t mins, const vec3_t maxs, const vec3_t velocity, qboolean alive)
+static void CL_Lua_PushPlayer(lua_State *L, int entnum, const vec3_t origin, const vec3_t mins, const vec3_t maxs, const vec3_t velocity, qbool alive)
 {
 	int colors = cl.scores ? cl.scores[entnum - 1].colors : 0;
 	int team;
-	qboolean dead, spectator, known = CL_Lua_PlayerInfo(entnum, &team, &dead, &spectator);
+	qbool dead, spectator, known = CL_Lua_PlayerInfo(entnum, &team, &dead, &spectator);
 	if (known)
 		alive = !dead && !spectator;
 	lua_createtable(L, 0, 9);
@@ -440,7 +440,7 @@ static int LuaCl_players(lua_State *L)
 			int entnum;
 			float solid;
 			vec3_t vel;
-			if (ed->priv.required->free)
+			if (ed->free)
 				continue;
 			entnum = (int)PRVM_clientedictfloat(ed, entnum);
 			if (entnum < 1 || entnum > cl.maxclients)
@@ -498,7 +498,7 @@ typedef struct cl_lua_weapon_s
 static struct
 {
 	double bound_starttime;
-	qboolean bound;
+	qbool bound;
 	cl_lua_weapon_t weapons[CL_LUA_MAXWEAPONS];
 	int numweapons;
 	int stat_weapons;
@@ -514,7 +514,7 @@ static struct
 
 static int CL_Lua_FieldOfs(prvm_prog_t *prog, const char *name, int *type)
 {
-	ddef_t *d = PRVM_ED_FindField(prog, name);
+	mdef_t *d = PRVM_ED_FindField(prog, name);
 	if (type)
 		*type = d ? (d->type & ~DEF_SAVEGLOBAL) : ev_void;
 	return d ? (int)d->ofs : -1;
@@ -536,7 +536,7 @@ static prvm_edict_t *CL_Lua_EdictOrNull(prvm_prog_t *prog, int n)
 
 static prvm_edict_t *CL_Lua_GlobalEdict(prvm_prog_t *prog, const char *name)
 {
-	ddef_t *g = PRVM_ED_FindGlobal(prog, name);
+	mdef_t *g = PRVM_ED_FindGlobal(prog, name);
 	if (!g || (g->type & ~DEF_SAVEGLOBAL) != ev_entity)
 		return NULL;
 	return CL_Lua_EdictOrNull(prog, PRVM_GLOBALFIELDEDICT(g->ofs));
@@ -547,8 +547,8 @@ static prvm_edict_t *CL_Lua_GlobalEdict(prvm_prog_t *prog, const char *name)
 static int LuaCl_scoreboard(lua_State *L)
 {
 	prvm_prog_t *prog = CLVM_prog;
-	ddef_t *g;
-	qboolean on = false;
+	mdef_t *g;
+	qbool on = false;
 	if (cls.state == ca_connected && prog->loaded)
 	{
 		g = PRVM_ED_FindGlobal(prog, "scoreboard_active");
@@ -561,11 +561,11 @@ static int LuaCl_scoreboard(lua_State *L)
 	return 1;
 }
 
-static qboolean CL_Lua_BindCSQC(void)
+static qbool CL_Lua_BindCSQC(void)
 {
 	prvm_prog_t *prog = CLVM_prog;
 	prvm_edict_t *ed;
-	ddef_t *g;
+	mdef_t *g;
 	mfunction_t *fn;
 	int f_impulse, f_next, f_name, f_ammo, f_nametype, f_icon, f_icontype = 0, guard, stat_fuel = -1, stat_plasma = -1, res_none = 0, type;
 	if (!prog->loaded)
@@ -632,10 +632,10 @@ static qboolean CL_Lua_BindCSQC(void)
 		{
 			cl_lua_weapon_t *w = &cl_lua_csqc.weapons[cl_lua_csqc.numweapons++];
 			w->id = id;
-			strlcpy(w->name, PRVM_GetString(prog, PRVM_EDICTFIELDSTRING(ed, f_name)), sizeof(w->name));
+			dp_strlcpy(w->name, PRVM_GetString(prog, PRVM_EDICTFIELDSTRING(ed, f_name)), sizeof(w->name));
 			w->icon[0] = 0;
 			if (f_icon >= 0 && f_icontype == ev_string)
-				strlcpy(w->icon, PRVM_GetString(prog, PRVM_EDICTFIELDSTRING(ed, f_icon)), sizeof(w->icon));
+				dp_strlcpy(w->icon, PRVM_GetString(prog, PRVM_EDICTFIELDSTRING(ed, f_icon)), sizeof(w->icon));
 			w->ammo_stat = -1;
 			if (f_ammo >= 0)
 			{
@@ -673,7 +673,7 @@ static float CL_Lua_CallCSQC1(int fnum, float arg)
 // what the game itself says about a player (entnum 1..maxclients): team
 // (Xonotic's team number, 0 = none, NUM_SPECTATOR for spectators), dead,
 // spectator. Returns false when the loaded CSQC does not offer it.
-static qboolean CL_Lua_PlayerInfo(int entnum, int *team, qboolean *dead, qboolean *spectator)
+static qbool CL_Lua_PlayerInfo(int entnum, int *team, qbool *dead, qbool *spectator)
 {
 	if (!CL_Lua_BindCSQC() || cl_lua_csqc.fn_team < 0)
 		return false;
@@ -683,7 +683,7 @@ static qboolean CL_Lua_PlayerInfo(int entnum, int *team, qboolean *dead, qboolea
 	return true;
 }
 
-static qboolean CL_Lua_WeaponOwned(const cl_lua_weapon_t *w)
+static qbool CL_Lua_WeaponOwned(const cl_lua_weapon_t *w)
 {
 	int bit = w->id - 1, s = cl_lua_csqc.stat_weapons;
 	if (s < 0 || bit < 0)
@@ -696,7 +696,7 @@ static qboolean CL_Lua_WeaponOwned(const cl_lua_weapon_t *w)
 }
 
 // id of the weapon in hand (or being switched to), 0 when unknown
-static int CL_Lua_HeldWeaponId(qboolean switching)
+static int CL_Lua_HeldWeaponId(qbool switching)
 {
 	prvm_prog_t *prog = CLVM_prog;
 	prvm_edict_t *ve, *we;
@@ -794,7 +794,7 @@ static int LuaCl_projectiles(lua_State *L)
 	for (i = 1; i < prog->num_edicts; i++)
 	{
 		prvm_edict_t *ed = PRVM_EDICT_NUM(i);
-		if (ed->priv.required->free || PRVM_EDICTFIELDFUNCTION(ed, cl_lua_csqc.f_draw) != cl_lua_csqc.fn_projectile_draw)
+		if (ed->free || PRVM_EDICTFIELDFUNCTION(ed, cl_lua_csqc.f_draw) != cl_lua_csqc.fn_projectile_draw)
 			continue;
 		lua_createtable(L, 0, 4);
 		lua_pushinteger(L, i); lua_setfield(L, -2, "num");
@@ -810,7 +810,7 @@ static int LuaCl_projectiles(lua_State *L)
 static int LuaCl_me(lua_State *L)
 {
 	int team;
-	qboolean dead, spectator;
+	qbool dead, spectator;
 	lua_pushinteger(L, cl.playerentity);
 	if (cl.scores && cl.playerentity >= 1 && cl.playerentity <= cl.maxclients)
 		lua_pushinteger(L, cl.scores[cl.playerentity - 1].colors & 15);
@@ -904,8 +904,8 @@ static int LuaCl_command(lua_State *L)
 			break;
 	if (!allowed[i])
 		return luaL_error(L, "xon.command: '%s' is not allowed", first);
-	Cbuf_AddText(text);
-	Cbuf_AddText("\n");
+	Cbuf_AddText(cmd_local, text);
+	Cbuf_AddText(cmd_local, "\n");
 	return 0;
 }
 
@@ -958,16 +958,16 @@ static int LuaCl_weapon_state(lua_State *L)
 //============================================================================
 // predicted sounds
 
-cvar_t cl_lua_predict_window = {CVAR_SAVE, "cl_lua_predict_window", "0.6", "seconds within which a sound a mod played ahead of the server cancels the same sound arriving from the game"};
+cvar_t cl_lua_predict_window = {CF_CLIENT | CF_ARCHIVE, "cl_lua_predict_window", "0.6", "seconds within which a sound a mod played ahead of the server cancels the same sound arriving from the game"};
 
 #define CL_LUA_MAXPREDICTED 64
 // state: 0 waiting for the game's copy, 1 confirmed (the game played it
 // too), 2 never confirmed (the window ran out: the prediction was wrong)
 static struct { sfx_t *sfx; double time; int ticket; int state; } cl_lua_predicted[CL_LUA_MAXPREDICTED];
 static int cl_lua_predicted_ticket;
-static qboolean cl_lua_playing_predicted;
+static qbool cl_lua_playing_predicted;
 
-qboolean CL_Lua_ConsumePredictedSound(sfx_t *sfx, int entnum)
+qbool CL_Lua_ConsumePredictedSound(sfx_t *sfx, int entnum)
 {
 	int i;
 	if (cl_lua_playing_predicted)
@@ -978,7 +978,7 @@ qboolean CL_Lua_ConsumePredictedSound(sfx_t *sfx, int entnum)
 		return false;
 	for (i = 0; i < CL_LUA_MAXPREDICTED; i++)
 	{
-		if (cl_lua_predicted[i].sfx == sfx && cl_lua_predicted[i].state == 0 && realtime - cl_lua_predicted[i].time <= cl_lua_predict_window.value)
+		if (cl_lua_predicted[i].sfx == sfx && cl_lua_predicted[i].state == 0 && host.realtime - cl_lua_predicted[i].time <= cl_lua_predict_window.value)
 		{
 			cl_lua_predicted[i].state = 1;
 			return true;
@@ -994,7 +994,7 @@ static int LuaCl_play_sound(lua_State *L)
 {
 	const char *path = luaL_checkstring(L, 1);
 	float volume = (float)luaL_optnumber(L, 2, 1);
-	qboolean predicted = lua_toboolean(L, 3);
+	qbool predicted = lua_toboolean(L, 3);
 	sfx_t *sfx;
 	vec3_t org;
 	int i, oldest = 0;
@@ -1016,7 +1016,7 @@ static int LuaCl_play_sound(lua_State *L)
 			if (cl_lua_predicted[i].time < cl_lua_predicted[oldest].time)
 				oldest = i;
 		cl_lua_predicted[oldest].sfx = sfx;
-		cl_lua_predicted[oldest].time = realtime;
+		cl_lua_predicted[oldest].time = host.realtime;
 		cl_lua_predicted[oldest].ticket = ++cl_lua_predicted_ticket;
 		cl_lua_predicted[oldest].state = 0;
 		lua_pushinteger(L, cl_lua_predicted_ticket);
@@ -1038,7 +1038,7 @@ static int LuaCl_sound_confirmed(lua_State *L)
 	{
 		if (cl_lua_predicted[i].ticket != ticket || !cl_lua_predicted[i].sfx)
 			continue;
-		if (cl_lua_predicted[i].state == 0 && realtime - cl_lua_predicted[i].time > cl_lua_predict_window.value)
+		if (cl_lua_predicted[i].state == 0 && host.realtime - cl_lua_predicted[i].time > cl_lua_predict_window.value)
 			cl_lua_predicted[i].state = 2;
 		if (cl_lua_predicted[i].state == 0)
 			return 0;
@@ -1074,7 +1074,7 @@ static cachepic_t *CL_Lua_MakeCircle(const char *name, float inner)
 			pixels[(y * S + x) * 4 + 3] = (unsigned char)(a * 255);
 		}
 	}
-	pic = Draw_NewPic(name, S, S, true, pixels);
+	pic = Draw_NewPic(name, S, S, pixels, TEXTYPE_BGRA, TEXF_ALPHA | TEXF_CLAMP);
 	Mem_Free(pixels);
 	return pic;
 }
@@ -1114,7 +1114,7 @@ static int LuaCl_draw_pic(lua_State *L)
 	pic = Draw_CachePic_Flags(path, CACHEPICFLAG_NOTPERSISTENT | CACHEPICFLAG_QUIET);
 	// Draw_GetPicTexture loads a lazily loaded image now (JPG/PNG pics only
 	// get their texture when first drawn; pic->tex was still NULL for them)
-	if (!pic || !Draw_GetPicTexture(pic) || pic->tex == r_texture_notexture)
+	if (!pic || !Draw_GetPicTexture(pic) || Draw_GetPicTexture(pic) == r_texture_notexture)
 	{
 		lua_pushboolean(L, false);
 		return 1;
@@ -1138,7 +1138,7 @@ static int LuaCl_draw_subpic(lua_State *L)
 	pic = Draw_CachePic_Flags(path, CACHEPICFLAG_NOTPERSISTENT | CACHEPICFLAG_QUIET);
 	// Draw_GetPicTexture loads a lazily loaded image now (JPG/PNG pics only
 	// get their texture when first drawn; pic->tex was still NULL for them)
-	if (!pic || !Draw_GetPicTexture(pic) || pic->tex == r_texture_notexture)
+	if (!pic || !Draw_GetPicTexture(pic) || Draw_GetPicTexture(pic) == r_texture_notexture)
 	{
 		lua_pushboolean(L, false);
 		return 1;
@@ -1152,7 +1152,7 @@ static int LuaCl_draw_subpic(lua_State *L)
 	return 1;
 }
 
-static void CL_Lua_DrawRound(lua_State *L, qboolean ring)
+static void CL_Lua_DrawRound(lua_State *L, qbool ring)
 {
 	float x = luaL_checknumber(L, 1), y = luaL_checknumber(L, 2), r = luaL_checknumber(L, 3);
 	float c[4];
@@ -1257,18 +1257,18 @@ static void CL_Lua_RegisterAPI(lua_State *L)
 //============================================================================
 // console commands
 
-static void CL_Lua_Mods_f(void)
+static void CL_Lua_Mods_f(cmd_state_t *cmd)
 {
 	LuaSandbox_PrintList(&cl_luahost);
 }
 
-static void CL_Lua_Reload_f(void)
+static void CL_Lua_Reload_f(cmd_state_t *cmd)
 {
 	CL_Lua_CloseAll();
 	Con_Printf("[lua] reloading mods\n");
 	cl_lua_was_connected = false;
 	CL_Lua_LoadAll();
-	CL_Lua_Mods_f();
+	CL_Lua_Mods_f(cmd_local);
 }
 
 void CL_Lua_Init(void)
@@ -1280,8 +1280,8 @@ void CL_Lua_Init(void)
 	Cvar_RegisterVariable(&cl_lua_touch_mouse);
 	Cvar_RegisterVariable(&cl_lua_disabled);
 	Cvar_RegisterVariable(&cl_lua_predict_window);
-	Cmd_AddCommand("lua_mods", CL_Lua_Mods_f, "list client Lua mods and their status");
-	Cmd_AddCommand("lua_reload", CL_Lua_Reload_f, "reload every client Lua mod");
+	Cmd_AddCommand(CF_CLIENT, "lua_mods", CL_Lua_Mods_f, "list client Lua mods and their status");
+	Cmd_AddCommand(CF_CLIENT, "lua_reload", CL_Lua_Reload_f, "reload every client Lua mod");
 }
 
 void CL_Lua_Shutdown(void)
