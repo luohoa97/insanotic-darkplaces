@@ -2292,8 +2292,8 @@ static void VID_Android_SetupANGLE(void)
 		if (gles) dlclose(gles);
 		return;
 	}
-	SDL_SetHint(SDL_HINT_EGL_LIBRARY, "libEGL_angle.so");
-	SDL_SetHint(SDL_HINT_OPENGL_LIBRARY, "libGLESv2_angle.so");
+	setenv("SDL_VIDEO_EGL_DRIVER", "libEGL_angle.so", 1); // SDL 2 reads the library names from the environment
+	setenv("SDL_OPENGL_LIBRARY", "libGLESv2_angle.so", 1);
 	vid_angle_state = "ANGLE";
 	Con_Printf("GL backend: ANGLE (libEGL_angle.so / libGLESv2_angle.so)\n");
 }
