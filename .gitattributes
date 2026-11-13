@@ -61,7 +61,6 @@ DoxyConfig crlf=input
 doxyfile crlf=input
 Doxyfile crlf=input
 *.doxygen crlf=input
-*.dpk -diff -crlf
 *.dpm -diff -crlf
 *.dsp -crlf
 *.dsw -crlf
@@ -165,9 +164,9 @@ POSITIONS -diff -crlf
 *.psd -diff -crlf
 *.py crlf=input
 *.q3map1 crlf=input
-*.qc crlf=input linguist-language=C
+*.qc crlf=input
 *.qdt crlf=input
-*.qh crlf=input linguist-language=C
+*.qh crlf=input
 *.rb crlf=input
 *.rc2 crlf=input
 *.rc -crlf

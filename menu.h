@@ -21,9 +21,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #ifndef MENU_H
 #define MENU_H
 
-#include "qtypes.h"
-struct serverlist_entry_s;
-
 enum m_state_e {
 	m_none,
 	m_main,
@@ -52,7 +49,8 @@ enum m_state_e {
 };
 
 extern enum m_state_e m_state;
-
+extern char m_return_reason[128];
+void M_Update_Return_Reason(const char *s);
 
 /*
 // hard-coded menus
@@ -71,8 +69,6 @@ void MP_Draw (void);
 void MP_ToggleMenu (int mode);
 void MP_Shutdown (void);*/
 
-qbool MP_ConsoleCommand(const char *text, size_t textlen);
-
 //
 // menu router
 //
@@ -80,15 +76,12 @@ qbool MP_ConsoleCommand(const char *text, size_t textlen);
 void MR_Init_Commands (void);
 void MR_Init (void);
 void MR_Restart (void);
-extern void (*MR_KeyEvent) (int key, int ascii, qbool downevent);
+extern void (*MR_KeyEvent) (int key, int ascii, qboolean downevent);
 extern void (*MR_Draw) (void);
 extern void (*MR_ToggleMenu) (int mode);
 extern void (*MR_Shutdown) (void);
 extern void (*MR_NewMap) (void);
-extern int (*MR_GetServerListEntryCategory) (const struct serverlist_entry_s *entry);
-
-// menu QC error handling
-extern jmp_buf mp_abort;
+extern int (*MR_GetServerListEntryCategory) (const serverlist_entry_t *entry);
 
 typedef struct video_resolution_s
 {

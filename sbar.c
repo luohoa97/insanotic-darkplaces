@@ -53,7 +53,7 @@ cachepic_t *sb_face_quad;
 cachepic_t *sb_face_invuln;
 cachepic_t *sb_face_invis_invuln;
 
-qbool sb_showscores;
+qboolean sb_showscores;
 
 int sb_lines;			// scan lines to draw
 
@@ -85,37 +85,36 @@ cachepic_t *sb_complete;
 cachepic_t *sb_inter;
 cachepic_t *sb_finale;
 
-cvar_t cl_showfps = {CF_CLIENT | CF_ARCHIVE, "cl_showfps", "0", "shows your rendered fps (frames per second)"};
-cvar_t cl_showsound = {CF_CLIENT | CF_ARCHIVE, "cl_showsound", "0", "shows number of active sound sources, sound latency, and other statistics"};
-cvar_t cl_showblur = {CF_CLIENT | CF_ARCHIVE, "cl_showblur", "0", "shows the current alpha level of motionblur"};
-cvar_t cl_showspeed = {CF_CLIENT | CF_ARCHIVE, "cl_showspeed", "0", "shows your current speed (qu per second); number selects unit: 1 = qu/s, 2 = m/s, 3 = km/h, 4 = mph, 5 = knots"};
-cvar_t cl_showspeed_factor = {CF_CLIENT | CF_ARCHIVE, "cl_showspeed_factor", "2.54", "multiplier of the centimeter for cl_showspeed. 1 unit = 1 inch in Quake, so this should be 2.54 for Quake, etc"};
-cvar_t cl_showtopspeed = {CF_CLIENT | CF_ARCHIVE, "cl_showtopspeed", "0", "shows your top speed (kept on screen for max 3 seconds); value -1 takes over the unit from cl_showspeed, otherwise it's an unit number just like in cl_showspeed"};
-cvar_t cl_showtime = {CF_CLIENT | CF_ARCHIVE, "cl_showtime", "0", "shows current time of day (useful on screenshots)"};
-cvar_t cl_showtime_format = {CF_CLIENT | CF_ARCHIVE, "cl_showtime_format", "%H:%M:%S", "format string for time of day"};
-cvar_t cl_showdate = {CF_CLIENT | CF_ARCHIVE, "cl_showdate", "0", "shows current date (useful on screenshots)"};
-cvar_t cl_showdate_format = {CF_CLIENT | CF_ARCHIVE, "cl_showdate_format", "%Y-%m-%d", "format string for date"};
-cvar_t cl_showtex = {CF_CLIENT, "cl_showtex", "0", "shows the name of the texture on the crosshair (for map debugging)"};
+cvar_t showfps = {CVAR_SAVE, "showfps", "0", "shows your rendered fps (frames per second)"};
+cvar_t showsound = {CVAR_SAVE, "showsound", "0", "shows number of active sound sources, sound latency, and other statistics"};
+cvar_t showblur = {CVAR_SAVE, "showblur", "0", "shows the current alpha level of motionblur"};
+cvar_t showspeed = {CVAR_SAVE, "showspeed", "0", "shows your current speed (qu per second); number selects unit: 1 = qu/s, 2 = m/s, 3 = km/h, 4 = mph, 5 = knots"};
+cvar_t showtopspeed = {CVAR_SAVE, "showtopspeed", "0", "shows your top speed (kept on screen for max 3 seconds); value -1 takes over the unit from showspeed, otherwise it's an unit number just like in showspeed"};
+cvar_t showtime = {CVAR_SAVE, "showtime", "0", "shows current time of day (useful on screenshots)"};
+cvar_t showtime_format = {CVAR_SAVE, "showtime_format", "%H:%M:%S", "format string for time of day"};
+cvar_t showdate = {CVAR_SAVE, "showdate", "0", "shows current date (useful on screenshots)"};
+cvar_t showdate_format = {CVAR_SAVE, "showdate_format", "%Y-%m-%d", "format string for date"};
+cvar_t showtex = {0, "showtex", "0", "shows the name of the texture on the crosshair (for map debugging)"};
+cvar_t sbar_alpha_bg = {CVAR_SAVE, "sbar_alpha_bg", "0.4", "opacity value of the statusbar background image"};
+cvar_t sbar_alpha_fg = {CVAR_SAVE, "sbar_alpha_fg", "1", "opacity value of the statusbar weapon/item icons and numbers"};
+cvar_t sbar_hudselector = {CVAR_SAVE, "sbar_hudselector", "0", "selects which of the builtin hud layouts to use (meaning is somewhat dependent on gamemode, so nexuiz has a very different set of hud layouts than quake for example)"};
+cvar_t sbar_scorerank = {CVAR_SAVE, "sbar_scorerank", "1", "shows an overlay for your score (or team score) and rank in the scoreboard"};
+cvar_t sbar_gametime = {CVAR_SAVE, "sbar_gametime", "1", "shows an overlay for the time left in the current match/level (or current game time if there is no timelimit set)"};
+cvar_t sbar_miniscoreboard_size = {CVAR_SAVE, "sbar_miniscoreboard_size", "-1", "sets the size of the mini deathmatch overlay in items, or disables it when set to 0, or sets it to a sane default when set to -1"};
+cvar_t sbar_flagstatus_right = {CVAR_SAVE, "sbar_flagstatus_right", "0", "moves Nexuiz flag status icons to the right"};
+cvar_t sbar_flagstatus_pos = {CVAR_SAVE, "sbar_flagstatus_pos", "115", "pixel position of the Nexuiz flag status icons, from the bottom"};
+cvar_t sbar_info_pos = {CVAR_SAVE, "sbar_info_pos", "0", "pixel position of the info strings (such as showfps), from the bottom"};
 
-cvar_t sbar_alpha_bg = {CF_CLIENT | CF_ARCHIVE, "sbar_alpha_bg", "0.4", "opacity value of the statusbar background image"};
-cvar_t sbar_alpha_fg = {CF_CLIENT | CF_ARCHIVE, "sbar_alpha_fg", "1", "opacity value of the statusbar weapon/item icons and numbers"};
-cvar_t sbar_hudselector = {CF_CLIENT | CF_ARCHIVE, "sbar_hudselector", "0", "selects which of the builtin hud layouts to use (meaning is somewhat dependent on gamemode, so nexuiz has a very different set of hud layouts than quake for example)"};
-cvar_t sbar_scorerank = {CF_CLIENT | CF_ARCHIVE, "sbar_scorerank", "1", "shows an overlay for your score (or team score) and rank in the scoreboard"};
-cvar_t sbar_gametime = {CF_CLIENT | CF_ARCHIVE, "sbar_gametime", "1", "shows an overlay for the time left in the current match/level (or current game time if there is no timelimit set)"};
-cvar_t sbar_miniscoreboard_size = {CF_CLIENT | CF_ARCHIVE, "sbar_miniscoreboard_size", "-1", "sets the size of the mini deathmatch overlay in items, or disables it when set to 0, or sets it to a sane default when set to -1"};
-cvar_t sbar_flagstatus_right = {CF_CLIENT | CF_ARCHIVE, "sbar_flagstatus_right", "0", "moves Nexuiz flag status icons to the right"};
-cvar_t sbar_flagstatus_pos = {CF_CLIENT | CF_ARCHIVE, "sbar_flagstatus_pos", "115", "pixel position of the Nexuiz flag status icons, from the bottom"};
-cvar_t sbar_info_pos = {CF_CLIENT | CF_ARCHIVE, "sbar_info_pos", "0", "pixel position of the info strings (such as showfps), from the bottom"};
+cvar_t cl_deathscoreboard = {0, "cl_deathscoreboard", "1", "shows scoreboard (+showscores) while dead"};
 
-cvar_t cl_deathscoreboard = {CF_CLIENT, "cl_deathscoreboard", "1", "shows scoreboard (+showscores) while dead"};
-
-cvar_t crosshair_color_red = {CF_CLIENT | CF_ARCHIVE, "crosshair_color_red", "1", "customizable crosshair color"};
-cvar_t crosshair_color_green = {CF_CLIENT | CF_ARCHIVE, "crosshair_color_green", "0", "customizable crosshair color"};
-cvar_t crosshair_color_blue = {CF_CLIENT | CF_ARCHIVE, "crosshair_color_blue", "0", "customizable crosshair color"};
-cvar_t crosshair_color_alpha = {CF_CLIENT | CF_ARCHIVE, "crosshair_color_alpha", "1", "how opaque the crosshair should be"};
-cvar_t crosshair_size = {CF_CLIENT | CF_ARCHIVE, "crosshair_size", "1", "adjusts size of the crosshair on the screen"};
+cvar_t crosshair_color_red = {CVAR_SAVE, "crosshair_color_red", "1", "customizable crosshair color"};
+cvar_t crosshair_color_green = {CVAR_SAVE, "crosshair_color_green", "0", "customizable crosshair color"};
+cvar_t crosshair_color_blue = {CVAR_SAVE, "crosshair_color_blue", "0", "customizable crosshair color"};
+cvar_t crosshair_color_alpha = {CVAR_SAVE, "crosshair_color_alpha", "1", "how opaque the crosshair should be"};
+cvar_t crosshair_size = {CVAR_SAVE, "crosshair_size", "1", "adjusts size of the crosshair on the screen"};
 
 static void Sbar_MiniDeathmatchOverlay (int x, int y);
+static void Sbar_DeathmatchOverlay (void);
 static void Sbar_IntermissionOverlay (void);
 static void Sbar_FinaleOverlay (void);
 
@@ -128,7 +127,7 @@ Sbar_ShowScores
 Tab key down
 ===============
 */
-static void Sbar_ShowScores_f(cmd_state_t *cmd)
+static void Sbar_ShowScores (void)
 {
 	if (sb_showscores)
 		return;
@@ -143,7 +142,7 @@ Sbar_DontShowScores
 Tab key up
 ===============
 */
-static void Sbar_DontShowScores_f(cmd_state_t *cmd)
+static void Sbar_DontShowScores (void)
 {
 	sb_showscores = false;
 	CL_VM_UpdateShowingScoresState(sb_showscores);
@@ -162,7 +161,7 @@ static void sbar_start(void)
 		for (i = 0;i < 10;i++)
 			sb_nums[0][i] = Draw_CachePic_Flags (va(vabuf, sizeof(vabuf), "gfx/num_%i",i), CACHEPICFLAG_QUIET);
 		sb_nums[0][10] = Draw_CachePic_Flags ("gfx/num_minus", CACHEPICFLAG_QUIET);
-		sb_colon = Draw_CachePic_Flags ("gfx/num_colon", CACHEPICFLAG_QUIET | CACHEPICFLAG_FAILONMISSING);
+		sb_colon = Draw_CachePic_Flags ("gfx/num_colon", CACHEPICFLAG_QUIET);
 
 		sb_ammo[0] = Draw_CachePic_Flags ("gfx/sb_shells", CACHEPICFLAG_QUIET);
 		sb_ammo[1] = Draw_CachePic_Flags ("gfx/sb_bullets", CACHEPICFLAG_QUIET);
@@ -220,7 +219,7 @@ static void sbar_start(void)
 		sb_nums[0][10] = Draw_CachePic_Flags ("gfx/num_minus", CACHEPICFLAG_QUIET);
 		sb_nums[1][10] = Draw_CachePic_Flags ("gfx/anum_minus", CACHEPICFLAG_QUIET);
 
-		sb_colon = Draw_CachePic_Flags ("gfx/num_colon", CACHEPICFLAG_QUIET | CACHEPICFLAG_FAILONMISSING);
+		sb_colon = Draw_CachePic_Flags ("gfx/num_colon", CACHEPICFLAG_QUIET);
 		sb_slash = Draw_CachePic_Flags ("gfx/num_slash", CACHEPICFLAG_QUIET);
 
 		sb_weapons[0][0] = Draw_CachePic_Flags ("gfx/inv_shotgun", CACHEPICFLAG_QUIET);
@@ -358,31 +357,18 @@ static void sbar_newmap(void)
 
 void Sbar_Init (void)
 {
-	Cmd_AddCommand(CF_CLIENT, "+showscores", Sbar_ShowScores_f, "show scoreboard");
-	Cmd_AddCommand(CF_CLIENT, "-showscores", Sbar_DontShowScores_f, "hide scoreboard");
-	Cvar_RegisterVariable(&cl_showfps);
-	Cvar_RegisterVariable(&cl_showsound);
-	Cvar_RegisterVariable(&cl_showblur);
-	Cvar_RegisterVariable(&cl_showspeed);
-	Cvar_RegisterVariable(&cl_showspeed_factor);
-	Cvar_RegisterVariable(&cl_showtopspeed);
-	Cvar_RegisterVariable(&cl_showtime);
-	Cvar_RegisterVariable(&cl_showtime_format);
-	Cvar_RegisterVariable(&cl_showdate);
-	Cvar_RegisterVariable(&cl_showdate_format);
-	Cvar_RegisterVariable(&cl_showtex);
-	
-	Cvar_RegisterVirtual(&cl_showfps, "showfps");
-	Cvar_RegisterVirtual(&cl_showsound, "showsound");
-	Cvar_RegisterVirtual(&cl_showblur, "showblur");
-	Cvar_RegisterVirtual(&cl_showspeed, "showspeed");
-	Cvar_RegisterVirtual(&cl_showtopspeed, "showtopspeed");
-	Cvar_RegisterVirtual(&cl_showtime, "showtime");
-	Cvar_RegisterVirtual(&cl_showtime_format, "showtime_format");
-	Cvar_RegisterVirtual(&cl_showdate, "showdate");
-	Cvar_RegisterVirtual(&cl_showdate_format, "showdate_format");
-	Cvar_RegisterVirtual(&cl_showtex, "showtex");
-	
+	Cmd_AddCommand("+showscores", Sbar_ShowScores, "show scoreboard");
+	Cmd_AddCommand("-showscores", Sbar_DontShowScores, "hide scoreboard");
+	Cvar_RegisterVariable(&showfps);
+	Cvar_RegisterVariable(&showsound);
+	Cvar_RegisterVariable(&showblur);
+	Cvar_RegisterVariable(&showspeed);
+	Cvar_RegisterVariable(&showtopspeed);
+	Cvar_RegisterVariable(&showtime);
+	Cvar_RegisterVariable(&showtime_format);
+	Cvar_RegisterVariable(&showdate);
+	Cvar_RegisterVariable(&showdate_format);
+	Cvar_RegisterVariable(&showtex);
 	Cvar_RegisterVariable(&sbar_alpha_bg);
 	Cvar_RegisterVariable(&sbar_alpha_fg);
 	Cvar_RegisterVariable(&sbar_hudselector);
@@ -391,8 +377,6 @@ void Sbar_Init (void)
 	Cvar_RegisterVariable(&sbar_miniscoreboard_size);
 	Cvar_RegisterVariable(&sbar_info_pos);
 	Cvar_RegisterVariable(&cl_deathscoreboard);
-	// This cvar is found in Fitzquake-derived engines and FTEQW and is read by the Alkaline 1.2 and Arcane Dimensions 1.80 CSQC
-	Cvar_RegisterVirtual(&sbar_alpha_bg, "scr_sbaralpha");
 
 	Cvar_RegisterVariable(&crosshair_color_red);
 	Cvar_RegisterVariable(&crosshair_color_green);
@@ -621,7 +605,7 @@ void Sbar_SortFrags (void)
 						teamname = "Total Team Score";
 						break;
 				}
-				dp_strlcpy(teams[teamlines-1].name, teamname, sizeof(teams[teamlines-1].name));
+				strlcpy(teams[teamlines-1].name, teamname, sizeof(teams[teamlines-1].name));
 
 				teams[teamlines-1].frags = 0;
 				teams[teamlines-1].colors = color + 16 * color;
@@ -683,7 +667,7 @@ static void Sbar_SoloScoreboard (void)
 		Sbar_DrawString(8+22*8, 4, va(vabuf, sizeof(vabuf), "Secrets:%3i", cl.stats[STAT_SECRETS]));
 
 	// format is like this: e1m1:The Sligpate Complex
-	dpsnprintf(str, sizeof(str), "%s:%.39s", cl.worldbasename, cl.worldmessage);
+	dpsnprintf(str, sizeof(str), "%s:%s", cl.worldbasename, cl.worldmessage);
 
 	// if there's a newline character, terminate the string there
 	if (strchr(str, '\n'))
@@ -743,7 +727,7 @@ Sbar_DrawScoreboard
 static void Sbar_DrawScoreboard (void)
 {
 	Sbar_SoloScoreboard ();
-	// LadyHavoc: changed to draw the deathmatch overlays in any multiplayer mode
+	// LordHavoc: changed to draw the deathmatch overlays in any multiplayer mode
 	//if (cl.gametype == GAME_DEATHMATCH)
 	if (!cl.islocalgame)
 		Sbar_DeathmatchOverlay ();
@@ -892,7 +876,7 @@ static void Sbar_DrawInventory (void)
 
 	// items
 	for (i=0 ; i<6 ; i++)
-		if (cl.stats[STAT_ITEMS] & (1u<<(17+i)))
+		if (cl.stats[STAT_ITEMS] & (1<<(17+i)))
 		{
 			//MED 01/04/97 changed keys
 			if (!(gamemode == GAME_HIPNOTIC || gamemode == GAME_QUOTH) || (i>1))
@@ -904,7 +888,7 @@ static void Sbar_DrawInventory (void)
 	if (gamemode == GAME_HIPNOTIC || gamemode == GAME_QUOTH)
 	{
 		for (i=0 ; i<2 ; i++)
-			if (cl.stats[STAT_ITEMS] & (1u<<(24+i)))
+			if (cl.stats[STAT_ITEMS] & (1<<(24+i)))
 				Sbar_DrawPic (288 + i*16, -16, hsb_items[i]);
 	}
 
@@ -912,14 +896,14 @@ static void Sbar_DrawInventory (void)
 	{
 		// new rogue items
 		for (i=0 ; i<2 ; i++)
-			if (cl.stats[STAT_ITEMS] & (1u<<(29+i)))
+			if (cl.stats[STAT_ITEMS] & (1<<(29+i)))
 				Sbar_DrawPic (288 + i*16, -16, rsb_items[i]);
 	}
 	else
 	{
 		// sigils
 		for (i=0 ; i<4 ; i++)
-			if (cl.stats[STAT_ITEMS] & (1u<<(28+i)))
+			if (cl.stats[STAT_ITEMS] & (1<<(28+i)))
 				Sbar_DrawPic (320-32 + i*8, -16, sb_sigil[i]);
 	}
 }
@@ -1048,29 +1032,41 @@ time_t topxy_time = 0;
 static void get_showspeed_unit(int unitnumber, double *conversion_factor, const char **unit)
 {
 	if(unitnumber < 0)
-		unitnumber = cl_showspeed.integer;
+		unitnumber = showspeed.integer;
 	switch(unitnumber)
 	{
 		default:
 		case 1:
-			*unit = "qu/s";
+			if(IS_NEXUIZ_DERIVED(gamemode))
+				*unit = "in/s";
+			else
+				*unit = "qu/s";
 			*conversion_factor = 1.0;
 			break;
 		case 2:
 			*unit = "m/s";
-			*conversion_factor = 1.0 * cl_showspeed_factor.value * 0.01;
+			*conversion_factor = 0.0254;
+			if(!IS_NEXUIZ_DERIVED(gamemode))
+				*conversion_factor *= 1.5;
+			// 1qu=1.5in is for non-Nexuiz/Xonotic only - Nexuiz/Xonotic players are overly large, but 1qu=1in fixes that
 			break;
 		case 3:
 			*unit = "km/h";
-			*conversion_factor = 1.0 * (cl_showspeed_factor.value * 0.01) * 3.6;
+			*conversion_factor = 0.0254 * 3.6;
+			if(!IS_NEXUIZ_DERIVED(gamemode))
+				*conversion_factor *= 1.5;
 			break;
 		case 4:
 			*unit = "mph";
-			*conversion_factor = 1.0 * (cl_showspeed_factor.value * 0.01 * 3.6) * 0.6213711922;
+			*conversion_factor = 0.0254 * 3.6 * 0.6213711922;
+			if(!IS_NEXUIZ_DERIVED(gamemode))
+				*conversion_factor *= 1.5;
 			break;
 		case 5:
 			*unit = "knots";
-			*conversion_factor = 1.0 * (cl_showspeed_factor.value * 0.01 * 3.6) * 0.539957;
+			*conversion_factor = 0.0254 * 1.943844492; // 1 m/s = 1.943844492 knots, because 1 knot = 1.852 km/h
+			if(!IS_NEXUIZ_DERIVED(gamemode))
+				*conversion_factor *= 1.5;
 			break;
 	}
 }
@@ -1083,7 +1079,7 @@ void Sbar_ShowFPS_Update(void)
 {
 	double interval = 1;
 	double newtime;
-	newtime = host.realtime;
+	newtime = realtime;
 	if (newtime >= showfps_nexttime)
 	{
 		showfps_framerate = showfps_framecount / (newtime - showfps_lasttime);
@@ -1110,7 +1106,7 @@ void Sbar_ShowFPS(void)
 	char topspeedstring[48];
 	char texstring[MAX_QPATH];
 	char entstring[32];
-	qbool red = false;
+	qboolean red = false;
 	soundstring[0] = 0;
 	fpsstring[0] = 0;
 	timedemostring1[0] = 0;
@@ -1122,10 +1118,10 @@ void Sbar_ShowFPS(void)
 	topspeedstring[0] = 0;
 	texstring[0] = 0;
 	entstring[0] = 0;
-	if (cl_showfps.integer)
+	if (showfps.integer)
 	{
 		red = (showfps_framerate < 1.0f);
-		if(cl_showfps.integer == 2)
+		if(showfps.integer == 2)
 			dpsnprintf(fpsstring, sizeof(fpsstring), "%7.3f mspf", (1000.0 / showfps_framerate));
 		else if (red)
 			dpsnprintf(fpsstring, sizeof(fpsstring), "%4i spf", (int)(1.0 / showfps_framerate + 0.5));
@@ -1134,48 +1130,48 @@ void Sbar_ShowFPS(void)
 		fps_strings++;
 		if (cls.timedemo)
 		{
-			dpsnprintf(timedemostring1, sizeof(timedemostring1), "frame%4i %f", cls.td_frames, host.realtime - cls.td_starttime);
+			dpsnprintf(timedemostring1, sizeof(timedemostring1), "frame%4i %f", cls.td_frames, realtime - cls.td_starttime);
 			dpsnprintf(timedemostring2, sizeof(timedemostring2), "%i seconds %3.0f/%3.0f/%3.0f fps", cls.td_onesecondavgcount, cls.td_onesecondminfps, cls.td_onesecondavgfps / max(1, cls.td_onesecondavgcount), cls.td_onesecondmaxfps);
 			fps_strings++;
 			fps_strings++;
 		}
 	}
-	if (cl_showtime.integer)
+	if (showtime.integer)
 	{
-		Sys_TimeString(timestring, sizeof(timestring), cl_showtime_format.string);
+		strlcpy(timestring, Sys_TimeString(showtime_format.string), sizeof(timestring));
 		fps_strings++;
 	}
-	if (cl_showdate.integer)
+	if (showdate.integer)
 	{
-		Sys_TimeString(datestring, sizeof(datestring), cl_showdate_format.string);
+		strlcpy(datestring, Sys_TimeString(showdate_format.string), sizeof(datestring));
 		fps_strings++;
 	}
-	if (cl_showblur.integer)
+	if (showblur.integer)
 	{
 		dpsnprintf(blurstring, sizeof(blurstring), "%3i%% blur", (int)(cl.motionbluralpha * 100));
 		fps_strings++;
 	}
-	if (cl_showsound.integer)
+	if (showsound.integer)
 	{
 		dpsnprintf(soundstring, sizeof(soundstring), "%4i/4%i at %3ims", cls.soundstats.mixedsounds, cls.soundstats.totalsounds, cls.soundstats.latency_milliseconds);
 		fps_strings++;
 	}
-	if (cl_showspeed.integer || cl_showtopspeed.integer)
+	if (showspeed.integer || showtopspeed.integer)
 	{
 		double speed, speedxy, f;
 		const char *unit;
 		speed = VectorLength(cl.movement_velocity);
 		speedxy = sqrt(cl.movement_velocity[0] * cl.movement_velocity[0] + cl.movement_velocity[1] * cl.movement_velocity[1]);
-		if (cl_showspeed.integer)
+		if (showspeed.integer)
 		{
-			get_showspeed_unit(cl_showspeed.integer, &f, &unit);
+			get_showspeed_unit(showspeed.integer, &f, &unit);
 			dpsnprintf(speedstring, sizeof(speedstring), "%.0f (%.0f) %s", f*speed, f*speedxy, unit);
 			fps_strings++;
 		}
-		if (cl_showtopspeed.integer)
+		if (showtopspeed.integer)
 		{
-			qbool topspeed_latched = false, topspeedxy_latched = false;
-			get_showspeed_unit(cl_showtopspeed.integer, &f, &unit);
+			qboolean topspeed_latched = false, topspeedxy_latched = false;
+			get_showspeed_unit(showtopspeed.integer, &f, &unit);
 			if (speed >= topspeed || current_time - top_time > 3)
 			{
 				topspeed = speed;
@@ -1198,7 +1194,7 @@ void Sbar_ShowFPS(void)
 			fps_strings++;
 		}
 	}
-	if (cl_showtex.integer)
+	if (showtex.integer)
 	{
 		vec3_t org;
 		vec3_t dest;
@@ -1215,13 +1211,13 @@ void Sbar_ShowFPS(void)
 		svtrace.fraction = 2.0;
 		cltrace.fraction = 2.0;
 		// ray hits models (even animated ones) and ignores translucent materials
-		if (sv.active)
+		if (SVVM_prog != NULL)
 			svtrace = SV_TraceLine(org, dest, MOVE_HITMODEL, NULL, SUPERCONTENTS_SOLID, 0, MATERIALFLAGMASK_TRANSLUCENT, collision_extendmovelength.value);
 		cltrace = CL_TraceLine(org, dest, MOVE_HITMODEL, NULL, SUPERCONTENTS_SOLID, 0, MATERIALFLAGMASK_TRANSLUCENT, collision_extendmovelength.value, true, false, &hitnetentity, true, true);
 		if (cltrace.hittexture)
-			dp_strlcpy(texstring, cltrace.hittexture->name, sizeof(texstring));
+			strlcpy(texstring, cltrace.hittexture->name, sizeof(texstring));
 		else
-			dp_strlcpy(texstring, "(no texture hit)", sizeof(texstring));
+			strlcpy(texstring, "(no texture hit)", sizeof(texstring));
 		fps_strings++;
 		if (svtrace.fraction < cltrace.fraction)
 		{
@@ -1231,11 +1227,11 @@ void Sbar_ShowFPS(void)
 				dpsnprintf(entstring, sizeof(entstring), "server entity %i", (int)PRVM_EDICT_TO_PROG(svtrace.ent));
 			}
 			else
-				dp_strlcpy(entstring, "(no entity hit)", sizeof(entstring));
+				strlcpy(entstring, "(no entity hit)", sizeof(entstring));
 		}
 		else
 		{
-			if (cltrace.ent != NULL)
+			if (CLVM_prog != NULL && cltrace.ent != NULL)
 			{
 				prvm_prog_t *prog = CLVM_prog;
 				dpsnprintf(entstring, sizeof(entstring), "client entity %i", (int)PRVM_EDICT_TO_PROG(cltrace.ent));
@@ -1243,9 +1239,9 @@ void Sbar_ShowFPS(void)
 			else if (hitnetentity > 0)
 				dpsnprintf(entstring, sizeof(entstring), "network entity %i", hitnetentity);
 			else if (hitnetentity == 0)
-				dp_strlcpy(entstring, "world entity", sizeof(entstring));
+				strlcpy(entstring, "world entity", sizeof(entstring));
 			else
-				dp_strlcpy(entstring, "(no entity hit)", sizeof(entstring));
+				strlcpy(entstring, "(no entity hit)", sizeof(entstring));
 		}
 		fps_strings++;
 	}
@@ -1661,7 +1657,7 @@ void Sbar_Draw (void)
 		{
 			sbar_x = (vid_conwidth.integer - 320)/2;
 			sbar_y = vid_conheight.integer - SBAR_HEIGHT;
-			// LadyHavoc: changed to draw the deathmatch overlays in any multiplayer mode
+			// LordHavoc: changed to draw the deathmatch overlays in any multiplayer mode
 			//if (cl.gametype == GAME_DEATHMATCH && gamemode != GAME_TRANSFUSION)
 
 			if (sb_lines > 24)
@@ -1762,7 +1758,7 @@ void Sbar_Draw (void)
 
 				Sbar_DrawNum (248, 0, cl.stats[STAT_AMMO], 3, cl.stats[STAT_AMMO] <= 10);
 
-				// LadyHavoc: changed to draw the deathmatch overlays in any multiplayer mode
+				// LordHavoc: changed to draw the deathmatch overlays in any multiplayer mode
 				if ((!cl.islocalgame || cl.gametype != GAME_COOP))
 				{
 					if (gamemode == GAME_TRANSFUSION)
@@ -1778,7 +1774,7 @@ void Sbar_Draw (void)
 	if (cl.csqc_vidvars.drawcrosshair && crosshair.integer >= 1 && !cl.intermission && !r_letterbox.value)
 	{
 		pic = Draw_CachePic (va(vabuf, sizeof(vabuf), "gfx/crosshair%i", crosshair.integer));
-		DrawQ_Pic((vid_conwidth.integer - Draw_GetPicWidth(pic) * crosshair_size.value) * 0.5f, (vid_conheight.integer - Draw_GetPicHeight(pic) * crosshair_size.value) * 0.5f, pic, Draw_GetPicWidth(pic) * crosshair_size.value, Draw_GetPicHeight(pic) * crosshair_size.value, crosshair_color_red.value, crosshair_color_green.value, crosshair_color_blue.value, crosshair_color_alpha.value, 0);
+		DrawQ_Pic((vid_conwidth.integer - pic->width * crosshair_size.value) * 0.5f, (vid_conheight.integer - pic->height * crosshair_size.value) * 0.5f, pic, pic->width * crosshair_size.value, pic->height * crosshair_size.value, crosshair_color_red.value, crosshair_color_green.value, crosshair_color_blue.value, crosshair_color_alpha.value, 0);
 	}
 
 	if (cl_prydoncursor.integer > 0)
@@ -1796,7 +1792,7 @@ Sbar_DeathmatchOverlay
 static float Sbar_PrintScoreboardItem(scoreboard_t *s, float x, float y)
 {
 	int minutes;
-	qbool myself = false;
+	qboolean myself = false;
 	unsigned char *c;
 	char vabuf[1024];
 	minutes = (int)((cl.intermission ? cl.completed_time - s->qw_entertime : cl.time - s->qw_entertime) / 60.0);
@@ -1869,9 +1865,9 @@ void Sbar_DeathmatchOverlay (void)
 	char vabuf[1024];
 
 	// request new ping times every two second
-	if (cl.last_ping_request < host.realtime - 2 && cls.netcon)
+	if (cl.last_ping_request < realtime - 2 && cls.netcon)
 	{
-		cl.last_ping_request = host.realtime;
+		cl.last_ping_request = realtime;
 		if (cls.protocol == PROTOCOL_QUAKEWORLD)
 		{
 			MSG_WriteByte(&cls.netcon->message, qw_clc_stringcmd);
@@ -1918,7 +1914,7 @@ void Sbar_DeathmatchOverlay (void)
 	if(IS_OLDNEXUIZ_DERIVED(gamemode))
 		DrawQ_Pic (xmin - 8, ymin - 8, 0, xmax-xmin+1 + 2*8, ymax-ymin+1 + 2*8, 0, 0, 0, sbar_alpha_bg.value, 0);
 
-	DrawQ_Pic ((vid_conwidth.integer - Draw_GetPicWidth(sb_ranking))/2, 8, sb_ranking, 0, 0, 1, 1, 1, 1 * sbar_alpha_fg.value, 0);
+	DrawQ_Pic ((vid_conwidth.integer - sb_ranking->width)/2, 8, sb_ranking, 0, 0, 1, 1, 1, 1 * sbar_alpha_fg.value, 0);
 
 	// draw the text
 	y = 40;
@@ -2166,14 +2162,14 @@ void Sbar_Score (int margin)
 		if (minutes >= 5)
 		{
 			Sbar_DrawXNum(-12*6, 32, minutes,  3, 12, 1, 1, 1, 1, 0);
-			if (Draw_IsPicLoaded(sb_colon))
+			if(sb_colon && sb_colon->tex != r_texture_notexture)
 				DrawQ_Pic(sbar_x + -12*3, sbar_y + 32, sb_colon, 12, 12, 1, 1, 1, sbar_alpha_fg.value, 0);
 			Sbar_DrawXNum(-12*2, 32, seconds, -2, 12, 1, 1, 1, 1, 0);
 		}
 		else if (minutes >= 1)
 		{
 			Sbar_DrawXNum(-12*6, 32, minutes,  3, 12, 1, 1, 0, 1, 0);
-			if (Draw_IsPicLoaded(sb_colon))
+			if(sb_colon && sb_colon->tex != r_texture_notexture)
 				DrawQ_Pic(sbar_x + -12*3, sbar_y + 32, sb_colon, 12, 12, 1, 1, 0, sbar_alpha_fg.value, 0);
 			Sbar_DrawXNum(-12*2, 32, seconds, -2, 12, 1, 1, 0, 1, 0);
 		}
@@ -2187,7 +2183,7 @@ void Sbar_Score (int margin)
 		minutes = (int)floor(cl.time / 60);
 		seconds = (int)(floor(cl.time) - minutes * 60);
 		Sbar_DrawXNum(-12*6, 32, minutes,  3, 12, 1, 1, 1, 1, 0);
-		if (Draw_IsPicLoaded(sb_colon))
+		if(sb_colon && sb_colon->tex != r_texture_notexture)
 			DrawQ_Pic(sbar_x + -12*3, sbar_y + 32, sb_colon, 12, 12, 1, 1, 1, sbar_alpha_fg.value, 0);
 		Sbar_DrawXNum(-12*2, 32, seconds, -2, 12, 1, 1, 1, 1, 0);
 	}
@@ -2262,6 +2258,6 @@ Sbar_FinaleOverlay
 */
 void Sbar_FinaleOverlay (void)
 {
-	DrawQ_Pic((vid_conwidth.integer - Draw_GetPicWidth(sb_finale))/2, 16, sb_finale, 0, 0, 1, 1, 1, 1 * sbar_alpha_fg.value, 0);
+	DrawQ_Pic((vid_conwidth.integer - sb_finale->width)/2, 16, sb_finale, 0, 0, 1, 1, 1, 1 * sbar_alpha_fg.value, 0);
 }
 

@@ -1,6 +1,5 @@
 /*
 Copyright (C) 1996-1997 Id Software, Inc.
-Copyright (C) 2000-2021 DarkPlaces contributors
 
 This program is free software; you can redistribute it and/or
 modify it under the terms of the GNU General Public License
@@ -23,92 +22,82 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "quakedef.h"
 
 const char *cvar_dummy_description = "custom cvar";
-static const char *cvar_null_string = "";
 
-cvar_state_t cvars_all;
-cvar_state_t cvars_null;
+cvar_t *cvar_vars = NULL;
+cvar_t *cvar_hashtable[CVAR_HASHSIZE];
+const char *cvar_null_string = "";
 
 /*
 ============
 Cvar_FindVar
 ============
 */
-cvar_t *Cvar_FindVar(cvar_state_t *cvars, const char *var_name, unsigned neededflags)
+cvar_t *Cvar_FindVar (const char *var_name)
 {
-	unsigned hashindex;
-	cvar_hash_t *hash;
+	int hashindex;
+	cvar_t *var;
 
 	// use hash lookup to minimize search time
 	hashindex = CRC_Block((const unsigned char *)var_name, strlen(var_name)) % CVAR_HASHSIZE;
-	for (hash = cvars->hashtable[hashindex];hash;hash = hash->next)
-		if (!strcmp (var_name, hash->cvar->name) && (hash->cvar->flags & neededflags))
-			return hash->cvar;
-		else
-			for (char **alias = hash->cvar->aliases; alias && *alias; alias++)
-				if (!strcmp (var_name, *alias) && (hash->cvar->flags & neededflags))
-					return hash->cvar;
+	for (var = cvar_hashtable[hashindex];var;var = var->nextonhashchain)
+		if (!strcmp (var_name, var->name))
+			return var;
+
 	return NULL;
 }
 
-cvar_t *Cvar_FindVarAfter(cvar_state_t *cvars, const char *prev_var_name, unsigned neededflags)
+cvar_t *Cvar_FindVarAfter (const char *prev_var_name, int neededflags)
 {
 	cvar_t *var;
 
 	if (*prev_var_name)
 	{
-		var = Cvar_FindVar(cvars, prev_var_name, neededflags);
+		var = Cvar_FindVar (prev_var_name);
 		if (!var)
 			return NULL;
 		var = var->next;
 	}
 	else
-		var = cvars->vars;
+		var = cvar_vars;
 
 	// search for the next cvar matching the needed flags
 	while (var)
 	{
-		if (var->flags & neededflags)
+		if ((var->flags & neededflags) || !neededflags)
 			break;
 		var = var->next;
 	}
 	return var;
 }
 
-/**
- * Returns a pointer to the pointer stored in hashtable[] (or the one it links to)
- * because we'll need to update that when deleting a cvar as other cvar(s) may share its hashindex.
- */
-static cvar_hash_t **Cvar_FindVarLink(cvar_state_t *cvars, const char *var_name, cvar_t **prev_alpha, unsigned neededflags)
+static cvar_t *Cvar_FindVarLink (const char *var_name, cvar_t **parent, cvar_t ***link, cvar_t **prev_alpha)
 {
-	unsigned hashindex;
-	cvar_t *cvar;
-	cvar_hash_t **hashlinkptr;
+	int hashindex;
+	cvar_t *var;
 
 	// use hash lookup to minimize search time
-	hashindex = CRC_Block((const unsigned char *)var_name, strlen(var_name)) % CVAR_HASHSIZE;
+	hashindex = CRC_Block((const unsigned char *)var_name, strlen(var_name));
+	if(parent) *parent = NULL;
 	if(prev_alpha) *prev_alpha = NULL;
-	hashlinkptr = &cvars->hashtable[hashindex];
-	for (hashlinkptr = &cvars->hashtable[hashindex]; *hashlinkptr; hashlinkptr = &(*hashlinkptr)->next)
+	if(link) *link = &cvar_hashtable[hashindex];
+	for (var = cvar_hashtable[hashindex];var;var = var->nextonhashchain)
 	{
-		cvar = (*hashlinkptr)->cvar;
-		if (!strcmp (var_name, cvar->name) && (cvar->flags & neededflags))
-			goto match;
-		else
-			for (char **alias = cvar->aliases; alias && *alias; alias++)
-				if (!strcmp (var_name, *alias) && (cvar->flags & neededflags))
-					goto match;
-	}
-	return NULL;
+		if (!strcmp (var_name, var->name))
+		{
+			if(!prev_alpha || var == cvar_vars)
+				return var;
 
-match:
-	if(!prev_alpha || cvar == cvars->vars)
-		return hashlinkptr;
-	*prev_alpha = cvars->vars;
-	// if prev_alpha happens to become NULL then there has been some inconsistency elsewhere
-	// already - should I still insert '*prev_alpha &&' in the loop?
-	while((*prev_alpha)->next != cvar)
-		*prev_alpha = (*prev_alpha)->next;
-	return hashlinkptr;
+			*prev_alpha = cvar_vars;
+			// if prev_alpha happens to become NULL then there has been some inconsistency elsewhere
+			// already - should I still insert '*prev_alpha &&' in the loop?
+			while((*prev_alpha)->next != var)
+				*prev_alpha = (*prev_alpha)->next;
+			return var;
+		}
+		if(parent) *parent = var;
+	}
+
+	return NULL;
 }
 
 /*
@@ -116,19 +105,19 @@ match:
 Cvar_VariableValue
 ============
 */
-float Cvar_VariableValueOr(cvar_state_t *cvars, const char *var_name, float def, unsigned neededflags)
+float Cvar_VariableValueOr (const char *var_name, float def)
 {
 	cvar_t *var;
 
-	var = Cvar_FindVar(cvars, var_name, neededflags);
+	var = Cvar_FindVar (var_name);
 	if (!var)
 		return def;
 	return atof (var->string);
 }
 
-float Cvar_VariableValue(cvar_state_t *cvars, const char *var_name, unsigned neededflags)
+float Cvar_VariableValue (const char *var_name)
 {
-	return Cvar_VariableValueOr(cvars, var_name, 0, neededflags);
+	return Cvar_VariableValueOr(var_name, 0);
 }
 
 /*
@@ -136,19 +125,19 @@ float Cvar_VariableValue(cvar_state_t *cvars, const char *var_name, unsigned nee
 Cvar_VariableString
 ============
 */
-const char *Cvar_VariableStringOr(cvar_state_t *cvars, const char *var_name, const char *def, unsigned neededflags)
+const char *Cvar_VariableStringOr (const char *var_name, const char *def)
 {
 	cvar_t *var;
 
-	var = Cvar_FindVar(cvars, var_name, neededflags);
+	var = Cvar_FindVar (var_name);
 	if (!var)
 		return def;
 	return var->string;
 }
 
-const char *Cvar_VariableString(cvar_state_t *cvars, const char *var_name, unsigned neededflags)
+const char *Cvar_VariableString (const char *var_name)
 {
-	return Cvar_VariableStringOr(cvars, var_name, cvar_null_string, neededflags);
+	return Cvar_VariableStringOr(var_name, cvar_null_string);
 }
 
 /*
@@ -156,11 +145,11 @@ const char *Cvar_VariableString(cvar_state_t *cvars, const char *var_name, unsig
 Cvar_VariableDefString
 ============
 */
-const char *Cvar_VariableDefString(cvar_state_t *cvars, const char *var_name, unsigned neededflags)
+const char *Cvar_VariableDefString (const char *var_name)
 {
 	cvar_t *var;
 
-	var = Cvar_FindVar(cvars, var_name, neededflags);
+	var = Cvar_FindVar (var_name);
 	if (!var)
 		return cvar_null_string;
 	return var->defstring;
@@ -171,11 +160,11 @@ const char *Cvar_VariableDefString(cvar_state_t *cvars, const char *var_name, un
 Cvar_VariableDescription
 ============
 */
-const char *Cvar_VariableDescription(cvar_state_t *cvars, const char *var_name, unsigned neededflags)
+const char *Cvar_VariableDescription (const char *var_name)
 {
 	cvar_t *var;
 
-	var = Cvar_FindVar(cvars, var_name, neededflags);
+	var = Cvar_FindVar (var_name);
 	if (!var)
 		return cvar_null_string;
 	return var->description;
@@ -187,7 +176,7 @@ const char *Cvar_VariableDescription(cvar_state_t *cvars, const char *var_name, 
 Cvar_CompleteVariable
 ============
 */
-const char *Cvar_CompleteVariable(cvar_state_t *cvars, const char *partial, unsigned neededflags)
+const char *Cvar_CompleteVariable (const char *partial)
 {
 	cvar_t		*cvar;
 	size_t		len;
@@ -198,8 +187,8 @@ const char *Cvar_CompleteVariable(cvar_state_t *cvars, const char *partial, unsi
 		return NULL;
 
 // check functions
-	for (cvar=cvars->vars ; cvar ; cvar=cvar->next)
-		if (!strncasecmp (partial,cvar->name, len) && (cvar->flags & neededflags))
+	for (cvar=cvar_vars ; cvar ; cvar=cvar->next)
+		if (!strncasecmp (partial,cvar->name, len))
 			return cvar->name;
 
 	return NULL;
@@ -214,7 +203,7 @@ const char *Cvar_CompleteVariable(cvar_state_t *cvars, const char *partial, unsi
 	Thanks to Fett erich@heintz.com
 
 */
-int Cvar_CompleteCountPossible(cvar_state_t *cvars, const char *partial, unsigned neededflags)
+int Cvar_CompleteCountPossible (const char *partial)
 {
 	cvar_t	*cvar;
 	size_t	len;
@@ -227,14 +216,10 @@ int Cvar_CompleteCountPossible(cvar_state_t *cvars, const char *partial, unsigne
 		return	0;
 
 	// Loop through the cvars and count all possible matches
-	for (cvar = cvars->vars; cvar; cvar = cvar->next)
-		if (!strncasecmp(partial, cvar->name, len) && (cvar->flags & neededflags))
+	for (cvar = cvar_vars; cvar; cvar = cvar->next)
+		if (!strncasecmp(partial, cvar->name, len))
 			h++;
-		else
-			for (char **alias = cvar->aliases; alias && *alias; alias++)
-				if (!strncasecmp(partial, *alias, len) && (cvar->flags & neededflags))
-					h++;
-		
+
 	return h;
 }
 
@@ -247,63 +232,38 @@ int Cvar_CompleteCountPossible(cvar_state_t *cvars, const char *partial, unsigne
 	Thanks to taniwha
 
 */
-const char **Cvar_CompleteBuildList(cvar_state_t *cvars, const char *partial, unsigned neededflags)
+const char **Cvar_CompleteBuildList (const char *partial)
 {
 	const cvar_t *cvar;
 	size_t len = 0;
 	size_t bpos = 0;
-	size_t sizeofbuf = (Cvar_CompleteCountPossible(cvars, partial, neededflags) + 1) * sizeof(const char *);
+	size_t sizeofbuf = (Cvar_CompleteCountPossible (partial) + 1) * sizeof (const char *);
 	const char **buf;
 
 	len = strlen(partial);
-	buf = (const char **)Mem_Alloc(tempmempool, sizeofbuf + sizeof(const char *));
+	buf = (const char **)Mem_Alloc(tempmempool, sizeofbuf + sizeof (const char *));
 	// Loop through the alias list and print all matches
-	for (cvar = cvars->vars; cvar; cvar = cvar->next)
-		if (!strncasecmp(partial, cvar->name, len) && (cvar->flags & neededflags))
+	for (cvar = cvar_vars; cvar; cvar = cvar->next)
+		if (!strncasecmp(partial, cvar->name, len))
 			buf[bpos++] = cvar->name;
-		else
-			for (char **alias = cvar->aliases; alias && *alias; alias++)
-				if (!strncasecmp(partial, *alias, len) && (cvar->flags & neededflags))
-					buf[bpos++] = *alias;
-		
 
 	buf[bpos] = NULL;
 	return buf;
 }
 
-void Cvar_PrintHelp(cvar_t *cvar, const char *name, qbool full)
-{
-	// Aliases are purple, cvars are yellow
-	if (strcmp(cvar->name, name))
-		Con_Printf("^6%s^7 (alias of ^3%s^7)", name, cvar->name);
-	else
-		Con_Printf("^3%s^7", name);
-	Con_Printf(" is \"%s^7\" [\"%s^7\"]", ((cvar->flags & CF_PRIVATE) ? "********"/*hunter2*/ : cvar->string), cvar->defstring);
-	if (full)
-		Con_Printf(" %s", cvar->description);
-	Con_Print("\n");
-}
-
-// written by LadyHavoc
-void Cvar_CompleteCvarPrint(cvar_state_t *cvars, const char *partial, unsigned neededflags)
+// written by LordHavoc
+void Cvar_CompleteCvarPrint (const char *partial)
 {
 	cvar_t *cvar;
 	size_t len = strlen(partial);
 	// Loop through the command list and print all matches
-	for (cvar = cvars->vars; cvar; cvar = cvar->next)
-		if (!strncasecmp(partial, cvar->name, len) && (cvar->flags & neededflags))
-			Cvar_PrintHelp(cvar, cvar->name, true);
-		else
-			for (char **alias = cvar->aliases; alias && *alias; alias++)
-				if (!strncasecmp (partial, *alias, len) && (cvar->flags & neededflags))
-					Cvar_PrintHelp(cvar, *alias, true);
-
-		
+	for (cvar = cvar_vars; cvar; cvar = cvar->next)
+		if (!strncasecmp(partial, cvar->name, len))
+			Con_Printf ("^3%s^7 is \"%s\" [\"%s\"] %s\n", cvar->name, cvar->string, cvar->defstring, cvar->description);
 }
 
-/// Check if a cvar is held by some progs
-/// in which case its name is returned, otherwise NULL.
-static const char *Cvar_IsAutoCvar(cvar_t *var)
+// check if a cvar is held by some progs
+static qboolean Cvar_IsAutoCvar(cvar_t *var)
 {
 	int i;
 	prvm_prog_t *prog;
@@ -311,12 +271,12 @@ static const char *Cvar_IsAutoCvar(cvar_t *var)
 	{
 		prog = &prvm_prog_list[i];
 		if (prog->loaded && var->globaldefindex[i] >= 0)
-			return prog->name;
+			return true;
 	}
-	return NULL;
+	return false;
 }
 
-/// we assume that prog is already set to the target progs
+// we assume that prog is already set to the target progs
 static void Cvar_UpdateAutoCvar(cvar_t *var)
 {
 	int i;
@@ -329,7 +289,7 @@ static void Cvar_UpdateAutoCvar(cvar_t *var)
 		prog = &prvm_prog_list[i];
 		if (prog->loaded && var->globaldefindex[i] >= 0)
 		{
-			// MUST BE SYNCED WITH prvm_edict.c PRVM_Prog_Load
+			// MUST BE SYNCED WITH prvm_edict.c PRVM_LoadProgs
 			switch(prog->globaldefs[var->globaldefindex[i]].type & ~DEF_SAVEGLOBAL)
 			{
 			case ev_float:
@@ -361,24 +321,12 @@ static void Cvar_UpdateAutoCvar(cvar_t *var)
 	}
 }
 
-/// called after loading a savegame
-void Cvar_UpdateAllAutoCvars(cvar_state_t *cvars)
+// called after loading a savegame
+void Cvar_UpdateAllAutoCvars(void)
 {
 	cvar_t *var;
-	for (var = cvars->vars ; var ; var = var->next)
+	for (var = cvar_vars ; var ; var = var->next)
 		Cvar_UpdateAutoCvar(var);
-}
-
-void Cvar_Callback(cvar_t *var)
-{
-	if (var == NULL)
-	{
-		Con_Print(CON_WARN "Cvar_Callback: var == NULL\n");
-		return;
-	}
-
-	if(var->callback)
-		var->callback(var);
 }
 
 /*
@@ -389,15 +337,16 @@ Cvar_Set
 extern cvar_t sv_disablenotify;
 static void Cvar_SetQuick_Internal (cvar_t *var, const char *value)
 {
-	qbool changed;
+	qboolean changed;
 	size_t valuelen;
+	char vabuf[1024];
 
 	changed = strcmp(var->string, value) != 0;
-	// LadyHavoc: don't reallocate when there is no change
+	// LordHavoc: don't reallocate when there is no change
 	if (!changed)
-		goto cvar_callback;
+		return;
 
-	// LadyHavoc: don't reallocate when the buffer is the same size
+	// LordHavoc: don't reallocate when the buffer is the same size
 	valuelen = strlen(value);
 	if (!var->string || strlen(var->string) != valuelen)
 	{
@@ -408,11 +357,11 @@ static void Cvar_SetQuick_Internal (cvar_t *var, const char *value)
 	memcpy ((char *)var->string, value, valuelen + 1);
 	var->value = atof (var->string);
 	var->integer = (int) var->value;
-	if ((var->flags & CF_NOTIFY) && sv.active && !sv_disablenotify.integer)
-		SV_BroadcastPrintf("\003^3Server cvar \"%s\" changed to \"%s\"\n", var->name, var->string);
+	if ((var->flags & CVAR_NOTIFY) && changed && sv.active && !sv_disablenotify.integer)
+		SV_BroadcastPrintf("\"%s\" changed to \"%s\"\n", var->name, var->string);
 #if 0
 	// TODO: add infostring support to the server?
-	if ((var->flags & CF_SERVERINFO) && changed && sv.active)
+	if ((var->flags & CVAR_SERVERINFO) && changed && sv.active)
 	{
 		InfoString_SetValue(svs.serverinfo, sizeof(svs.serverinfo), var->name, var->string);
 		if (sv.active)
@@ -423,28 +372,60 @@ static void Cvar_SetQuick_Internal (cvar_t *var, const char *value)
 		}
 	}
 #endif
-	if (var->flags & CF_USERINFO)
+	if ((var->flags & CVAR_USERINFO) && cls.state != ca_dedicated)
 		CL_SetInfo(var->name, var->string, true, false, false, false);
+	else if ((var->flags & CVAR_NQUSERINFOHACK) && cls.state != ca_dedicated)
+	{
+		// update the cls.userinfo to have proper values for the
+		// silly nq config variables.
+		//
+		// this is done when these variables are changed rather than at
+		// connect time because if the user or code checks the userinfo and it
+		// holds weird values it may cause confusion...
+		if (!strcmp(var->name, "_cl_color"))
+		{
+			int top = (var->integer >> 4) & 15, bottom = var->integer & 15;
+			CL_SetInfo("topcolor", va(vabuf, sizeof(vabuf), "%i", top), true, false, false, false);
+			CL_SetInfo("bottomcolor", va(vabuf, sizeof(vabuf), "%i", bottom), true, false, false, false);
+			if (cls.protocol != PROTOCOL_QUAKEWORLD && cls.netcon)
+			{
+				MSG_WriteByte(&cls.netcon->message, clc_stringcmd);
+				MSG_WriteString(&cls.netcon->message, va(vabuf, sizeof(vabuf), "color %i %i", top, bottom));
+			}
+		}
+		else if (!strcmp(var->name, "_cl_rate"))
+			CL_SetInfo("rate", va(vabuf, sizeof(vabuf), "%i", var->integer), true, false, false, false);
+		else if (!strcmp(var->name, "_cl_rate_burstsize"))
+			CL_SetInfo("rate_burstsize", va(vabuf, sizeof(vabuf), "%i", var->integer), true, false, false, false);
+		else if (!strcmp(var->name, "_cl_playerskin"))
+			CL_SetInfo("playerskin", var->string, true, false, false, false);
+		else if (!strcmp(var->name, "_cl_playermodel"))
+			CL_SetInfo("playermodel", var->string, true, false, false, false);
+		else if (!strcmp(var->name, "_cl_name"))
+			CL_SetInfo("name", var->string, true, false, false, false);
+		else if (!strcmp(var->name, "rcon_secure"))
+		{
+			// whenever rcon_secure is changed to 0, clear rcon_password for
+			// security reasons (prevents a send-rcon-password-as-plaintext
+			// attack based on NQ protocol session takeover and svc_stufftext)
+			if(var->integer <= 0)
+				Cvar_Set("rcon_password", "");
+		}
+#ifdef CONFIG_MENU
+		else if (!strcmp(var->name, "net_slist_favorites"))
+			NetConn_UpdateFavorites();
+#endif
+	}
 
 	Cvar_UpdateAutoCvar(var);
-
-cvar_callback:
-	// Call the function stored in the cvar for bounds checking, cleanup, etc
-	Cvar_Callback(var);
 }
 
 void Cvar_SetQuick (cvar_t *var, const char *value)
 {
 	if (var == NULL)
 	{
-		Con_Print(CON_WARN "Cvar_SetQuick: var == NULL\n");
+		Con_Print("Cvar_SetQuick: var == NULL\n");
 		return;
-	}
-
-	if (!(var->flags & CF_REGISTERED) && !(var->flags & CF_ALLOCATED))
-	{
-		Con_Printf(CON_WARN "Warning: Cvar_SetQuick() cannot set unregistered cvar \"%s\"\n", var->name);
-		return; // setting an unregistered engine cvar crashes
 	}
 
 	if (developer_extra.integer)
@@ -453,13 +434,13 @@ void Cvar_SetQuick (cvar_t *var, const char *value)
 	Cvar_SetQuick_Internal(var, value);
 }
 
-void Cvar_Set(cvar_state_t *cvars, const char *var_name, const char *value)
+void Cvar_Set (const char *var_name, const char *value)
 {
 	cvar_t *var;
-	var = Cvar_FindVar(cvars, var_name, ~0);
+	var = Cvar_FindVar (var_name);
 	if (var == NULL)
 	{
-		Con_Printf(CON_WARN "Cvar_Set: variable %s not found\n", var_name);
+		Con_Printf("Cvar_Set: variable %s not found\n", var_name);
 		return;
 	}
 	Cvar_SetQuick(var, value);
@@ -481,7 +462,7 @@ void Cvar_SetValueQuick(cvar_t *var, float value)
 	Cvar_SetQuick(var, val);
 }
 
-void Cvar_SetValue(cvar_state_t *cvars, const char *var_name, float value)
+void Cvar_SetValue(const char *var_name, float value)
 {
 	char val[MAX_INPUTLINE];
 
@@ -489,104 +470,7 @@ void Cvar_SetValue(cvar_state_t *cvars, const char *var_name, float value)
 		dpsnprintf(val, sizeof(val), "%i", (int)value);
 	else
 		dpsnprintf(val, sizeof(val), "%f", value);
-	Cvar_Set(cvars, var_name, val);
-}
-
-void Cvar_RegisterCallback(cvar_t *variable, void (*callback)(cvar_t *))
-{
-	if (variable == NULL)
-	{
-		Con_Print(CON_WARN "Cvar_RegisterCallback: var == NULL\n");
-		return;
-	}
-
-	if (!(variable->flags & cmd_local->cvars_flagsmask))
-	{
-		if (developer_extra.integer)
-			Con_DPrintf("^6Cvar_RegisterCallback: rejecting cvar \"%s\"\n", variable->name);
-		return;
-	}
-
-	variable->callback = callback;
-}
-
-void Cvar_RegisterVirtual(cvar_t *variable, const char *name )
-{
-	cvar_state_t *cvars = &cvars_all;
-	cvar_hash_t *hash;
-	unsigned hashindex;
-
-	if (!(variable->flags & cmd_local->cvars_flagsmask))
-	{
-		if (developer_extra.integer)
-			Con_DPrintf("^6Cvar_RegisterVirtual: rejecting cvar \"%s\" alias \"%s\"\n", variable->name, name);
-		return;
-	}
-
-	if(!*name)
-	{
-		Con_Printf(CON_WARN "Cvar_RegisterVirtual: invalid virtual cvar name\n");
-		return;
-	}
-
-	// check for overlap with a command
-	if (Cmd_Exists(cmd_local, name))
-	{
-		Con_Printf(CON_WARN "Cvar_RegisterVirtual: %s is a command\n", name);
-		return;
-	}
-
-	if(Cvar_FindVar(&cvars_all, name, 0))
-	{
-		Con_Printf(CON_WARN "Cvar_RegisterVirtual: %s is a cvar\n", name);
-		return;
-	}
-
-	// Resize the variable->aliases list to have room for another entry and a null terminator.
-	// This zero-pads when resizing, so we don't need to write the NULL terminator manually here.
-	// Also if aliases is NULL this allocates fresh for the correct size, so it's fine to just do this.
-	variable->aliases = (char **)Z_Realloc(variable->aliases, sizeof(char *) * (variable->aliases_size + 2));
-	// Add the new alias, and increment the number of aliases in the list
-	variable->aliases[variable->aliases_size++] = Z_strdup(name);
-
-	// link to head of list in this hash table index
-	hash = (cvar_hash_t *)Z_Malloc(sizeof(cvar_hash_t));
-	hashindex = CRC_Block((const unsigned char *)name, strlen(name)) % CVAR_HASHSIZE;
-	hash->next = cvars->hashtable[hashindex];
-	cvars->hashtable[hashindex] = hash;
-	hash->cvar = variable;
-}
-
-/*
-============
-Cvar_Link
-
-Links a variable to the variable list and hashtable
-============
-*/
-static void Cvar_Link(cvar_t *variable, cvar_state_t *cvars)
-{
-	cvar_t *current, *next;
-	cvar_hash_t *hash;
-	unsigned hashindex;
-	/*
-	 * Link the variable in
-	 * alphanumerical order
-	 */
-	for( current = NULL, next = cvars->vars ; next && strcmp( next->name, variable->name ) < 0 ; current = next, next = next->next )
-		;
-	if(current)
-		current->next = variable;
-	else
-		cvars->vars = variable;
-	variable->next = next;
-
-	// link to head of list in this hash table index
-	hash = (cvar_hash_t *)Z_Malloc(sizeof(cvar_hash_t));
-	hashindex = CRC_Block((const unsigned char *)variable->name, strlen(variable->name)) % CVAR_HASHSIZE;
-	hash->next = cvars->hashtable[hashindex];
-	hash->cvar = variable;
-	cvars->hashtable[hashindex] = hash;
+	Cvar_Set(var_name, val);
 }
 
 /*
@@ -598,25 +482,20 @@ Adds a freestanding variable to the variable list.
 */
 void Cvar_RegisterVariable (cvar_t *variable)
 {
-	cvar_state_t *cvars = &cvars_all;
-	cvar_t *current, *cvar;
+	int hashindex;
+	cvar_t *current, *next, *cvar;
+	char *oldstr;
+	size_t alloclen;
 	int i;
-
-	if (!(variable->flags & cmd_local->cvars_flagsmask))
-	{
-		if (developer_extra.integer)
-			Con_DPrintf("^2Cvar_RegisterVariable: rejecting cvar \"%s\"\n", variable->name);
-		return;
-	}
 
 	if (developer_extra.integer)
 		Con_DPrintf("Cvar_RegisterVariable({\"%s\", \"%s\", %i});\n", variable->name, variable->string, variable->flags);
 
-	// first check to see if it has already been defined
-	cvar = Cvar_FindVar(cvars, variable->name, ~0);
+// first check to see if it has already been defined
+	cvar = Cvar_FindVar (variable->name);
 	if (cvar)
 	{
-		if (cvar->flags & CF_ALLOCATED)
+		if (cvar->flags & CVAR_ALLOCATED)
 		{
 			if (developer_extra.integer)
 				Con_DPrintf("...  replacing existing allocated cvar {\"%s\", \"%s\", %i}\n", cvar->name, cvar->string, cvar->flags);
@@ -624,7 +503,7 @@ void Cvar_RegisterVariable (cvar_t *variable)
 			// (because the engine directly accesses fixed variables)
 			// NOTE: this isn't actually used currently
 			// (all cvars are registered before config parsing)
-			variable->flags &= ~CF_ALLOCATED;
+			variable->flags |= (cvar->flags & ~CVAR_ALLOCATED);
 			// cvar->string is now owned by variable instead
 			variable->string = cvar->string;
 			variable->defstring = cvar->defstring;
@@ -635,15 +514,15 @@ void Cvar_RegisterVariable (cvar_t *variable)
 			memcpy(variable->globaldefindex_stringno, cvar->globaldefindex_stringno, sizeof(variable->globaldefindex_stringno));
 			// replace cvar with this one...
 			variable->next = cvar->next;
-			if (cvars->vars == cvar)
+			if (cvar_vars == cvar)
 			{
 				// head of the list is easy to change
-				cvars->vars = variable;
+				cvar_vars = variable;
 			}
 			else
 			{
 				// otherwise find it somewhere in the list
-				for (current = cvars->vars;current->next != cvar;current = current->next)
+				for (current = cvar_vars;current->next != cvar;current = current->next)
 					;
 				current->next = variable;
 			}
@@ -658,31 +537,42 @@ void Cvar_RegisterVariable (cvar_t *variable)
 		return;
 	}
 
-	// check for overlap with a command
-	if (Cmd_Exists(cmd_local, variable->name))
+// check for overlap with a command
+	if (Cmd_Exists (variable->name))
 	{
-		Con_Printf(CON_WARN "Cvar_RegisterVariable: %s is a command\n", variable->name);
+		Con_Printf("Cvar_RegisterVariable: %s is a command\n", variable->name);
 		return;
 	}
 
-	// copy the value off, because future sets will Z_Free it
-	variable->name = Z_strdup(variable->name);
-	variable->string = Z_strdup(variable->string);
-	variable->defstring = Z_strdup(variable->string);
+// copy the value off, because future sets will Z_Free it
+	oldstr = (char *)variable->string;
+	alloclen = strlen(variable->string) + 1;
+	variable->string = (char *)Z_Malloc (alloclen);
+	memcpy ((char *)variable->string, oldstr, alloclen);
+	variable->defstring = (char *)Z_Malloc (alloclen);
+	memcpy ((char *)variable->defstring, oldstr, alloclen);
 	variable->value = atof (variable->string);
 	variable->integer = (int) variable->value;
-	variable->aliases = NULL;
-	variable->aliases_size = 0;
-	variable->initstring = NULL;
 
 	// Mark it as not an autocvar.
 	for (i = 0;i < PRVM_PROG_MAX;i++)
 		variable->globaldefindex[i] = -1;
 
-	// Safe for Cvar_SetQuick()
-	variable->flags |= CF_REGISTERED;
+// link the variable in
+// alphanumerical order
+	for( current = NULL, next = cvar_vars ; next && strcmp( next->name, variable->name ) < 0 ; current = next, next = next->next )
+		;
+	if( current ) {
+		current->next = variable;
+	} else {
+		cvar_vars = variable;
+	}
+	variable->next = next;
 
-	Cvar_Link(variable, cvars);
+	// link to head of list in this hash table index
+	hashindex = CRC_Block((const unsigned char *)variable->name, strlen(variable->name)) % CVAR_HASHSIZE;
+	variable->nextonhashchain = cvar_hashtable[hashindex];
+	cvar_hashtable[hashindex] = variable;
 }
 
 /*
@@ -692,63 +582,61 @@ Cvar_Get
 Adds a newly allocated variable to the variable list or sets its value.
 ============
 */
-cvar_t *Cvar_Get(cvar_state_t *cvars, const char *name, const char *value, unsigned flags, const char *newdescription)
+cvar_t *Cvar_Get (const char *name, const char *value, int flags, const char *newdescription)
 {
-	cvar_t *cvar;
+	int hashindex;
+	cvar_t *current, *next, *cvar;
 	int i;
 
 	if (developer_extra.integer)
 		Con_DPrintf("Cvar_Get(\"%s\", \"%s\", %i);\n", name, value, flags);
 
-	// first check to see if it has already been defined
-	cvar = Cvar_FindVar(cvars, name, ~0);
+// first check to see if it has already been defined
+	cvar = Cvar_FindVar (name);
 	if (cvar)
 	{
 		cvar->flags |= flags;
 		Cvar_SetQuick_Internal (cvar, value);
-		if(newdescription && (cvar->flags & CF_ALLOCATED))
+		if(newdescription && (cvar->flags & CVAR_ALLOCATED))
 		{
 			if(cvar->description != cvar_dummy_description)
 				Z_Free((char *)cvar->description);
 
 			if(*newdescription)
-				cvar->description = Z_strdup(newdescription);
+				cvar->description = (char *)Mem_strdup(zonemempool, newdescription);
 			else
 				cvar->description = cvar_dummy_description;
 		}
 		return cvar;
 	}
 
-	// check for pure evil
+// check for pure evil
 	if (!*name)
 	{
-		Con_Printf(CON_WARN "Cvar_Get: invalid variable name\n");
+		Con_Printf("Cvar_Get: invalid variable name\n");
 		return NULL;
 	}
 
-	// check for overlap with a command
-	if (Cmd_Exists(cmd_local, name))
+// check for overlap with a command
+	if (Cmd_Exists (name))
 	{
-		Con_Printf(CON_WARN "Cvar_Get: %s is a command\n", name);
+		Con_Printf("Cvar_Get: %s is a command\n", name);
 		return NULL;
 	}
 
-	// allocate a new cvar, cvar name, and cvar string
-	// TODO: factorize the following code with the one at the end of Cvar_RegisterVariable()
-	// FIXME: these never get Z_Free'd
+// allocate a new cvar, cvar name, and cvar string
+// TODO: factorize the following code with the one at the end of Cvar_RegisterVariable()
+// FIXME: these never get Z_Free'd
 	cvar = (cvar_t *)Z_Malloc(sizeof(cvar_t));
-	cvar->flags = flags | CF_ALLOCATED;
-	cvar->name = Z_strdup(name);
-	cvar->string = Z_strdup(value);
-	cvar->defstring = Z_strdup(value);
+	cvar->flags = flags | CVAR_ALLOCATED;
+	cvar->name = (char *)Mem_strdup(zonemempool, name);
+	cvar->string = (char *)Mem_strdup(zonemempool, value);
+	cvar->defstring = (char *)Mem_strdup(zonemempool, value);
 	cvar->value = atof (cvar->string);
 	cvar->integer = (int) cvar->value;
-	cvar->aliases = NULL;
-	cvar->aliases_size = 0;
-	cvar->initstring = NULL;
 
 	if(newdescription && *newdescription)
-		cvar->description = Z_strdup(newdescription);
+		cvar->description = (char *)Mem_strdup(zonemempool, newdescription);
 	else
 		cvar->description = cvar_dummy_description; // actually checked by VM_cvar_type
 
@@ -756,72 +644,24 @@ cvar_t *Cvar_Get(cvar_state_t *cvars, const char *name, const char *value, unsig
 	for (i = 0;i < PRVM_PROG_MAX;i++)
 		cvar->globaldefindex[i] = -1;
 
-	Cvar_Link(cvar, cvars);
+// link the variable in
+// alphanumerical order
+	for( current = NULL, next = cvar_vars ; next && strcmp( next->name, cvar->name ) < 0 ; current = next, next = next->next )
+		;
+	if( current )
+		current->next = cvar;
+	else
+		cvar_vars = cvar;
+	cvar->next = next;
+
+	// link to head of list in this hash table index
+	hashindex = CRC_Block((const unsigned char *)cvar->name, strlen(cvar->name)) % CVAR_HASHSIZE;
+	cvar->nextonhashchain = cvar_hashtable[hashindex];
+	cvar_hashtable[hashindex] = cvar;
 
 	return cvar;
 }
 
-/// For "quiet" mode pass NULL as the callername.
-/// Returns true if the cvar was deleted.
-static qbool Cvar_Delete(cvar_state_t *cvars, const char *name, const char *callername)
-{
-	cvar_t *cvar, *prev;
-	cvar_hash_t **hashlinkptr, *oldhashlink;
-	const char *progname;
-
-	hashlinkptr = Cvar_FindVarLink(cvars, name, &prev, ~0);
-	if(!hashlinkptr)
-	{
-		if (callername)
-			Con_Printf("%s: cvar \"%s\" is not defined.\n", callername, name);
-		return false;
-	}
-	cvar = (*hashlinkptr)->cvar;
-
-	if(!(cvar->flags & CF_ALLOCATED))
-	{
-		if (callername)
-			Con_Printf(CON_WARN "%s: engine cvar \"%s\" cannot be deleted!\n", callername, cvar->name);
-		return false;
-	}
-	if ((progname = Cvar_IsAutoCvar(cvar)))
-	{
-		if (callername)
-			Con_Printf(CON_WARN "%s: unable to delete cvar \"%s\", it is an autocvar used by running %s progs!\n", callername, cvar->name, progname);
-		return false;
-	}
-
-	if(cvar == cvars->vars)
-		cvars->vars = cvar->next;
-	else
-		prev->next = cvar->next;
-
-	if(cvar->description != cvar_dummy_description)
-		Z_Free((char *)cvar->description);
-	Z_Free((char *)cvar->name);
-	Z_Free((char *)cvar->string);
-	Z_Free((char *)cvar->defstring);
-	Z_Free(cvar);
-
-	oldhashlink = *hashlinkptr;
-	*hashlinkptr = (*hashlinkptr)->next;
-	Z_Free(oldhashlink);
-
-	return true;
-}
-
-qbool Cvar_Readonly (cvar_t *var, const char *cmd_name)
-{
-	if (var->flags & CF_READONLY)
-	{
-		Con_Print(CON_WARN);
-		if(cmd_name)
-			Con_Printf("%s: ",cmd_name);
-		Con_Printf("%s is read-only\n", var->name);
-		return true;
-	}
-	return false;
-}
 
 /*
 ============
@@ -830,57 +670,58 @@ Cvar_Command
 Handles variable inspection and changing from the console
 ============
 */
-qbool	Cvar_Command (cmd_state_t *cmd)
+qboolean	Cvar_Command (void)
 {
-	cvar_state_t	*cvars = cmd->cvars;
 	cvar_t			*v;
 
-	// check variables
-	v = Cvar_FindVar(cvars, Cmd_Argv(cmd, 0), (cmd->cvars_flagsmask));
+// check variables
+	v = Cvar_FindVar (Cmd_Argv(0));
 	if (!v)
 		return false;
 
-	// perform a variable print or set
-	if (Cmd_Argc(cmd) == 1)
+// perform a variable print or set
+	if (Cmd_Argc() == 1)
 	{
-		Cvar_PrintHelp(v, Cmd_Argv(cmd, 0), true);
+		Con_Printf("\"%s\" is \"%s\" [\"%s\"]\n", v->name, ((v->flags & CVAR_PRIVATE) ? "********"/*hunter2*/ : v->string), v->defstring);
 		return true;
 	}
 
 	if (developer_extra.integer)
 		Con_DPrint("Cvar_Command: ");
 
-	if(Cvar_Readonly(v, NULL))
+	if (v->flags & CVAR_READONLY)
+	{
+		Con_Printf("%s is read-only\n", v->name);
 		return true;
-
-	Cvar_SetQuick(v, Cmd_Argv(cmd, 1));
+	}
+	Cvar_Set (v->name, Cmd_Argv(1));
 	if (developer_extra.integer)
 		Con_DPrint("\n");
 	return true;
 }
 
-void Cvar_UnlockDefaults(cmd_state_t *cmd)
+
+void Cvar_UnlockDefaults (void)
 {
-	cvar_state_t *cvars = cmd->cvars;
 	cvar_t *var;
 	// unlock the default values of all cvars
-	for (var = cvars->vars ; var ; var = var->next)
-		var->flags &= ~CF_DEFAULTSET;
+	for (var = cvar_vars ; var ; var = var->next)
+		var->flags &= ~CVAR_DEFAULTSET;
 }
 
-void Cvar_LockDefaults_f(cmd_state_t *cmd)
+
+void Cvar_LockDefaults_f (void)
 {
-	cvar_state_t *cvars = cmd->cvars;
 	cvar_t *var;
 	// lock in the default values of all cvars
-	for (var = cvars->vars ; var ; var = var->next)
+	for (var = cvar_vars ; var ; var = var->next)
 	{
-		if (!(var->flags & CF_DEFAULTSET))
+		if (!(var->flags & CVAR_DEFAULTSET))
 		{
 			size_t alloclen;
 
 			//Con_Printf("locking cvar %s (%s -> %s)\n", var->name, var->string, var->defstring);
-			var->flags |= CF_DEFAULTSET;
+			var->flags |= CVAR_DEFAULTSET;
 			Z_Free((char *)var->defstring);
 			alloclen = strlen(var->string) + 1;
 			var->defstring = (char *)Z_Malloc(alloclen);
@@ -889,90 +730,127 @@ void Cvar_LockDefaults_f(cmd_state_t *cmd)
 	}
 }
 
-void Cvar_SaveInitState(cvar_state_t *cvars)
+void Cvar_SaveInitState(void)
 {
 	cvar_t *c;
-
-	for (c = cvars->vars;c;c = c->next)
-		if ((c->flags & (CF_PERSISTENT | CF_READONLY)) == 0)
-			c->initstring = Z_strdup(c->string);
+	for (c = cvar_vars;c;c = c->next)
+	{
+		c->initstate = true;
+		c->initflags = c->flags;
+		c->initdefstring = Mem_strdup(zonemempool, c->defstring);
+		c->initstring = Mem_strdup(zonemempool, c->string);
+		c->initvalue = c->value;
+		c->initinteger = c->integer;
+		VectorCopy(c->vector, c->initvector);
+	}
 }
 
-void Cvar_RestoreInitState(cvar_state_t *cvars)
+void Cvar_RestoreInitState(void)
 {
-	cvar_t *c, *cp;
-
-	for (cp = cvars->vars; (c = cp);)
+	int hashindex;
+	cvar_t *c, **cp;
+	cvar_t *c2, **cp2;
+	for (cp = &cvar_vars;(c = *cp);)
 	{
-		cp = c->next; // get next cvar now in case we delete this cvar
-
-		if (c->initstring)
+		if (c->initstate)
 		{
 			// restore this cvar, it existed at init
-			Con_DPrintf("Cvar_RestoreInitState: Restoring cvar \"%s\"\n", c->name);
-
-			/* bones_was_here: intentionally NOT restoring defstring in this function.
-			 * The only callsite, Host_LoadConfig_f, will re-exec quake.rc, default.cfg, etc.
-			 * Defaults are unlocked here, so Cvar_LockDefaults_f will reset the defstring.
-			 * This is more correct than restoring the defstring here
-			 * because a gamedir change could load configs that should change defaults.
-			 */
-
-			Cvar_SetQuick(c, c->initstring);
-			c->flags &= ~CF_DEFAULTSET;
-		}
-		else if (!(c->flags & (CF_PERSISTENT | CF_READONLY))) // cvars with those flags have no initstring AND may not be deleted or reset
-		{
-			// remove this cvar, it did not exist at init
-			Con_DPrintf("Cvar_RestoreInitState: cvar \"%s\"", c->name);
-			if (Cvar_Delete(cvars, c->name, NULL))
-				Con_DPrint("deleted.\n");
-			else
+			if (((c->flags ^ c->initflags) & CVAR_MAXFLAGSVAL)
+			 || strcmp(c->defstring ? c->defstring : "", c->initdefstring ? c->initdefstring : "")
+			 || strcmp(c->string ? c->string : "", c->initstring ? c->initstring : ""))
 			{
-				// In this case, at least reset it to the default.
-				Con_DPrint("reset.\n");
-				Cvar_SetQuick(c, c->defstring);
+				Con_DPrintf("Cvar_RestoreInitState: Restoring cvar \"%s\"\n", c->name);
+				if (c->defstring)
+					Z_Free((char *)c->defstring);
+				c->defstring = Mem_strdup(zonemempool, c->initdefstring);
+				if (c->string)
+					Z_Free((char *)c->string);
+				c->string = Mem_strdup(zonemempool, c->initstring);
 			}
+			c->flags = c->initflags;
+			c->value = c->initvalue;
+			c->integer = c->initinteger;
+			VectorCopy(c->initvector, c->vector);
+			cp = &c->next;
+		}
+		else
+		{
+			if (!(c->flags & CVAR_ALLOCATED))
+			{
+				Con_DPrintf("Cvar_RestoreInitState: Unable to destroy cvar \"%s\", it was registered after init!\n", c->name);
+				// In this case, at least reset it to the default.
+				if((c->flags & CVAR_NORESETTODEFAULTS) == 0)
+					Cvar_SetQuick(c, c->defstring);
+				cp = &c->next;
+				continue;
+			}
+			if (Cvar_IsAutoCvar(c))
+			{
+				Con_DPrintf("Cvar_RestoreInitState: Unable to destroy cvar \"%s\", it is an autocvar used by running progs!\n", c->name);
+				// In this case, at least reset it to the default.
+				if((c->flags & CVAR_NORESETTODEFAULTS) == 0)
+					Cvar_SetQuick(c, c->defstring);
+				cp = &c->next;
+				continue;
+			}
+			// remove this cvar, it did not exist at init
+			Con_DPrintf("Cvar_RestoreInitState: Destroying cvar \"%s\"\n", c->name);
+			// unlink struct from hash
+			hashindex = CRC_Block((const unsigned char *)c->name, strlen(c->name)) % CVAR_HASHSIZE;
+			for (cp2 = &cvar_hashtable[hashindex];(c2 = *cp2);)
+			{
+				if (c2 == c)
+				{
+					*cp2 = c2->nextonhashchain;
+					break;
+				}
+				else
+					cp2 = &c2->nextonhashchain;
+			}
+			// unlink struct from main list
+			*cp = c->next;
+			// free strings
+			if (c->defstring)
+				Z_Free((char *)c->defstring);
+			if (c->string)
+				Z_Free((char *)c->string);
+			if (c->description && c->description != cvar_dummy_description)
+				Z_Free((char *)c->description);
+			// free struct
+			Z_Free(c);
 		}
 	}
 }
 
-void Cvar_ResetToDefaults_All_f(cmd_state_t *cmd)
+void Cvar_ResetToDefaults_All_f (void)
 {
-	cvar_state_t *cvars = cmd->cvars;
 	cvar_t *var;
 	// restore the default values of all cvars
-	for (var = cvars->vars ; var ; var = var->next)
-	{
-		if((var->flags & (CF_PERSISTENT | CF_READONLY)) == 0)
+	for (var = cvar_vars ; var ; var = var->next)
+		if((var->flags & CVAR_NORESETTODEFAULTS) == 0)
 			Cvar_SetQuick(var, var->defstring);
-	}
-}
-
-void Cvar_ResetToDefaults_NoSaveOnly_f(cmd_state_t *cmd)
-{
-	cvar_state_t *cvars = cmd->cvars;
-	cvar_t *var;
-	// restore the default values of all cvars
-	for (var = cvars->vars ; var ; var = var->next)
-	{
-		if ((var->flags & (CF_PERSISTENT | CF_READONLY | CF_ARCHIVE)) == 0)
-			Cvar_SetQuick(var, var->defstring);
-	}
 }
 
 
-void Cvar_ResetToDefaults_SaveOnly_f(cmd_state_t *cmd)
+void Cvar_ResetToDefaults_NoSaveOnly_f (void)
 {
-	cvar_state_t *cvars = cmd->cvars;
 	cvar_t *var;
 	// restore the default values of all cvars
-	for (var = cvars->vars ; var ; var = var->next)
-	{
-		if ((var->flags & (CF_PERSISTENT | CF_READONLY | CF_ARCHIVE)) == CF_ARCHIVE)
+	for (var = cvar_vars ; var ; var = var->next)
+		if ((var->flags & (CVAR_NORESETTODEFAULTS | CVAR_SAVE)) == 0)
 			Cvar_SetQuick(var, var->defstring);
-	}
 }
+
+
+void Cvar_ResetToDefaults_SaveOnly_f (void)
+{
+	cvar_t *var;
+	// restore the default values of all cvars
+	for (var = cvar_vars ; var ; var = var->next)
+		if ((var->flags & (CVAR_NORESETTODEFAULTS | CVAR_SAVE)) == CVAR_SAVE)
+			Cvar_SetQuick(var, var->defstring);
+}
+
 
 /*
 ============
@@ -982,21 +860,21 @@ Writes lines containing "set variable value" for all variables
 with the archive flag set to true.
 ============
 */
-void Cvar_WriteVariables (cvar_state_t *cvars, qfile_t *f)
+void Cvar_WriteVariables (qfile_t *f)
 {
 	cvar_t	*var;
 	char buf1[MAX_INPUTLINE], buf2[MAX_INPUTLINE];
 
 	// don't save cvars that match their default value
-	for (var = cvars->vars ; var ; var = var->next) {
-		if ((var->flags & CF_ARCHIVE) && (strcmp(var->string, var->defstring) || ((var->flags & CF_ALLOCATED) && !(var->flags & CF_DEFAULTSET))))
+	for (var = cvar_vars ; var ; var = var->next)
+		if ((var->flags & CVAR_SAVE) && (strcmp(var->string, var->defstring) || ((var->flags & CVAR_ALLOCATED) && !(var->flags & CVAR_DEFAULTSET))))
 		{
 			Cmd_QuoteString(buf1, sizeof(buf1), var->name, "\"\\$", false);
 			Cmd_QuoteString(buf2, sizeof(buf2), var->string, "\"\\$", false);
-			FS_Printf(f, "%s\"%s\" \"%s\"\n", var->flags & CF_ALLOCATED ? "seta " : "", buf1, buf2);
+			FS_Printf(f, "%s\"%s\" \"%s\"\n", var->flags & CVAR_ALLOCATED ? "seta " : "", buf1, buf2);
 		}
-	}
 }
+
 
 // Added by EvilTypeGuy eviltypeguy@qeradiant.com
 // 2000-01-09 CvarList command By Matthias "Maddes" Buecher, http://www.inside3d.com/qip/
@@ -1005,142 +883,175 @@ void Cvar_WriteVariables (cvar_state_t *cvars, qfile_t *f)
 Cvar_List
 =========
 */
-void Cvar_List_f(cmd_state_t *cmd)
+void Cvar_List_f (void)
 {
-	cvar_state_t *cvars = cmd->cvars;
 	cvar_t *cvar;
 	const char *partial;
+	size_t len;
 	int count;
-	qbool ispattern;
-	char vabuf[1024];
+	qboolean ispattern;
 
-	if (Cmd_Argc(cmd) > 1)
+	if (Cmd_Argc() > 1)
 	{
-		partial = Cmd_Argv(cmd, 1);
+		partial = Cmd_Argv (1);
+		len = strlen(partial);
 		ispattern = (strchr(partial, '*') || strchr(partial, '?'));
-		if(!ispattern)
-			partial = va(vabuf, sizeof(vabuf), "%s*", partial);
 	}
 	else
 	{
-		partial = va(vabuf, sizeof(vabuf), "*");
+		partial = NULL;
+		len = 0;
 		ispattern = false;
 	}
 
 	count = 0;
-	for (cvar = cvars->vars; cvar; cvar = cvar->next)
+	for (cvar = cvar_vars; cvar; cvar = cvar->next)
 	{
-		if (matchpattern_with_separator(cvar->name, partial, false, "", false))
-		{
-			Cvar_PrintHelp(cvar, cvar->name, true);
-			count++;
-		}
-		for (char **alias = cvar->aliases; alias && *alias; alias++)
-		{
-			if (matchpattern_with_separator(*alias, partial, false, "", false))
-			{
-				Cvar_PrintHelp(cvar, *alias, true);
-				count++;
-			}
-		}
+		if (len && (ispattern ? !matchpattern_with_separator(cvar->name, partial, false, "", false) : strncmp (partial,cvar->name,len)))
+			continue;
+
+		Con_Printf("%s is \"%s\" [\"%s\"] %s\n", cvar->name, ((cvar->flags & CVAR_PRIVATE) ? "********"/*hunter2*/ : cvar->string), cvar->defstring, cvar->description);
+		count++;
 	}
 
-	if (Cmd_Argc(cmd) > 1)
+	if (len)
 	{
 		if(ispattern)
 			Con_Printf("%i cvar%s matching \"%s\"\n", count, (count > 1) ? "s" : "", partial);
 		else
-			Con_Printf("%i cvar%s beginning with \"%s\"\n", count, (count > 1) ? "s" : "", Cmd_Argv(cmd,1));
+			Con_Printf("%i cvar%s beginning with \"%s\"\n", count, (count > 1) ? "s" : "", partial);
 	}
 	else
 		Con_Printf("%i cvar(s)\n", count);
 }
 // 2000-01-09 CvarList command by Maddes
 
-void Cvar_Set_f(cmd_state_t *cmd)
+void Cvar_Set_f (void)
 {
-	cvar_state_t *cvars = cmd->cvars;
 	cvar_t *cvar;
 
 	// make sure it's the right number of parameters
-	if (Cmd_Argc(cmd) < 3)
+	if (Cmd_Argc() < 3)
 	{
 		Con_Printf("Set: wrong number of parameters, usage: set <variablename> <value> [<description>]\n");
 		return;
 	}
 
 	// check if it's read-only
-	cvar = Cvar_FindVar(cvars, Cmd_Argv(cmd, 1), ~0);
-	if (cvar)
-		if(Cvar_Readonly(cvar,"Set"))
-			return;
+	cvar = Cvar_FindVar(Cmd_Argv(1));
+	if (cvar && cvar->flags & CVAR_READONLY)
+	{
+		Con_Printf("Set: %s is read-only\n", cvar->name);
+		return;
+	}
 
 	if (developer_extra.integer)
 		Con_DPrint("Set: ");
 
 	// all looks ok, create/modify the cvar
-	Cvar_Get(cvars, Cmd_Argv(cmd, 1), Cmd_Argv(cmd, 2), cmd->cvars_flagsmask, Cmd_Argc(cmd) > 3 ? Cmd_Argv(cmd, 3) : NULL);
+	Cvar_Get(Cmd_Argv(1), Cmd_Argv(2), 0, Cmd_Argc() > 3 ? Cmd_Argv(3) : NULL);
 }
 
-void Cvar_SetA_f(cmd_state_t *cmd)
+void Cvar_SetA_f (void)
 {
-	cvar_state_t *cvars = cmd->cvars;
 	cvar_t *cvar;
 
 	// make sure it's the right number of parameters
-	if (Cmd_Argc(cmd) < 3)
+	if (Cmd_Argc() < 3)
 	{
 		Con_Printf("SetA: wrong number of parameters, usage: seta <variablename> <value> [<description>]\n");
 		return;
 	}
 
 	// check if it's read-only
-	cvar = Cvar_FindVar(cvars, Cmd_Argv(cmd, 1), ~0);
-	if (cvar)
-		if(Cvar_Readonly(cvar,"SetA"))
-			return;
+	cvar = Cvar_FindVar(Cmd_Argv(1));
+	if (cvar && cvar->flags & CVAR_READONLY)
+	{
+		Con_Printf("SetA: %s is read-only\n", cvar->name);
+		return;
+	}
 
 	if (developer_extra.integer)
 		Con_DPrint("SetA: ");
 
 	// all looks ok, create/modify the cvar
-	Cvar_Get(cvars, Cmd_Argv(cmd, 1), Cmd_Argv(cmd, 2), cmd->cvars_flagsmask | CF_ARCHIVE, Cmd_Argc(cmd) > 3 ? Cmd_Argv(cmd, 3) : NULL);
+	Cvar_Get(Cmd_Argv(1), Cmd_Argv(2), CVAR_SAVE, Cmd_Argc() > 3 ? Cmd_Argv(3) : NULL);
 }
 
-void Cvar_Del_f(cmd_state_t *cmd)
+void Cvar_Del_f (void)
 {
-	cvar_state_t *cvars = cmd->cvars;
 	int i;
+	cvar_t *cvar, *parent, **link, *prev;
 
-	if(Cmd_Argc(cmd) < 2)
+	if(Cmd_Argc() < 2)
 	{
-		Con_Printf("%s: wrong number of parameters, usage: unset <variablename1> [<variablename2> ...]\n", Cmd_Argv(cmd, 0));
+		Con_Printf("Del: wrong number of parameters, useage: unset <variablename1> [<variablename2> ...]\n");
 		return;
 	}
-	for(i = 1; i < Cmd_Argc(cmd); ++i)
-		Cvar_Delete(cvars, Cmd_Argv(cmd, i), Cmd_Argv(cmd, 0));
+	for(i = 1; i < Cmd_Argc(); ++i)
+	{
+		cvar = Cvar_FindVarLink(Cmd_Argv(i), &parent, &link, &prev);
+		if(!cvar)
+		{
+			Con_Printf("Del: %s is not defined\n", Cmd_Argv(i));
+			continue;
+		}
+		if(cvar->flags & CVAR_READONLY)
+		{
+			Con_Printf("Del: %s is read-only\n", cvar->name);
+			continue;
+		}
+		if(!(cvar->flags & CVAR_ALLOCATED))
+		{
+			Con_Printf("Del: %s is static and cannot be deleted\n", cvar->name);
+			continue;
+		}
+		if(cvar == cvar_vars)
+		{
+			cvar_vars = cvar->next;
+		}
+		else
+		{
+			// in this case, prev must be set, otherwise there has been some inconsistensy
+			// elsewhere already... should I still check for prev != NULL?
+			prev->next = cvar->next;
+		}
+
+		if(parent)
+			parent->nextonhashchain = cvar->nextonhashchain;
+		else if(link)
+			*link = cvar->nextonhashchain;
+
+		if(cvar->description != cvar_dummy_description)
+			Z_Free((char *)cvar->description);
+
+		Z_Free((char *)cvar->name);
+		Z_Free((char *)cvar->string);
+		Z_Free((char *)cvar->defstring);
+		Z_Free(cvar);
+	}
 }
 
 #ifdef FILLALLCVARSWITHRUBBISH
-void Cvar_FillAll_f(cmd_state_t *cmd)
+void Cvar_FillAll_f()
 {
 	char *buf, *p, *q;
 	int n, i;
 	cvar_t *var;
-	qbool verify;
-	if(Cmd_Argc(cmd) != 2)
+	qboolean verify;
+	if(Cmd_Argc() != 2)
 	{
-		Con_Printf("Usage: %s length to plant rubbish\n", Cmd_Argv(cmd, 0));
-		Con_Printf("Usage: %s -length to verify that the rubbish is still there\n", Cmd_Argv(cmd, 0));
+		Con_Printf("Usage: %s length to plant rubbish\n", Cmd_Argv(0));
+		Con_Printf("Usage: %s -length to verify that the rubbish is still there\n", Cmd_Argv(0));
 		return;
 	}
-	n = atoi(Cmd_Argv(cmd, 1));
+	n = atoi(Cmd_Argv(1));
 	verify = (n < 0);
 	if(verify)
 		n = -n;
 	buf = Z_Malloc(n + 1);
 	buf[n] = 0;
-	for(var = cvars->vars; var; var = var->next)
+	for(var = cvar_vars; var; var = var->next)
 	{
 		for(i = 0, p = buf, q = var->name; i < n; ++i)
 		{

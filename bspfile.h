@@ -18,8 +18,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 */
 
-#ifndef BSPFILE_H
-#define BSPFILE_H
 
 #define MAX_MAP_HULLS 16 // Q1BSP has 4, Hexen2 Q1BSP has 8, MCBSP has 16
 
@@ -27,9 +25,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 
 #define BSPVERSION	29
-#define HLBSPVERSION 30
-#define _2PSBVERSION ('2' + 'P' * 256 + 'S' * 65536 + 'B' * 16777216)
-#define BSP2VERSION ('B' + 'S' * 256 + 'P' * 65536 + '2' * 16777216)
 
 typedef struct lump_s
 {
@@ -283,7 +278,7 @@ typedef struct dedge_s
 /*
 typedef struct dface_s
 {
-	// LadyHavoc: changed from short to unsigned short for q2 support
+	// LordHavoc: changed from short to unsigned short for q2 support
 	unsigned short	planenum;
 	short		side;
 
@@ -324,4 +319,3 @@ typedef struct dleaf_s
 } dleaf_t;
 */
 
-#endif

@@ -11,7 +11,7 @@ void SV_StartDemoRecording(client_t *client, const char *filename, int forcetrac
 	if(client->sv_demo_file != NULL)
 		return; // we already have a demo
 
-	dp_strlcpy(name, filename, sizeof(name));
+	strlcpy(name, filename, sizeof(name));
 	FS_DefaultExtension(name, ".dem", sizeof(name));
 
 	Con_Printf("Recording demo for # %d (%s) to %s\n", PRVM_NUM_FOR_EDICT(client->edict), client->netaddress, name);
@@ -22,14 +22,14 @@ void SV_StartDemoRecording(client_t *client, const char *filename, int forcetrac
 	client->sv_demo_file = FS_OpenRealFile(name, "wb", false);
 	if(!client->sv_demo_file)
 	{
-		Con_Print(CON_ERROR "ERROR: couldn't open.\n");
+		Con_Print("ERROR: couldn't open.\n");
 		return;
 	}
 
 	FS_Printf(client->sv_demo_file, "%i\n", forcetrack);
 }
 
-void SV_WriteDemoMessage(client_t *client, sizebuf_t *sendbuffer, qbool clienttoserver)
+void SV_WriteDemoMessage(client_t *client, sizebuf_t *sendbuffer, qboolean clienttoserver)
 {
 	prvm_prog_t *prog = SVVM_prog;
 	int len, i;

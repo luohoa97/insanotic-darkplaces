@@ -22,7 +22,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "quakedef.h"
 #include "clvm_cmds.h"
 #include "cl_collision.h"
-#include "com_list.h"
 
 /*
 
@@ -32,45 +31,29 @@ line of sight checks trace->inopen and trace->inwater, but bullets don't
 
 */
 
-#ifdef USEODE
 static void World_Physics_Init(void);
-#endif
 void World_Init(void)
 {
 	Collision_Init();
-#ifdef USEODE
 	World_Physics_Init();
-#endif
 }
 
-#ifdef USEODE
 static void World_Physics_Shutdown(void);
-#endif
 void World_Shutdown(void)
 {
-#ifdef USEODE
 	World_Physics_Shutdown();
-#endif
 }
 
-#ifdef USEODE
 static void World_Physics_Start(world_t *world);
-#endif
 void World_Start(world_t *world)
 {
-#ifdef USEODE
 	World_Physics_Start(world);
-#endif
 }
 
-#ifdef USEODE
 static void World_Physics_End(world_t *world);
-#endif
 void World_End(world_t *world)
 {
-#ifdef USEODE
 	World_Physics_End(world);
-#endif
 }
 
 //============================================================================
@@ -79,18 +62,22 @@ void World_End(world_t *world)
 void World_ClearLink (link_t *l)
 {
 	l->entitynumber = 0;
-	l->list.prev = l->list.next = &l->list;
+	l->prev = l->next = l;
 }
 
 void World_RemoveLink (link_t *l)
 {
-	List_Delete(&l->list);
+	l->next->prev = l->prev;
+	l->prev->next = l->next;
 }
 
 void World_InsertLinkBefore (link_t *l, link_t *before, int entitynumber)
 {
 	l->entitynumber = entitynumber;
-	List_Add_Tail(&l->list, &before->list);
+	l->next = before;
+	l->prev = before->prev;
+	l->prev->next = l;
+	l->next->prev = l;
 }
 
 /*
@@ -119,7 +106,7 @@ void World_SetSize(world_t *world, const char *filename, const vec3_t mins, cons
 {
 	int i;
 
-	dp_strlcpy(world->filename, filename, sizeof(world->filename));
+	strlcpy(world->filename, filename, sizeof(world->filename));
 	VectorCopy(mins, world->mins);
 	VectorCopy(maxs, world->maxs);
 	world->prog = prog;
@@ -163,11 +150,11 @@ void World_UnlinkAll(world_t *world)
 	link_t *grid;
 	// unlink all entities one by one
 	grid = &world->areagrid_outside;
-	while (grid->list.next != &grid->list)
-		World_UnlinkEdict(PRVM_EDICT_NUM(List_Entry(grid->list.next, link_t, list)->entitynumber));
+	while (grid->next != grid)
+		World_UnlinkEdict(PRVM_EDICT_NUM(grid->next->entitynumber));
 	for (i = 0, grid = world->areagrid;i < AREA_GRIDNODES;i++, grid++)
-		while (grid->list.next != &grid->list)
-			World_UnlinkEdict(PRVM_EDICT_NUM(List_Entry(grid->list.next, link_t, list)->entitynumber));
+		while (grid->next != grid)
+			World_UnlinkEdict(PRVM_EDICT_NUM(grid->next->entitynumber));
 }
 
 /*
@@ -180,8 +167,11 @@ void World_UnlinkEdict(prvm_edict_t *ent)
 	int i;
 	for (i = 0;i < ENTITYGRIDAREAS;i++)
 	{
-		if (ent->priv.server->areagrid[i].list.prev)
+		if (ent->priv.server->areagrid[i].prev)
+		{
 			World_RemoveLink (&ent->priv.server->areagrid[i]);
+			ent->priv.server->areagrid[i].prev = ent->priv.server->areagrid[i].next = NULL;
+		}
 	}
 }
 
@@ -195,11 +185,7 @@ int World_EntitiesInBox(world_t *world, const vec3_t requestmins, const vec3_t r
 	vec3_t paddedmins, paddedmaxs;
 	int igrid[3], igridmins[3], igridmaxs[3];
 
-	// avoid crash in showtex code on level change
-	if (prog == NULL || prog->num_edicts < 1)
-		return 0;
-
-	// LadyHavoc: discovered this actually causes its own bugs (dm6 teleporters being too close to info_teleport_destination)
+	// LordHavoc: discovered this actually causes its own bugs (dm6 teleporters being too close to info_teleport_destination)
 	//VectorSet(paddedmins, requestmins[0] - 1.0f, requestmins[1] - 1.0f, requestmins[2] - 1.0f);
 	//VectorSet(paddedmaxs, requestmaxs[0] + 1.0f, requestmaxs[1] + 1.0f, requestmaxs[2] + 1.0f);
 	VectorCopy(requestmins, paddedmins);
@@ -228,16 +214,16 @@ int World_EntitiesInBox(world_t *world, const vec3_t requestmins, const vec3_t r
 	numlist = 0;
 	// add entities not linked into areagrid because they are too big or
 	// outside the grid bounds
-	if (world->areagrid_outside.list.next)
+	if (world->areagrid_outside.next)
 	{
 		grid = &world->areagrid_outside;
-		List_For_Each_Entry(l, &grid->list, link_t, list)
+		for (l = grid->next;l != grid;l = l->next)
 		{
 			ent = PRVM_EDICT_NUM(l->entitynumber);
 			if (ent->priv.server->areagridmarknumber != world->areagrid_marknumber)
 			{
 				ent->priv.server->areagridmarknumber = world->areagrid_marknumber;
-				if (!ent->free && BoxesOverlap(paddedmins, paddedmaxs, ent->priv.server->areamins, ent->priv.server->areamaxs))
+				if (!ent->priv.server->free && BoxesOverlap(paddedmins, paddedmaxs, ent->priv.server->areamins, ent->priv.server->areamaxs))
 				{
 					if (numlist < maxlist)
 						list[numlist] = ent;
@@ -253,15 +239,15 @@ int World_EntitiesInBox(world_t *world, const vec3_t requestmins, const vec3_t r
 		grid = world->areagrid + igrid[1] * AREA_GRID + igridmins[0];
 		for (igrid[0] = igridmins[0];igrid[0] < igridmaxs[0];igrid[0]++, grid++)
 		{
-			if (grid->list.next)
+			if (grid->next)
 			{
-				List_For_Each_Entry(l, &grid->list, link_t, list)
+				for (l = grid->next;l != grid;l = l->next)
 				{
 					ent = PRVM_EDICT_NUM(l->entitynumber);
 					if (ent->priv.server->areagridmarknumber != world->areagrid_marknumber)
 					{
 						ent->priv.server->areagridmarknumber = world->areagrid_marknumber;
-						if (!ent->free && BoxesOverlap(paddedmins, paddedmaxs, ent->priv.server->areamins, ent->priv.server->areamaxs))
+						if (!ent->priv.server->free && BoxesOverlap(paddedmins, paddedmaxs, ent->priv.server->areamins, ent->priv.server->areamaxs))
 						{
 							if (numlist < maxlist)
 								list[numlist] = ent;
@@ -317,23 +303,19 @@ World_LinkEdict
 
 ===============
 */
-void World_LinkEdict(world_t *world, prvm_edict_t *ent, const vec3_t mins, const vec3_t maxs, qbool link_solid_not)
+void World_LinkEdict(world_t *world, prvm_edict_t *ent, const vec3_t mins, const vec3_t maxs)
 {
 	prvm_prog_t *prog = world->prog;
 	// unlink from old position first
-	if (ent->priv.server->areagrid[0].list.prev)
+	if (ent->priv.server->areagrid[0].prev)
 		World_UnlinkEdict(ent);
-
-	// some games don't want SOLID_NOT entities linked
-	if (!link_solid_not && PRVM_serveredictfloat(ent, solid) == SOLID_NOT)
-		return;
 
 	// don't add the world
 	if (ent == prog->edicts)
 		return;
 
 	// don't add free entities
-	if (ent->free)
+	if (ent->priv.server->free)
 		return;
 
 	VectorCopy(mins, ent->priv.server->areamins);
@@ -349,38 +331,38 @@ void World_LinkEdict(world_t *world, prvm_edict_t *ent, const vec3_t mins, const
 //============================================================================
 
 #ifdef USEODE
-cvar_t physics_ode_quadtree_depth = {CF_CLIENT | CF_SERVER, "physics_ode_quadtree_depth","5", "desired subdivision level of quadtree culling space"};
-cvar_t physics_ode_allowconvex = {CF_CLIENT | CF_SERVER, "physics_ode_allowconvex", "0", "allow usage of Convex Hull primitive type on trimeshes that have custom 'collisionconvex' mesh. If disabled, trimesh primitive type are used."};
-cvar_t physics_ode_contactsurfacelayer = {CF_CLIENT | CF_SERVER, "physics_ode_contactsurfacelayer","1", "allows objects to overlap this many units to reduce jitter"};
-cvar_t physics_ode_worldstep_iterations = {CF_CLIENT | CF_SERVER, "physics_ode_worldstep_iterations", "20", "parameter to dWorldQuickStep"};
-cvar_t physics_ode_contact_mu = {CF_CLIENT | CF_SERVER, "physics_ode_contact_mu", "1", "contact solver mu parameter - friction pyramid approximation 1 (see ODE User Guide)"};
-cvar_t physics_ode_contact_erp = {CF_CLIENT | CF_SERVER, "physics_ode_contact_erp", "0.96", "contact solver erp parameter - Error Restitution Percent (see ODE User Guide)"};
-cvar_t physics_ode_contact_cfm = {CF_CLIENT | CF_SERVER, "physics_ode_contact_cfm", "0", "contact solver cfm parameter - Constraint Force Mixing (see ODE User Guide)"};
-cvar_t physics_ode_contact_maxpoints = {CF_CLIENT | CF_SERVER, "physics_ode_contact_maxpoints", "16", "maximal number of contact points between 2 objects, higher = stable (and slower), can be up to 32"};
-cvar_t physics_ode_world_erp = {CF_CLIENT | CF_SERVER, "physics_ode_world_erp", "-1", "world solver erp parameter - Error Restitution Percent (see ODE User Guide); use defaults when set to -1"};
-cvar_t physics_ode_world_cfm = {CF_CLIENT | CF_SERVER, "physics_ode_world_cfm", "-1", "world solver cfm parameter - Constraint Force Mixing (see ODE User Guide); not touched when -1"};
-cvar_t physics_ode_world_damping = {CF_CLIENT | CF_SERVER, "physics_ode_world_damping", "1", "enabled damping scale (see ODE User Guide), this scales all damping values, be aware that behavior depends of step type"};
-cvar_t physics_ode_world_damping_linear = {CF_CLIENT | CF_SERVER, "physics_ode_world_damping_linear", "0.01", "world linear damping scale (see ODE User Guide); use defaults when set to -1"};
-cvar_t physics_ode_world_damping_linear_threshold = {CF_CLIENT | CF_SERVER, "physics_ode_world_damping_linear_threshold", "0.1", "world linear damping threshold (see ODE User Guide); use defaults when set to -1"};
-cvar_t physics_ode_world_damping_angular = {CF_CLIENT | CF_SERVER, "physics_ode_world_damping_angular", "0.05", "world angular damping scale (see ODE User Guide); use defaults when set to -1"};
-cvar_t physics_ode_world_damping_angular_threshold = {CF_CLIENT | CF_SERVER, "physics_ode_world_damping_angular_threshold", "0.1", "world angular damping threshold (see ODE User Guide); use defaults when set to -1"};
-cvar_t physics_ode_world_gravitymod = {CF_CLIENT | CF_SERVER, "physics_ode_world_gravitymod", "1", "multiplies gravity got from sv_gravity, this may be needed to tweak if strong damping is used"};
-cvar_t physics_ode_iterationsperframe = {CF_CLIENT | CF_SERVER, "physics_ode_iterationsperframe", "1", "divisor for time step, runs multiple physics steps per frame"};
-cvar_t physics_ode_constantstep = {CF_CLIENT | CF_SERVER, "physics_ode_constantstep", "0", "use constant step instead of variable step which tends to increase stability, if set to 1 uses sys_ticrate, instead uses it's own value"};
-cvar_t physics_ode_autodisable = {CF_CLIENT | CF_SERVER, "physics_ode_autodisable", "1", "automatic disabling of objects which dont move for long period of time, makes object stacking a lot faster"};
-cvar_t physics_ode_autodisable_steps = {CF_CLIENT | CF_SERVER, "physics_ode_autodisable_steps", "10", "how many steps object should be dormant to be autodisabled"};
-cvar_t physics_ode_autodisable_time = {CF_CLIENT | CF_SERVER, "physics_ode_autodisable_time", "0", "how many seconds object should be dormant to be autodisabled"};
-cvar_t physics_ode_autodisable_threshold_linear = {CF_CLIENT | CF_SERVER, "physics_ode_autodisable_threshold_linear", "0.6", "body will be disabled if it's linear move below this value"};
-cvar_t physics_ode_autodisable_threshold_angular = {CF_CLIENT | CF_SERVER, "physics_ode_autodisable_threshold_angular", "6", "body will be disabled if it's angular move below this value"};
-cvar_t physics_ode_autodisable_threshold_samples = {CF_CLIENT | CF_SERVER, "physics_ode_autodisable_threshold_samples", "5", "average threshold with this number of samples"};
-cvar_t physics_ode_movelimit = {CF_CLIENT | CF_SERVER, "physics_ode_movelimit", "0.5", "clamp velocity if a single move would exceed this percentage of object thickness, to prevent flying through walls, be aware that behavior depends of step type"};
-cvar_t physics_ode_spinlimit = {CF_CLIENT | CF_SERVER, "physics_ode_spinlimit", "10000", "reset spin velocity if it gets too large"};
-cvar_t physics_ode_trick_fixnan = {CF_CLIENT | CF_SERVER, "physics_ode_trick_fixnan", "1", "engine trick that checks and fixes NaN velocity/origin/angles on objects, a value of 2 makes console prints on each fix"};
-cvar_t physics_ode_printstats = {CF_CLIENT | CF_SERVER, "physics_ode_printstats", "0", "print ODE stats each frame"};
+cvar_t physics_ode_quadtree_depth = {0, "physics_ode_quadtree_depth","5", "desired subdivision level of quadtree culling space"};
+cvar_t physics_ode_allowconvex = {0, "physics_ode_allowconvex", "0", "allow usage of Convex Hull primitive type on trimeshes that have custom 'collisionconvex' mesh. If disabled, trimesh primitive type are used."};
+cvar_t physics_ode_contactsurfacelayer = {0, "physics_ode_contactsurfacelayer","1", "allows objects to overlap this many units to reduce jitter"};
+cvar_t physics_ode_worldstep_iterations = {0, "physics_ode_worldstep_iterations", "20", "parameter to dWorldQuickStep"};
+cvar_t physics_ode_contact_mu = {0, "physics_ode_contact_mu", "1", "contact solver mu parameter - friction pyramid approximation 1 (see ODE User Guide)"};
+cvar_t physics_ode_contact_erp = {0, "physics_ode_contact_erp", "0.96", "contact solver erp parameter - Error Restitution Percent (see ODE User Guide)"};
+cvar_t physics_ode_contact_cfm = {0, "physics_ode_contact_cfm", "0", "contact solver cfm parameter - Constraint Force Mixing (see ODE User Guide)"};
+cvar_t physics_ode_contact_maxpoints = {0, "physics_ode_contact_maxpoints", "16", "maximal number of contact points between 2 objects, higher = stable (and slower), can be up to 32"};
+cvar_t physics_ode_world_erp = {0, "physics_ode_world_erp", "-1", "world solver erp parameter - Error Restitution Percent (see ODE User Guide); use defaults when set to -1"};
+cvar_t physics_ode_world_cfm = {0, "physics_ode_world_cfm", "-1", "world solver cfm parameter - Constraint Force Mixing (see ODE User Guide); not touched when -1"};
+cvar_t physics_ode_world_damping = {0, "physics_ode_world_damping", "1", "enabled damping scale (see ODE User Guide), this scales all damping values, be aware that behavior depends of step type"};
+cvar_t physics_ode_world_damping_linear = {0, "physics_ode_world_damping_linear", "0.01", "world linear damping scale (see ODE User Guide); use defaults when set to -1"};
+cvar_t physics_ode_world_damping_linear_threshold = {0, "physics_ode_world_damping_linear_threshold", "0.1", "world linear damping threshold (see ODE User Guide); use defaults when set to -1"};
+cvar_t physics_ode_world_damping_angular = {0, "physics_ode_world_damping_angular", "0.05", "world angular damping scale (see ODE User Guide); use defaults when set to -1"};
+cvar_t physics_ode_world_damping_angular_threshold = {0, "physics_ode_world_damping_angular_threshold", "0.1", "world angular damping threshold (see ODE User Guide); use defaults when set to -1"};
+cvar_t physics_ode_world_gravitymod = {0, "physics_ode_world_gravitymod", "1", "multiplies gravity got from sv_gravity, this may be needed to tweak if strong damping is used"};
+cvar_t physics_ode_iterationsperframe = {0, "physics_ode_iterationsperframe", "1", "divisor for time step, runs multiple physics steps per frame"};
+cvar_t physics_ode_constantstep = {0, "physics_ode_constantstep", "0", "use constant step instead of variable step which tends to increase stability, if set to 1 uses sys_ticrate, instead uses it's own value"};
+cvar_t physics_ode_autodisable = {0, "physics_ode_autodisable", "1", "automatic disabling of objects which dont move for long period of time, makes object stacking a lot faster"};
+cvar_t physics_ode_autodisable_steps = {0, "physics_ode_autodisable_steps", "10", "how many steps object should be dormant to be autodisabled"};
+cvar_t physics_ode_autodisable_time = {0, "physics_ode_autodisable_time", "0", "how many seconds object should be dormant to be autodisabled"};
+cvar_t physics_ode_autodisable_threshold_linear = {0, "physics_ode_autodisable_threshold_linear", "0.6", "body will be disabled if it's linear move below this value"};
+cvar_t physics_ode_autodisable_threshold_angular = {0, "physics_ode_autodisable_threshold_angular", "6", "body will be disabled if it's angular move below this value"};
+cvar_t physics_ode_autodisable_threshold_samples = {0, "physics_ode_autodisable_threshold_samples", "5", "average threshold with this number of samples"};
+cvar_t physics_ode_movelimit = {0, "physics_ode_movelimit", "0.5", "clamp velocity if a single move would exceed this percentage of object thickness, to prevent flying through walls, be aware that behavior depends of step type"};
+cvar_t physics_ode_spinlimit = {0, "physics_ode_spinlimit", "10000", "reset spin velocity if it gets too large"};
+cvar_t physics_ode_trick_fixnan = {0, "physics_ode_trick_fixnan", "1", "engine trick that checks and fixes NaN velocity/origin/angles on objects, a value of 2 makes console prints on each fix"};
+cvar_t physics_ode_printstats = {0, "physics_ode_printstats", "0", "print ODE stats each frame"};
 
-cvar_t physics_ode = {CF_CLIENT | CF_SERVER, "physics_ode", "0", "run ODE physics (VERY experimental and potentially buggy)"};
+cvar_t physics_ode = {0, "physics_ode", "0", "run ODE physics (VERY experimental and potentially buggy)"};
 
-// LadyHavoc: this large chunk of definitions comes from the ODE library
+// LordHavoc: this large chunk of definitions comes from the ODE library
 // include files.
 
 #ifdef LINK_TO_LIBODE
@@ -1479,12 +1461,15 @@ static dllfunction_t odefuncs[] =
 //	{"dGeomTriMeshDataUpdate",                      (void **) &dGeomTriMeshDataUpdate},
 	{NULL, NULL}
 };
+
 // Handle for ODE DLL
 dllhandle_t ode_dll = NULL;
+#endif
 #endif
 
 static void World_Physics_Init(void)
 {
+#ifdef USEODE
 #ifndef LINK_TO_LIBODE
 	const char* dllnames [] =
 	{
@@ -1537,7 +1522,7 @@ static void World_Physics_Init(void)
 
 #ifndef LINK_TO_LIBODE
 	// Load the DLL
-	if (Sys_LoadDependency (dllnames, &ode_dll, odefuncs))
+	if (Sys_LoadLibrary (dllnames, &ode_dll, odefuncs))
 #endif
 	{
 		dInitODE();
@@ -1554,7 +1539,7 @@ static void World_Physics_Init(void)
 # else
 			Con_Printf("ODE library not compiled for double precision - incompatible!  Not using ODE physics.\n");
 # endif
-			Sys_FreeLibrary(&ode_dll);
+			Sys_UnloadLibrary(&ode_dll);
 			ode_dll = NULL;
 		}
 		else
@@ -1568,21 +1553,26 @@ static void World_Physics_Init(void)
 		}
 #endif
 	}
+#endif
 }
+
 static void World_Physics_Shutdown(void)
 {
+#ifdef USEODE
 #ifndef LINK_TO_LIBODE
 	if (ode_dll)
 #endif
 	{
 		dCloseODE();
 #ifndef LINK_TO_LIBODE
-		Sys_FreeLibrary(&ode_dll);
+		Sys_UnloadLibrary(&ode_dll);
 		ode_dll = NULL;
 #endif
 	}
+#endif
 }
 
+#ifdef USEODE
 static void World_Physics_UpdateODE(world_t *world)
 {
 	dWorldID odeworld;
@@ -1639,16 +1629,20 @@ static void World_Physics_EnableODE(world_t *world)
 
 	World_Physics_UpdateODE(world);
 }
+#endif
 
 static void World_Physics_Start(world_t *world)
 {
+#ifdef USEODE
 	if (world->physics.ode)
 		return;
 	World_Physics_EnableODE(world);
+#endif
 }
 
 static void World_Physics_End(world_t *world)
 {
+#ifdef USEODE
 	if (world->physics.ode)
 	{
 		dWorldDestroy((dWorldID)world->physics.ode_world);
@@ -1656,14 +1650,17 @@ static void World_Physics_End(world_t *world)
 		dJointGroupDestroy((dJointGroupID)world->physics.ode_contactgroup);
 		world->physics.ode = false;
 	}
+#endif
 }
 
 void World_Physics_RemoveJointFromEntity(world_t *world, prvm_edict_t *ed)
 {
 	ed->priv.server->ode_joint_type = 0;
+#ifdef USEODE
 	if(ed->priv.server->ode_joint)
 		dJointDestroy((dJointID)ed->priv.server->ode_joint);
 	ed->priv.server->ode_joint = NULL;
+#endif
 }
 
 void World_Physics_RemoveFromEntity(world_t *world, prvm_edict_t *ed)
@@ -1672,6 +1669,7 @@ void World_Physics_RemoveFromEntity(world_t *world, prvm_edict_t *ed)
 
 	// entity is not physics controlled, free any physics data
 	ed->priv.server->ode_physics = false;
+#ifdef USEODE
 	if (ed->priv.server->ode_geom)
 		dGeomDestroy((dGeomID)ed->priv.server->ode_geom);
 	ed->priv.server->ode_geom = NULL;
@@ -1701,6 +1699,7 @@ void World_Physics_RemoveFromEntity(world_t *world, prvm_edict_t *ed)
 		dBodyDestroy((dBodyID)ed->priv.server->ode_body);
 	}
 	ed->priv.server->ode_body = NULL;
+#endif
 	if (ed->priv.server->ode_vertex3f)
 		Mem_Free(ed->priv.server->ode_vertex3f);
 	ed->priv.server->ode_vertex3f = NULL;
@@ -1723,6 +1722,7 @@ void World_Physics_RemoveFromEntity(world_t *world, prvm_edict_t *ed)
 
 void World_Physics_ApplyCmd(prvm_edict_t *ed, edict_odefunc_t *f)
 {
+#ifdef USEODE
 	dBodyID body = (dBodyID)ed->priv.server->ode_body;
 
 	switch(f->type)
@@ -1744,8 +1744,10 @@ void World_Physics_ApplyCmd(prvm_edict_t *ed, edict_odefunc_t *f)
 	default:
 		break;
 	}
+#endif
 }
 
+#ifdef USEODE
 static void World_Physics_Frame_BodyToEntity(world_t *world, prvm_edict_t *ed)
 {
 	prvm_prog_t *prog = world->prog;
@@ -1862,7 +1864,7 @@ static void World_Physics_Frame_ForceFromEntity(world_t *world, prvm_edict_t *ed
 	if (!forcetype)
 		return;
 	enemy = PRVM_gameedictedict(ed, enemy);
-	if (enemy <= 0 || enemy >= prog->num_edicts || prog->edicts[enemy].free || prog->edicts[enemy].priv.server->ode_body == 0)
+	if (enemy <= 0 || enemy >= prog->num_edicts || prog->edicts[enemy].priv.required->free || prog->edicts[enemy].priv.server->ode_body == 0)
 		return;
 	VectorCopy(PRVM_gameedictvector(ed, movedir), movedir);
 	VectorCopy(PRVM_gameedictvector(ed, origin), origin);
@@ -1914,9 +1916,9 @@ static void World_Physics_Frame_JointFromEntity(world_t *world, prvm_edict_t *ed
 	VectorCopy(PRVM_gameedictvector(ed, movedir), movedir);
 	if(movetype == MOVETYPE_PHYSICS)
 		jointtype = JOINTTYPE_NONE; // can't have both
-	if(enemy <= 0 || enemy >= prog->num_edicts || prog->edicts[enemy].free || prog->edicts[enemy].priv.server->ode_body == 0)
+	if(enemy <= 0 || enemy >= prog->num_edicts || prog->edicts[enemy].priv.required->free || prog->edicts[enemy].priv.server->ode_body == 0)
 		enemy = 0;
-	if(aiment <= 0 || aiment >= prog->num_edicts || prog->edicts[aiment].free || prog->edicts[aiment].priv.server->ode_body == 0)
+	if(aiment <= 0 || aiment >= prog->num_edicts || prog->edicts[aiment].priv.required->free || prog->edicts[aiment].priv.server->ode_body == 0)
 		aiment = 0;
 	// see http://www.ode.org/old_list_archives/2006-January/017614.html
 	// we want to set ERP? make it fps independent and work like a spring constant
@@ -2116,7 +2118,7 @@ static void World_Physics_Frame_BodyFromEntity(world_t *world, prvm_edict_t *ed)
 	dMass mass;
 	const dReal *ovelocity, *ospinvelocity;
 	void *dataID;
-	model_t *model;
+	dp_model_t *model;
 	float *ov;
 	int *oe;
 	int axisindex;
@@ -2128,7 +2130,7 @@ static void World_Physics_Frame_BodyFromEntity(world_t *world, prvm_edict_t *ed)
 	int triangleindex;
 	int vertexindex;
 	mempool_t *mempool;
-	qbool modified = false;
+	qboolean modified = false;
 	vec3_t angles;
 	vec3_t avelocity;
 	vec3_t entmaxs;
@@ -2149,13 +2151,13 @@ static void World_Physics_Frame_BodyFromEntity(world_t *world, prvm_edict_t *ed)
 	vec3_t scale;
 	vec_t spinlimit;
 	vec_t test;
-	qbool gravity;
-	qbool geom_modified = false;
+	qboolean gravity;
+	qboolean geom_modified = false;
 	edict_odefunc_t *func, *nextf;
 
 	dReal *planes, *planesData, *pointsData;
 	unsigned int *polygons, *polygonsData, polyvert;
-	qbool *mapped, *used, convex_compatible;
+	qboolean *mapped, *used, convex_compatible;
 	int numplanes = 0, numpoints = 0, i;
 
 #ifndef LINK_TO_LIBODE
@@ -2288,9 +2290,9 @@ static void World_Physics_Frame_BodyFromEntity(world_t *world, prvm_edict_t *ed)
 
 			// check if trimesh can be defined with convex
 			convex_compatible = false;
-			for (i = model->submodelsurfaces_start;i < model->submodelsurfaces_end;i++)
+			for (i = 0;i < model->nummodelsurfaces;i++)
 			{
-				if (!strcmp(model->data_surfaces[i].texture->name, "collisionconvex"))
+				if (!strcmp(((msurface_t *)(model->data_surfaces + model->firstmodelsurface + i))->texture->name, "collisionconvex"))
 				{
 					convex_compatible = true;
 					break;
@@ -2372,10 +2374,10 @@ static void World_Physics_Frame_BodyFromEntity(world_t *world, prvm_edict_t *ed)
 				//              followed by that amount of indices to "points" in counter clockwise order
 				polygonsData = polygons = (unsigned int *)Mem_Alloc(mempool, numtriangles*sizeof(int)*4);
 				planesData = planes = (dReal *)Mem_Alloc(mempool, numtriangles*sizeof(dReal)*4);
-				mapped = (qbool *)Mem_Alloc(mempool, numvertices*sizeof(qbool));
-				used = (qbool *)Mem_Alloc(mempool, numtriangles*sizeof(qbool));
-				memset(mapped, 0, numvertices*sizeof(qbool));
-				memset(used, 0, numtriangles*sizeof(qbool));
+				mapped = (qboolean *)Mem_Alloc(mempool, numvertices*sizeof(qboolean));
+				used = (qboolean *)Mem_Alloc(mempool, numtriangles*sizeof(qboolean));
+				memset(mapped, 0, numvertices*sizeof(qboolean));
+				memset(used, 0, numtriangles*sizeof(qboolean));
 				numplanes = numpoints = polyvert = 0;
 				// build convex hull
 				// todo: merge duplicated verts here
@@ -2473,9 +2475,9 @@ static void World_Physics_Frame_BodyFromEntity(world_t *world, prvm_edict_t *ed)
 						pointsData[(polygons[1]*3)+2]*pointsData[(polygons[2]*3)+1]*pointsData[(polygons[3]*3)+0] -
 						pointsData[(polygons[1]*3)+1]*pointsData[(polygons[2]*3)+0]*pointsData[(polygons[3]*3)+2] -
 						pointsData[(polygons[1]*3)+0]*pointsData[(polygons[2]*3)+2]*pointsData[(polygons[3]*3)+1]) < 0)
-						Con_Printf(CON_WARN "WARNING: Polygon %d is not defined counterclockwise\n", i);
+						Con_Printf("WARNING: Polygon %d is not defined counterclockwise\n", i);
 					if (planesData[(i*4)+3] < 0)
-						Con_Printf(CON_WARN "WARNING: Plane %d does not contain the origin\n", i);
+						Con_Printf("WARNING: Plane %d does not contain the origin\n", i);
 					polygons += (*polygons + 1);
 				}
 				// create geom
@@ -2733,17 +2735,17 @@ treatasbox:
 	if (physics_ode_trick_fixnan.integer)
 	{
 		test = VectorLength2(origin) + VectorLength2(forward) + VectorLength2(left) + VectorLength2(up) + VectorLength2(velocity) + VectorLength2(spinvelocity);
-		if (isnan(test))
+		if (VEC_IS_NAN(test))
 		{
 			modified = true;
 			//Con_Printf("Fixing NAN values on entity %i : .classname = \"%s\" .origin = '%f %f %f' .velocity = '%f %f %f' .axis_forward = '%f %f %f' .axis_left = '%f %f %f' .axis_up = %f %f %f' .spinvelocity = '%f %f %f'\n", PRVM_NUM_FOR_EDICT(ed), PRVM_GetString(PRVM_gameedictstring(ed, classname)), origin[0], origin[1], origin[2], velocity[0], velocity[1], velocity[2], forward[0], forward[1], forward[2], left[0], left[1], left[2], up[0], up[1], up[2], spinvelocity[0], spinvelocity[1], spinvelocity[2]);
 			if (physics_ode_trick_fixnan.integer >= 2)
 				Con_Printf("Fixing NAN values on entity %i : .classname = \"%s\" .origin = '%f %f %f' .velocity = '%f %f %f' .angles = '%f %f %f' .avelocity = '%f %f %f'\n", PRVM_NUM_FOR_EDICT(ed), PRVM_GetString(prog, PRVM_gameedictstring(ed, classname)), origin[0], origin[1], origin[2], velocity[0], velocity[1], velocity[2], angles[0], angles[1], angles[2], avelocity[0], avelocity[1], avelocity[2]);
 			test = VectorLength2(origin);
-			if (isnan(test))
+			if (VEC_IS_NAN(test))
 				VectorClear(origin);
 			test = VectorLength2(forward) * VectorLength2(left) * VectorLength2(up);
-			if (isnan(test))
+			if (VEC_IS_NAN(test))
 			{
 				VectorSet(angles, 0, 0, 0);
 				VectorSet(forward, 1, 0, 0);
@@ -2751,10 +2753,10 @@ treatasbox:
 				VectorSet(up, 0, 0, 1);
 			}
 			test = VectorLength2(velocity);
-			if (isnan(test))
+			if (VEC_IS_NAN(test))
 				VectorClear(velocity);
 			test = VectorLength2(spinvelocity);
-			if (isnan(test))
+			if (VEC_IS_NAN(test))
 			{
 				VectorClear(avelocity);
 				VectorClear(spinvelocity);
@@ -2925,7 +2927,7 @@ static void nearCallback (void *data, dGeomID o1, dGeomID o2)
 		return;
 
 	ed1 = (prvm_edict_t *) dGeomGetData(o1);
-	if(ed1 && ed1->free)
+	if(ed1 && ed1->priv.server->free)
 		ed1 = NULL;
 	if(ed1)
 	{
@@ -2936,7 +2938,7 @@ static void nearCallback (void *data, dGeomID o1, dGeomID o2)
 	}
 
 	ed2 = (prvm_edict_t *) dGeomGetData(o2);
-	if(ed2 && ed2->free)
+	if(ed2 && ed2->priv.server->free)
 		ed2 = NULL;
 	if(ed2)
 	{
@@ -3006,9 +3008,11 @@ static void nearCallback (void *data, dGeomID o1, dGeomID o2)
 		dJointAttach(c, b1, b2);
 	}
 }
+#endif
 
 void World_Physics_Frame(world_t *world, double frametime, double gravity)
 {
+#ifdef USEODE
 	prvm_prog_t *prog = world->prog;
 	double tdelta, tdelta2, tdelta3, simulationtime, collisiontime;
 
@@ -3048,11 +3052,11 @@ void World_Physics_Frame(world_t *world, double frametime, double gravity)
 		if (prog)
 		{
 			for (i = 0, ed = prog->edicts + i;i < prog->num_edicts;i++, ed++)
-				if (!prog->edicts[i].free)
+				if (!prog->edicts[i].priv.required->free)
 					World_Physics_Frame_BodyFromEntity(world, ed);
 			// oh, and it must be called after all bodies were created
 			for (i = 0, ed = prog->edicts + i;i < prog->num_edicts;i++, ed++)
-				if (!prog->edicts[i].free)
+				if (!prog->edicts[i].priv.required->free)
 					World_Physics_Frame_JointFromEntity(world, ed);
 		}
 
@@ -3073,7 +3077,7 @@ void World_Physics_Frame(world_t *world, double frametime, double gravity)
 			{
 				int j;
 				for (j = 0, ed = prog->edicts + j;j < prog->num_edicts;j++, ed++)
-					if (!prog->edicts[j].free)
+					if (!prog->edicts[j].priv.required->free)
 						World_Physics_Frame_ForceFromEntity(world, ed);
 			}
 			// run physics (move objects, calculate new velocities)
@@ -3090,7 +3094,7 @@ void World_Physics_Frame(world_t *world, double frametime, double gravity)
 		if (prog)
 		{
 			for (i = 1, ed = prog->edicts + i;i < prog->num_edicts;i++, ed++)
-				if (!prog->edicts[i].free)
+				if (!prog->edicts[i].priv.required->free)
 					World_Physics_Frame_BodyToEntity(world, ed);
 
 			// print stats
@@ -3102,7 +3106,7 @@ void World_Physics_Frame(world_t *world, double frametime, double gravity)
 				world->physics.ode_activeovjects = 0;
 				for (i = 1, ed = prog->edicts + i;i < prog->num_edicts;i++, ed++)
 				{
-					if (prog->edicts[i].free)
+					if (prog->edicts[i].priv.required->free)
 						continue;
 					body = (dBodyID)prog->edicts[i].priv.server->ode_body;
 					if (!body)
@@ -3115,5 +3119,5 @@ void World_Physics_Frame(world_t *world, double frametime, double gravity)
 			}
 		}
 	}
-}
 #endif
+}

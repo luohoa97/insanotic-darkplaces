@@ -22,14 +22,13 @@
 */
 
 
-#include "darkplaces.h"
-#include "cl_screen.h"
+#include "quakedef.h"
 #include "image.h"
 #include "jpeg.h"
 #include "image_png.h"
 
-extern cvar_t sv_writepicture_quality;
-cvar_t r_texture_jpeg_fastpicmip = {CF_CLIENT | CF_ARCHIVE, "r_texture_jpeg_fastpicmip", "1", "perform gl_picmip during decompression for JPEG files (faster)"};
+cvar_t sv_writepicture_quality = {CVAR_SAVE, "sv_writepicture_quality", "10", "WritePicture quality offset (higher means better quality, but slower)"};
+cvar_t r_texture_jpeg_fastpicmip = {CVAR_SAVE, "r_texture_jpeg_fastpicmip", "1", "perform gl_picmip during decompression for JPEG files (faster)"};
 
 // jboolean is unsigned char instead of int on Win32
 #ifdef WIN32
@@ -169,9 +168,9 @@ typedef struct {
   /* The decompressor output side may not use these variables. */
   int dc_tbl_no;                /* DC entropy table selector (0..3) */
   int ac_tbl_no;                /* AC entropy table selector (0..3) */
-
+  
   /* Remaining fields should be treated as private by applications. */
-
+  
   /* These values are computed during compression or decompression startup: */
   /* Component's size in DCT blocks.
    * Any dummy blocks added to complete an MCU are not counted; therefore
@@ -455,12 +454,12 @@ static dllfunction_t jpegfuncs[] =
 
 // Handle for JPEG DLL
 dllhandle_t jpeg_dll = NULL;
-qbool jpeg_tried_loading = 0;
+qboolean jpeg_tried_loading = 0;
 #endif
 
 static unsigned char jpeg_eoi_marker [2] = {0xFF, JPEG_EOI};
 static jmp_buf error_in_jpeg;
-static qbool jpeg_toolarge;
+static qboolean jpeg_toolarge;
 
 // Our own output manager for JPEG compression
 typedef struct
@@ -489,7 +488,7 @@ JPEG_OpenLibrary
 Try to load the JPEG DLL
 ====================
 */
-qbool JPEG_OpenLibrary (void)
+qboolean JPEG_OpenLibrary (void)
 {
 #ifdef LINK_TO_LIBJPEG
 	return true;
@@ -523,7 +522,7 @@ qbool JPEG_OpenLibrary (void)
 #endif
 
 	// Load the DLL
-	return Sys_LoadDependency (dllnames, &jpeg_dll, jpegfuncs);
+	return Sys_LoadLibrary (dllnames, &jpeg_dll, jpegfuncs);
 #endif
 }
 
@@ -538,7 +537,7 @@ Unload the JPEG DLL
 void JPEG_CloseLibrary (void)
 {
 #ifndef LINK_TO_LIBJPEG
-	Sys_FreeLibrary (&jpeg_dll);
+	Sys_UnloadLibrary (&jpeg_dll);
 	jpeg_tried_loading = false; // allow retry
 #endif
 }
@@ -560,7 +559,7 @@ static jboolean JPEG_FillInputBuffer (j_decompress_ptr cinfo)
     cinfo->src->next_input_byte = jpeg_eoi_marker;
     cinfo->src->bytes_in_buffer = 2;
 
-	return true;
+	return TRUE;
 }
 
 static void JPEG_SkipInputData (j_decompress_ptr cinfo, long num_bytes)
@@ -625,7 +624,7 @@ unsigned char* JPEG_LoadImage_BGRA (const unsigned char *f, int filesize, int *m
 	cinfo.err = qjpeg_std_error (&jerr);
 	cinfo.err->error_exit = JPEG_ErrorExit;
 	JPEG_MemSrc (&cinfo, f, filesize);
-	qjpeg_read_header (&cinfo, true);
+	qjpeg_read_header (&cinfo, TRUE);
 	cinfo.scale_num = 1;
 	cinfo.scale_denom = (1 << submip);
 	qjpeg_start_decompress (&cinfo);
@@ -815,7 +814,7 @@ JPEG_SaveImage_preflipped
 Save a preflipped JPEG image to a file
 ====================
 */
-qbool JPEG_SaveImage_preflipped (const char *filename, int width, int height, unsigned char *data)
+qboolean JPEG_SaveImage_preflipped (const char *filename, int width, int height, unsigned char *data)
 {
 	struct jpeg_compress_struct cinfo;
 	struct jpeg_error_mgr jerr;
@@ -849,7 +848,7 @@ qbool JPEG_SaveImage_preflipped (const char *filename, int width, int height, un
 	cinfo.in_color_space = JCS_RGB;
 	cinfo.input_components = 3;
 	qjpeg_set_defaults (&cinfo);
-	qjpeg_set_quality (&cinfo, (int)(scr_screenshot_jpeg_quality.value * 100), true);
+	qjpeg_set_quality (&cinfo, (int)(scr_screenshot_jpeg_quality.value * 100), TRUE);
 	qjpeg_simple_progression (&cinfo);
 
 	// turn off subsampling (to make text look better)
@@ -899,7 +898,7 @@ static size_t JPEG_try_SaveImage_to_Buffer (struct jpeg_compress_struct *cinfo, 
 	cinfo->in_color_space = JCS_RGB;
 	cinfo->input_components = 3;
 	qjpeg_set_defaults (cinfo);
-	qjpeg_set_quality (cinfo, quality, false);
+	qjpeg_set_quality (cinfo, quality, FALSE);
 
 	cinfo->comp_info[0].h_samp_factor = 2;
 	cinfo->comp_info[0].v_samp_factor = 2;
@@ -1017,9 +1016,9 @@ static void CompressedImageCache_Add(const char *imagename, size_t maxsize, void
 
 	if(strlen(imagename) >= MAX_QPATH)
 		return; // can't add this
-
+	
 	i = (CompressedImageCacheItem*) Z_Malloc(sizeof(CompressedImageCacheItem));
-	dp_strlcpy(i->imagename, imagename, sizeof(i->imagename));
+	strlcpy(i->imagename, imagename, sizeof(i->imagename));
 	i->maxsize = maxsize;
 	i->compressed = compressed;
 	i->compressed_size = compressed_size;
@@ -1044,7 +1043,7 @@ static CompressedImageCacheItem *CompressedImageCache_Find(const char *imagename
 	return NULL;
 }
 
-qbool Image_Compress(const char *imagename, size_t maxsize, void **buf, size_t *size)
+qboolean Image_Compress(const char *imagename, size_t maxsize, void **buf, size_t *size)
 {
 	unsigned char *imagedata, *newimagedata;
 	int maxPixelCount;
@@ -1066,7 +1065,6 @@ qbool Image_Compress(const char *imagename, size_t maxsize, void **buf, size_t *
 	{
 		*size = i->compressed_size;
 		*buf = i->compressed;
-        return (*buf != NULL);
 	}
 
 	// load the image

@@ -8,7 +8,7 @@ SPDX-License-Identifier: GPL-3.0-or-later
 
 // true while a Lua mod drives the touchscreen (xon.touch_capture); the
 // engine's built-in touchscreen areas and touch-to-mouse emulation stand down
-extern qbool cl_lua_touch_captured;
+extern qboolean cl_lua_touch_captured;
 extern cvar_t cl_lua_touch_mouse;
 
 void CL_Lua_Init(void);
@@ -24,7 +24,7 @@ void CL_Lua_Disconnected(void);
 // a sound a mod played ahead of time (xon.play_sound predicted) arrives for
 // real: returns true once per prediction so the duplicate is skipped
 struct sfx_s;
-qbool CL_Lua_ConsumePredictedSound(struct sfx_s *sfx, int entnum);
+qboolean CL_Lua_ConsumePredictedSound(struct sfx_s *sfx, int entnum);
 
 // touch input reported by the video backend: fingers in normalized screen
 // coordinates; returns the number written (vid_sdl.c, 0 elsewhere)
