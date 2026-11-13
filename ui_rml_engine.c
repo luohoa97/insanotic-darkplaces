@@ -57,7 +57,7 @@ static int ui_num_remembered;
 static unsigned char ui_routed[MAX_KEYS];
 
 static float ui_mouse_sent[2] = {-1, -1};
-static qbool ui_modal_was; // a document from rml_show was up on the last frame
+static qboolean ui_modal_was; // a document from rml_show was up on the last frame
 
 /*
 ================================================================================
@@ -866,7 +866,7 @@ void UI_RML_Draw(void)
 	// with nothing drawn. When the last one is gone and neither the main menu
 	// nor the old menu has taken over, close the menu as well.
 	{
-		qbool modal_now = UIRml_AnyShownExcept(MAINMENU) != 0;
+		qboolean modal_now = UIRml_AnyShownExcept(MAINMENU) != 0;
 		if (ui_modal_was && !modal_now && !UI_RML_MainMenuShown() && cls.state == ca_connected
 			&& (key_dest == key_menu || key_dest == key_menu_grabbed)
 			&& Cvar_VariableValue(&cvars_all, "_menu_overview", CF_CLIENT | CF_SERVER) == 0)
