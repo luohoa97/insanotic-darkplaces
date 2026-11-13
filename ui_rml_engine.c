@@ -869,8 +869,8 @@ void UI_RML_Draw(void)
 		qboolean modal_now = UIRml_AnyShownExcept(MAINMENU) != 0;
 		if (ui_modal_was && !modal_now && !UI_RML_MainMenuShown() && cls.state == ca_connected
 			&& (key_dest == key_menu || key_dest == key_menu_grabbed)
-			&& Cvar_VariableValue(&cvars_all, "_menu_overview", CF_CLIENT | CF_SERVER) == 0)
-			Cbuf_AddText(cmd_local, "\ntogglemenu 0\n");
+			&& Cvar_VariableValue("_menu_overview") == 0)
+			Cbuf_AddText("\ntogglemenu 0\n");
 		ui_modal_was = modal_now;
 	}
 	if (!UI_RML_MainMenuShown() && !UIRml_AnyShownExcept(MAINMENU))
