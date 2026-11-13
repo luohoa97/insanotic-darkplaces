@@ -24,6 +24,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "cl_lua.h"
 #include "image.h"
 #include "utf8lib.h"
+#include "ui_rml.h"
 
 #ifndef __IPHONEOS__
 #ifdef MACOSX
@@ -1114,7 +1115,6 @@ void Sys_SDL_HandleEvents(void)
 {
 	int keycode;
 	int i;
-	const char *chp;
 	qbool isdown;
 	Uchar unicode;
 	char pending_text[64] = "";
