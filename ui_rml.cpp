@@ -313,6 +313,7 @@ struct State {
 	bool touch_mode = false; // the input is a finger: no hover, only the pressed state
 	bool left_target = false; // the finger went down on something and is now off it
 	Rml::Element* press_target = nullptr;
+	Rml::Element* slider_drag = nullptr; // a slider being dragged from outside its own track (see SliderPress)
 	bool scrolling = false;
 	Rml::Vector2f press_pos, last_pos;
 	Rml::Element* scroll_target = nullptr;
@@ -428,6 +429,48 @@ bool OnDragControl(Rml::Element* e)
 			return true;
 	}
 	return false;
+}
+
+// A press anywhere on a slider moves the thumb there and a drag carries on
+// from that spot, as in Base UI's Slider. RmlUi itself only does this when the
+// press is on the track, progress bar or thumb; the rest of the 48 dp strip
+// (and a finger that misses the thin line) would do nothing.
+bool IsSliderPart(const Rml::String& t)
+{
+	return t == "sliderbar" || t == "slidertrack" || t == "sliderprogress";
+}
+
+Rml::Element* SliderOf(Rml::Element* e)
+{
+	for (; e; e = e->GetParentNode())
+		if (e->GetTagName() == "input" && e->GetAttribute<Rml::String>("type", "") == "range")
+			return e;
+	return nullptr;
+}
+
+void SliderSetFromPosition(Rml::Element* input, float x)
+{
+	Rml::Element* track = input->QuerySelector("slidertrack");
+	Rml::Element* bar = input->QuerySelector("sliderbar");
+	if (!track || !bar)
+		return;
+	float left = track->GetAbsoluteOffset(Rml::BoxArea::Border).x;
+	float width = track->GetBox().GetSize(Rml::BoxArea::Border).x;
+	float barw = bar->GetBox().GetSize(Rml::BoxArea::Border).x;
+	if (width - barw < 1.0f)
+		return;
+	float f = std::min(1.0f, std::max(0.0f, (x - barw * 0.5f - left) / (width - barw)));
+	float mn = input->GetAttribute<float>("min", 0.0f);
+	float mx = input->GetAttribute<float>("max", 100.0f);
+	float st = input->GetAttribute<float>("step", 1.0f);
+	float v = mn + f * (mx - mn);
+	if (st > 0.0f)
+		v = mn + std::round((v - mn) / st) * st;
+	v = std::min(mx, std::max(mn, v));
+	if (v == input->GetAttribute<float>("value", mn - 1.0f))
+		return;
+	input->SetAttribute("value", v);
+	input->DispatchEvent("change", Rml::Dictionary());
 }
 
 Rml::Vector2f ScrollMax(Rml::Element* e)
@@ -706,6 +749,9 @@ void CloseDocument(const std::string& name)
 	if (it == g->documents.end())
 		return;
 	Document& d = it->second;
+	// a slider being dragged in this page must not be left pointing into it
+	if (g->slider_drag && d.doc && g->slider_drag->GetOwnerDocument() == d.doc)
+		g->slider_drag = nullptr;
 	if (!d.doc || !d.server) {
 		if (d.doc && d.shown) {
 			if (name == "mainmenu") {
@@ -787,6 +833,8 @@ int UIRml_Create(int width, int height, float dpratio)
 
 void UIRml_Destroy(void)
 {
+	if (g)
+		g->slider_drag = nullptr;
 	if (!g)
 		return;
 	g->bound.clear();
@@ -838,6 +886,8 @@ int UIRml_Show(const char* name)
 
 void UIRml_Hide(const char* name)
 {
+	if (g)
+		g->slider_drag = nullptr;
 	if (!g)
 		return;
 	auto it = g->documents.find(name);
@@ -848,6 +898,8 @@ void UIRml_Hide(const char* name)
 
 void UIRml_HideAll(void)
 {
+	if (g)
+		g->slider_drag = nullptr;
 	if (!g)
 		return;
 	std::vector<std::string> names;
@@ -988,6 +1040,8 @@ int UIRml_AnyShownExcept(const char* name)
 
 void UIRml_Reload(void)
 {
+	if (g)
+		g->slider_drag = nullptr;
 	if (!g)
 		return;
 	g->bound.clear();
@@ -1094,6 +1148,8 @@ void UIRml_MouseMove(float x, float y)
 {
 	if (!g)
 		return;
+	if (g->pressed && g->slider_drag)
+		SliderSetFromPosition(g->slider_drag, x);
 	if (g->pressed && g->touch) {
 		Rml::Vector2f now(x, y);
 		if (!g->scrolling) {
@@ -1103,7 +1159,7 @@ void UIRml_MouseMove(float x, float y)
 			if (d.x * d.x + d.y * d.y > slop * slop) {
 				// a list that is still moving from the last flick keeps being the one dragged
 				if (!(g->swallow && g->scroll_target))
-					g->scroll_target = OnDragControl(g->context->GetHoverElement()) ? nullptr : FindScrollable(g->context->GetHoverElement());
+					g->scroll_target = (g->slider_drag || OnDragControl(g->context->GetHoverElement())) ? nullptr : FindScrollable(g->context->GetHoverElement());
 				if (g->scroll_target) {
 					if (!g->swallow)
 						g->pos = Rml::Vector2f(g->scroll_target->GetScrollLeft(), g->scroll_target->GetScrollTop());
@@ -1215,6 +1271,18 @@ int UIRml_MouseButton(int button, int down, int modifiers, int touch)
 				g->press_target = nullptr;
 				return 1;
 			}
+		}
+	}
+	if (button == 0) {
+		if (down) {
+			Rml::Element* hit = g->context->GetHoverElement();
+			Rml::Element* slider = hit && !IsSliderPart(hit->GetTagName()) ? SliderOf(hit) : nullptr;
+			if (slider && !slider->HasAttribute("disabled")) {
+				g->slider_drag = slider;
+				SliderSetFromPosition(slider, g->last_pos.x);
+			}
+		} else {
+			g->slider_drag = nullptr;
 		}
 	}
 	bool r = down ? g->context->ProcessMouseButtonDown(button, modifiers) : g->context->ProcessMouseButtonUp(button, modifiers);
