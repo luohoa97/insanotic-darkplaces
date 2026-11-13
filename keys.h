@@ -27,23 +27,7 @@
 #ifndef __KEYS_H
 #define __KEYS_H
 
-#include <stddef.h>
 #include "qtypes.h"
-#include "qdefs.h"
-#include "fs.h"
-#include "cmd.h"
-
-// the highest Unicode character to allow key binding.
-// note that an excessively high value may degrade fps
-// when code is looping through the bindings
-// U+ABFF is probably the highest bindable codepoint,
-// see: https://github.com/DarkPlacesEngine/darkplaces/pull/68#issuecomment-1416802873
-#define MAX_KEY_BINDS 0xAC00
-
-// how long is a "tinystr" to hold a keyboard key's
-// Unicode utf-8 presentation, plus final \x00
-// to allow all characters <= 0xffff, use 4
-#define TINYSTR_LEN 4
 
 //
 // these are the key numbers that should be passed to Key_Event
@@ -365,7 +349,7 @@ typedef enum keynum_e
 	K_MIDINOTE126,
 	K_MIDINOTE127,
 
-	MAX_KEYS = MAX_KEY_BINDS
+	MAX_KEYS
 }
 keynum_t;
 
@@ -373,7 +357,7 @@ typedef enum keydest_e { key_game, key_message, key_menu, key_menu_grabbed, key_
 
 extern	char		key_line[MAX_INPUTLINE];
 extern	int			key_linepos;
-extern	qbool	key_insert;	// insert key toggle (for editing)
+extern	qboolean	key_insert;	// insert key toggle (for editing)
 extern	keydest_t	key_dest;
 // key_consoleactive bits
 // user wants console (halfscreen)
@@ -383,36 +367,31 @@ extern	keydest_t	key_dest;
 extern	int			key_consoleactive;
 extern	char		*keybindings[MAX_BINDMAPS][MAX_KEYS];
 
-extern signed char chat_mode; // 0 for say, 1 for say_team, -1 for command
+extern int chat_mode; // 0 for say, 1 for say_team, -1 for command
 extern char chat_buffer[MAX_INPUTLINE];
-extern int	chat_bufferpos;
+extern unsigned int chat_bufferlen;
 
-int Key_ClearEditLine(qbool is_console);
+void Key_ClearEditLine(int edit_line);
 void Key_WriteBindings(qfile_t *f);
 void Key_Init(void);
 void Key_Shutdown(void);
 void Key_Init_Cvars(void);
-void Key_Event(int key, int ascii, qbool down);
+void Key_Event(int key, int ascii, qboolean down);
 /// typed or pasted text, as one string of UTF-8: every character goes in as
 /// its own K_TEXT key, so a whole word an input method commits is not cut
 /// down to its first letter
 void Key_TextInput(const char *utf8);
 // Insanotic: whether a key or mouse button is held down
-qbool Key_IsDown(int key);
+qboolean Key_IsDown(int key);
 void Key_ReleaseAll (void);
-void Key_ReleaseAll_f(cmd_state_t *cmd);
 void Key_EventQueue_Block(void);
 void Key_EventQueue_Unblock(void);
-int Key_AddChar(int unicode, qbool is_console);
-int Key_Parse_CommonKeys(cmd_state_t *cmd, qbool is_console, int key, int unicode);
 
-qbool Key_SetBinding (int keynum, int bindmap, const char *binding);
+qboolean Key_SetBinding (int keynum, int bindmap, const char *binding);
 const char *Key_GetBind (int key, int bindmap);
 void Key_FindKeysForCommand (const char *command, int *keys, int numkeys, int bindmap);
-qbool Key_SetBindMap(int fg, int bg);
+qboolean Key_SetBindMap(int fg, int bg);
 void Key_GetBindMap(int *fg, int *bg);
-const char *Key_KeynumToString (int keynum, char *buf, size_t buflength);
-int Key_StringToKeynum (const char *str);
 
 #endif // __KEYS_H
 

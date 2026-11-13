@@ -2,7 +2,7 @@
 #include "quakedef.h"
 #include "image.h"
 
-cvar_t r_colormap_palette = {CF_CLIENT, "r_colormap_palette", "gfx/colormap_palette.lmp", "name of a palette lmp file to override the shirt/pants colors of player models. It consists of 16 shirt colors, 16 scoreboard shirt colors, 16 pants colors and 16 scoreboard pants colors"};
+cvar_t r_colormap_palette = {0, "r_colormap_palette", "gfx/colormap_palette.lmp", "name of a palette lmp file to override the shirt/pants colors of player models. It consists of 16 shirt colors, 16 scoreboard shirt colors, 16 pants colors and 16 scoreboard pants colors"};
 
 unsigned char palette_rgb[256][3];
 unsigned char palette_rgb_pantscolormap[16][3];
@@ -281,17 +281,17 @@ static void Palette_Load(void)
 	scale = 1;
 	base = 0;
 // COMMANDLINEOPTION: Client: -texgamma <number> sets the quake palette gamma, allowing you to make quake textures brighter/darker, not recommended
-	i = Sys_CheckParm("-texgamma");
+	i = COM_CheckParm("-texgamma");
 	if (i)
-		gamma = atof(sys.argv[i + 1]);
+		gamma = atof(com_argv[i + 1]);
 // COMMANDLINEOPTION: Client: -texcontrast <number> sets the quake palette contrast, allowing you to make quake textures brighter/darker, not recommended
-	i = Sys_CheckParm("-texcontrast");
+	i = COM_CheckParm("-texcontrast");
 	if (i)
-		scale = atof(sys.argv[i + 1]);
+		scale = atof(com_argv[i + 1]);
 // COMMANDLINEOPTION: Client: -texbrightness <number> sets the quake palette brightness (brightness of black), allowing you to make quake textures brighter/darker, not recommended
-	i = Sys_CheckParm("-texbrightness");
+	i = COM_CheckParm("-texbrightness");
 	if (i)
-		base = atof(sys.argv[i + 1]);
+		base = atof(com_argv[i + 1]);
 	gamma = bound(0.01, gamma, 10.0);
 	scale = bound(0.01, scale, 10.0);
 	base = bound(0, base, 0.95);
@@ -303,7 +303,7 @@ static void Palette_Load(void)
 		memcpy(palette_rgb, palfile, 768);
 	else
 	{
-		Con_DPrint(CON_WARN "Couldn't load gfx/palette.lmp, falling back on internal palette\n");
+		Con_DPrint("Couldn't load gfx/palette.lmp, falling back on internal palette\n");
 		memcpy(palette_rgb, host_quakepal, 768);
 	}
 	if (palfile)

@@ -31,9 +31,23 @@ typedef struct server_static_s
 	/// episode completion information
 	int serverflags;
 	/// cleared when at SV_SpawnServer
-	qbool changelevel_issued;
+	qboolean changelevel_issued;
 	/// server infostring
 	char serverinfo[MAX_SERVERINFO_STRING];
+	// performance data
+	float perf_cpuload;
+	float perf_lost;
+	float perf_offset_avg;
+	float perf_offset_max;
+	float perf_offset_sdev;
+	// temporary performance data accumulators
+	float perf_acc_realtime;
+	float perf_acc_sleeptime;
+	float perf_acc_lost;
+	float perf_acc_offset;
+	float perf_acc_offset_squared;
+	float perf_acc_offset_max;
+	int perf_acc_offset_samples;
 
 	// csqc stuff
 	unsigned char *csqc_progdata;
@@ -41,8 +55,8 @@ typedef struct server_static_s
 	unsigned char *csqc_progdata_deflated;
 
 	// independent server thread (when running client)
-	qbool threaded; // true if server is running on separate thread
-	qbool volatile threadstop;
+	qboolean threaded; // true if server is running on separate thread
+	qboolean volatile threadstop;
 	void *threadmutex;
 	void *thread;
 } server_static_t;
@@ -63,35 +77,19 @@ server_floodaddress_t;
 typedef struct server_s
 {
 	/// false if only a net client
-	qbool active;
+	qboolean active;
 
-	qbool paused;
+	qboolean paused;
 	double pausedstart;
 	/// handle connections specially
-	qbool loadgame;
+	qboolean loadgame;
 
 	/// one of the PROTOCOL_ values
 	protocolversion_t protocol;
 
 	double time;
+
 	double frametime;
-
-	unsigned int spawnframe; // signals SV_Frame() to reset its timers
-
-	// performance data
-	float perf_cpuload;
-	float perf_lost;
-	float perf_offset_avg;
-	float perf_offset_max;
-	float perf_offset_sdev;
-	// temporary performance data accumulators
-	float perf_acc_realtime;
-	float perf_acc_sleeptime;
-	float perf_acc_lost;
-	float perf_acc_offset;
-	float perf_acc_offset_squared;
-	float perf_acc_offset_max;
-	int perf_acc_offset_samples;
 
 	// used by PF_checkclient
 	int lastcheck;
@@ -105,18 +103,21 @@ typedef struct server_s
 	/// collision culling data
 	world_t world;
 
+	/// map name
+	char name[64]; // %s followed by entrance name
 	// variants of map name
+	char worldmessage[40]; // map title (not related to filename)
 	char worldbasename[MAX_QPATH]; // %s
 	char worldname[MAX_QPATH]; // maps/%s.bsp
 	char worldnamenoextension[MAX_QPATH]; // maps/%s
 	struct model_s *worldmodel;
 	// NULL terminated
-	// LadyHavoc: precaches are now MAX_QPATH rather than a pointer
+	// LordHavoc: precaches are now MAX_QPATH rather than a pointer
 	// updated by SV_ModelIndex
 	char model_precache[MAX_MODELS][MAX_QPATH];
 	struct model_s *models[MAX_MODELS];
 	// NULL terminated
-	// LadyHavoc: precaches are now MAX_QPATH rather than a pointer
+	// LordHavoc: precaches are now MAX_QPATH rather than a pointer
 	// updated by SV_SoundIndex
 	char sound_precache[MAX_SOUNDS][MAX_QPATH];
 	char lightstyles[MAX_LIGHTSTYLES][64];
@@ -131,7 +132,7 @@ typedef struct server_s
 	unsigned char reliable_datagram_buf[NET_MAXMESSAGE];
 
 	sizebuf_t signon;
-	/// LadyHavoc: increased signon message buffer from 8192
+	/// LordHavoc: increased signon message buffer from 8192
 	unsigned char signon_buf[NET_MAXMESSAGE];
 
 	/// connection flood blocking
@@ -140,7 +141,7 @@ typedef struct server_s
 	server_floodaddress_t connectfloodaddresses[MAX_CONNECTFLOODADDRESSES];
 	server_floodaddress_t getstatusfloodaddresses[MAX_GETSTATUSFLOODADDRESSES];
 
-	qbool particleeffectnamesloaded;
+	qboolean particleeffectnamesloaded;
 	char particleeffectname[MAX_PARTICLEEFFECTNAME][MAX_QPATH];
 
 	int writeentitiestoclient_stats_culled_pvs;
@@ -152,7 +153,8 @@ typedef struct server_s
 	sizebuf_t *writeentitiestoclient_msg;
 	vec3_t writeentitiestoclient_eyes[MAX_CLIENTNETWORKEYES];
 	int writeentitiestoclient_numeyes;
-	unsigned char *writeentitiestoclient_pvs;
+	int writeentitiestoclient_pvsbytes;
+	unsigned char writeentitiestoclient_pvs[MAX_MAP_LEAFS/8];
 	const entity_state_t *writeentitiestoclient_sendstates[MAX_EDICTS];
 	unsigned short writeentitiestoclient_csqcsendstates[MAX_EDICTS];
 
@@ -177,20 +179,23 @@ typedef struct csqcentityframedb_s
 	int sendflags[NUM_CSQCENTITIES_PER_FRAME];
 } csqcentityframedb_t;
 
+// if defined this does ping smoothing, otherwise it does not
+//#define NUM_PING_TIMES 16
+
 #define NUM_SPAWN_PARMS 16
 
 typedef struct client_s
 {
 	/// false = empty client slot
-	qbool active;
+	qboolean active;
 	/// false = don't do ClientDisconnect on drop
-	qbool clientconnectcalled;
+	qboolean clientconnectcalled;
 	/// false = don't allow spawn
-	qbool prespawned;
+	qboolean prespawned;
 	/// false = don't allow begin
-	qbool spawned;
+	qboolean spawned;
 	/// false = don't send datagrams
-	qbool begun;
+	qboolean begun;
 	/// 1 = send svc_serverinfo and advance to 2, 2 doesn't send, then advances to 0 (allowing unlimited sending) when prespawn is received
 	int sendsignon;
 
@@ -220,7 +225,12 @@ typedef struct client_s
 	/// PRVM_EDICT_NUM(clientnum+1)
 	prvm_edict_t *edict;
 
-	/// LadyHavoc: can be used for prediction or whatever...
+#ifdef NUM_PING_TIMES
+	float ping_times[NUM_PING_TIMES];
+	/// ping_times[num_pings%NUM_PING_TIMES]
+	int num_pings;
+#endif
+	/// LordHavoc: can be used for prediction or whatever...
 	float ping;
 
 	/// this is used by sv_clmovement_minping code
@@ -290,12 +300,12 @@ typedef struct client_s
 	// information on an active download if any
 	qfile_t *download_file;
 	int download_expectedposition; ///< next position the client should ack
-	qbool download_started;
+	qboolean download_started;
 	char download_name[MAX_QPATH];
-	qbool download_deflate;
+	qboolean download_deflate;
 
 	// fixangle data
-	qbool fixangle_angles_set;
+	qboolean fixangle_angles_set;
 	vec3_t fixangle_angles;
 
 	/// demo recording
@@ -318,7 +328,7 @@ typedef struct client_s
 #define	MOVETYPE_ANGLENOCLIP	1
 #define	MOVETYPE_ANGLECLIP		2
 #define	MOVETYPE_WALK			3		///< gravity
-#define	MOVETYPE_STEP			4		///< gravity, special edge handling, special step based client side interpolation
+#define	MOVETYPE_STEP			4		///< gravity, special edge handling
 #define	MOVETYPE_FLY			5
 #define	MOVETYPE_TOSS			6		///< gravity
 #define	MOVETYPE_PUSH			7		///< no clip to world, push and crush
@@ -339,9 +349,9 @@ typedef struct client_s
 #define	SOLID_BBOX				2		///< touch on edge, block
 #define	SOLID_SLIDEBOX			3		///< touch on edge, but not an onground
 #define	SOLID_BSP				4		///< bsp clip, touch on edge, block
-// LadyHavoc: corpse code
+// LordHavoc: corpse code
 #define	SOLID_CORPSE			5		///< same as SOLID_BBOX, except it behaves as SOLID_NOT against SOLID_SLIDEBOX objects (players/monsters)
-// LadyHavoc: physics
+// LordHavoc: physics
 // VorteX: now these fields are deprecated, as geomtype is more flexible
 #define	SOLID_PHYSICS_BOX		32		///< physics object (mins, maxs, mass, origin, axis_forward, axis_left, axis_up, velocity, spinvelocity)
 #define	SOLID_PHYSICS_SPHERE	33		///< physics object (mins, maxs, mass, origin, axis_forward, axis_left, axis_up, velocity, spinvelocity)
@@ -364,7 +374,7 @@ typedef struct client_s
 #define	FL_CONVEYOR				4
 #define	FL_CLIENT				8
 #define	FL_INWATER				16
-#define	FL_MONSTER				32      ///< movement is smoothed on the client side by step based interpolation
+#define	FL_MONSTER				32
 #define	FL_GODMODE				64
 #define	FL_NOTARGET				128
 #define	FL_ITEM					256
@@ -399,7 +409,7 @@ extern cvar_t scratch2;
 extern cvar_t scratch3;
 extern cvar_t scratch4;
 extern cvar_t skill;
-extern cvar_t host_timescale;
+extern cvar_t slowmo;
 extern cvar_t sv_accelerate;
 extern cvar_t sv_aim;
 extern cvar_t sv_airaccel_qw;
@@ -418,7 +428,6 @@ extern cvar_t sv_allowdownloads_archive;
 extern cvar_t sv_allowdownloads_config;
 extern cvar_t sv_allowdownloads_dlcache;
 extern cvar_t sv_allowdownloads_inarchive;
-extern cvar_t sv_areagrid_link_SOLID_NOT;
 extern cvar_t sv_areagrid_mingridsize;
 extern cvar_t sv_checkforpacketsduringsleep;
 extern cvar_t sv_clmovement_enable;
@@ -439,6 +448,7 @@ extern cvar_t sv_debugmove;
 extern cvar_t sv_echobprint;
 extern cvar_t sv_edgefriction;
 extern cvar_t sv_entpatch;
+extern cvar_t sv_fixedframeratesingleplayer;
 extern cvar_t sv_freezenonclients;
 extern cvar_t sv_friction;
 extern cvar_t sv_gameplayfix_blowupfallenzombies;
@@ -450,7 +460,6 @@ extern cvar_t sv_gameplayfix_easierwaterjump;
 extern cvar_t sv_gameplayfix_findradiusdistancetobox;
 extern cvar_t sv_gameplayfix_gravityunaffectedbyticrate;
 extern cvar_t sv_gameplayfix_grenadebouncedownslopes;
-extern cvar_t sv_gameplayfix_impactbeforeonground;
 extern cvar_t sv_gameplayfix_multiplethinksperframe;
 extern cvar_t sv_gameplayfix_noairborncorpse;
 extern cvar_t sv_gameplayfix_noairborncorpse_allowsuspendeditems;
@@ -470,7 +479,6 @@ extern cvar_t sv_gameplayfix_q1bsptracelinereportstexture;
 extern cvar_t sv_gameplayfix_unstickplayers;
 extern cvar_t sv_gameplayfix_unstickentities;
 extern cvar_t sv_gameplayfix_fixedcheckwatertransition;
-extern cvar_t sv_gameplayfix_nosquashentities;
 extern cvar_t sv_gravity;
 extern cvar_t sv_idealpitchscale;
 extern cvar_t sv_jumpstep;
@@ -485,7 +493,7 @@ extern cvar_t sv_playerphysicsqc;
 extern cvar_t sv_progs;
 extern cvar_t sv_protocolname;
 extern cvar_t sv_random_seed;
-extern cvar_t host_limitlocal;
+extern cvar_t sv_ratelimitlocalplayer;
 extern cvar_t sv_sound_land;
 extern cvar_t sv_sound_watersplash;
 extern cvar_t sv_stepheight;
@@ -511,20 +519,14 @@ extern client_t *host_client;
 //===========================================================
 
 void SV_Init (void);
-double SV_Frame(double time);
-void SV_Shutdown(void);
-
-int SV_IsLocalServer(void);
 
 void SV_StartParticle (vec3_t org, vec3_t dir, int color, int count);
 void SV_StartEffect (vec3_t org, int modelindex, int startframe, int framecount, int framerate);
-void SV_StartSound (prvm_edict_t *entity, int channel, const char *sample, int volume, float attenuation, qbool reliable, float speed);
+void SV_StartSound (prvm_edict_t *entity, int channel, const char *sample, int volume, float attenuation, qboolean reliable, float speed);
 void SV_StartPointSound (vec3_t origin, const char *sample, int volume, float attenuation, float speed);
 
 void SV_ConnectClient (int clientnum, netconn_t *netconnection);
-void SV_DropClient (qbool leaving, const char *reason, ... );
-
-void SV_ClientCommands(const char *fmt, ...) DP_FUNC_PRINTF(1);
+void SV_DropClient (qboolean crash);
 
 void SV_SendClientMessages(void);
 
@@ -539,15 +541,15 @@ int SV_SoundIndex(const char *s, int precachemode);
 
 int SV_ParticleEffectIndex(const char *name);
 
-model_t *SV_GetModelByIndex(int modelindex);
-qbool SV_CSQC_Deflated(void);
-model_t *SV_GetModelFromEdict(prvm_edict_t *ed);
+dp_model_t *SV_GetModelByIndex(int modelindex);
+qboolean SV_CSQC_Deflated(void);
+dp_model_t *SV_GetModelFromEdict(prvm_edict_t *ed);
 
 void SV_SetIdealPitch (void);
 
 void SV_AddUpdates (void);
 
-void SV_PlayerPhysics (void);
+void SV_ClientThink (void);
 
 void SV_ClientPrint(const char *msg);
 void SV_ClientPrintf(const char *fmt, ...) DP_FUNC_PRINTF(1);
@@ -558,9 +560,9 @@ void SV_Physics (void);
 void SV_Physics_ClientMove (void);
 //void SV_Physics_ClientEntity (prvm_edict_t *ent);
 
-qbool SV_PlayerCheckGround (prvm_edict_t *ent);
-qbool SV_CheckBottom (prvm_edict_t *ent);
-qbool SV_movestep (prvm_edict_t *ent, vec3_t move, qbool relink, qbool noenemy, qbool settrace);
+qboolean SV_PlayerCheckGround (prvm_edict_t *ent);
+qboolean SV_CheckBottom (prvm_edict_t *ent);
+qboolean SV_movestep (prvm_edict_t *ent, vec3_t move, qboolean relink, qboolean noenemy, qboolean settrace);
 
 /*! Needs to be called any time an entity changes origin, mins, maxs, or solid
  * sets ent->v.absmin and ent->v.absmax
@@ -570,6 +572,15 @@ void SV_LinkEdict(prvm_edict_t *ent);
 void SV_LinkEdict_TouchAreaGrid(prvm_edict_t *ent);
 void SV_LinkEdict_TouchAreaGrid_Call(prvm_edict_t *touch, prvm_edict_t *ent); // if we detected a touch from another source
 
+/*! move an entity that is stuck by small amounts in various directions to try to nudge it back into the collision hull
+ * returns true if it found a better place
+ */
+qboolean SV_UnstickEntity (prvm_edict_t *ent);
+/*! move an entity that is stuck out of the surface it is stuck in (can move large amounts)
+ * returns true if it found a better place
+ */
+qboolean SV_NudgeOutOfSolid(prvm_edict_t *ent);
+
 /// calculates hitsupercontentsmask for a generic qc entity
 int SV_GenericHitSuperContentsMask(const prvm_edict_t *edict);
 /// traces a box move against worldmodel and all entities in the specified area
@@ -578,13 +589,7 @@ trace_t SV_TraceLine(const vec3_t start, const vec3_t end, int type, prvm_edict_
 trace_t SV_TracePoint(const vec3_t start, int type, prvm_edict_t *passedict, int hitsupercontentsmask, int skipsupercontentsmask, int skipmaterialflagsmask);
 int SV_EntitiesInBox(const vec3_t mins, const vec3_t maxs, int maxedicts, prvm_edict_t **resultedicts);
 
-qbool SV_CanSeeBox(int numsamples, vec_t eyejitter, vec_t enlarge, vec_t entboxexpand, vec3_t eye, vec3_t entboxmins, vec3_t entboxmaxs);
-
-void SV_MarkWriteEntityStateToClient(entity_state_t *s, client_t *client);
-
-void SV_SendServerinfo(client_t *client);
-void SV_WriteEntitiesToClient(client_t *client, prvm_edict_t *clent, sizebuf_t *msg, int maxsize);
-void SV_AddCameraEyes(void);
+qboolean SV_CanSeeBox(int numsamples, vec_t eyejitter, vec_t enlarge, vec3_t eye, vec3_t entboxmins, vec3_t entboxmaxs);
 
 int SV_PointSuperContents(const vec3_t point);
 
@@ -595,17 +600,16 @@ void VM_SV_MoveToGoal(prvm_prog_t *prog);
 
 void SV_ApplyClientMove (void);
 void SV_SaveSpawnparms (void);
-
-void SV_SpawnServer (const char *map);
+void SV_SpawnServer (const char *server);
 
 void SV_CheckVelocity (prvm_edict_t *ent);
 
 void SV_SetupVM(void);
 
-const char *SV_TimingReport(char *buf, size_t buflen); ///< for output in SV_Status_f
+const char *Host_TimingReport(char *buf, size_t buflen); ///< for output in Host_Status_f
 
 int SV_GetPitchSign(prvm_prog_t *prog, prvm_edict_t *ent);
-void SV_GetEntityMatrix(prvm_prog_t *prog, prvm_edict_t *ent, matrix4x4_t *out, qbool viewmatrix);
+void SV_GetEntityMatrix(prvm_prog_t *prog, prvm_edict_t *ent, matrix4x4_t *out, qboolean viewmatrix);
 
 void SV_StartThread(void);
 void SV_StopThread(void);
@@ -614,17 +618,8 @@ void SV_StopThread(void);
 
 void VM_CustomStats_Clear(void);
 void VM_SV_UpdateCustomStats(client_t *client, prvm_edict_t *ent, sizebuf_t *msg, int *stats);
-void SV_Name(int clientnum);
-void SV_InitOperatorCommands(void);
-
-void SV_Savegame_to(prvm_prog_t *prog, const char *name);
-void SV_Savegame_f(cmd_state_t *cmd);
-void SV_Loadgame_f(cmd_state_t *cmd);
-
-void SV_PreSpawn_f(cmd_state_t *cmd);
-void SV_Spawn_f(cmd_state_t *cmd);
-void SV_Begin_f(cmd_state_t *cmd);
-
-qbool SV_VM_ConsoleCommand(const char *text, size_t textlen);
+void Host_Savegame_to(prvm_prog_t *prog, const char *name);
+void SV_SendServerinfo(client_t *client);
 
 #endif
+

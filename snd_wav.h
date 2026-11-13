@@ -25,12 +25,10 @@
 #ifndef SND_WAV_H
 #define SND_WAV_H
 
-#include "qtypes.h"
-struct sfx_s;
 
-extern const struct snd_fetcher_s wav_fetcher;
+extern const snd_fetcher_t wav_fetcher;
 
-qbool S_LoadWavFile (const char *filename, struct sfx_s *sfx);
+qboolean S_LoadWavFile (const char *filename, sfx_t *sfx);
 
 
 #endif

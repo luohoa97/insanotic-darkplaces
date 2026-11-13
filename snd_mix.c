@@ -24,13 +24,12 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 extern cvar_t snd_softclip;
 
 static portable_sampleframe_t paintbuffer[PAINTBUFFER_SIZE];
+static portable_sampleframe_t paintbuffer_unswapped[PAINTBUFFER_SIZE];
 
 extern speakerlayout_t snd_speakerlayout; // for querying the listeners
 
 #ifdef CONFIG_VIDEO_CAPTURE
-static portable_sampleframe_t paintbuffer_unswapped[PAINTBUFFER_SIZE];
-
-static void S_CaptureAVISound(const portable_sampleframe_t *sampleframes, size_t length)
+static void S_CaptureAVISound(const portable_sampleframe_t *paintbuffer, size_t length)
 {
 	size_t i;
 	unsigned int j;
@@ -43,7 +42,7 @@ static void S_CaptureAVISound(const portable_sampleframe_t *sampleframes, size_t
 	{
 		unsigned int j0 = snd_speakerlayout.listeners[j].channel_unswapped;
 		for(i = 0; i < length; ++i)
-			paintbuffer_unswapped[i].sample[j0] = sampleframes[i].sample[j];
+			paintbuffer_unswapped[i].sample[j0] = paintbuffer[i].sample[j];
 	}
 
 	SCR_CaptureVideo_SoundFrame(paintbuffer_unswapped, length);
@@ -128,64 +127,11 @@ static void S_SoftClipPaintBuffer(portable_sampleframe_t *painted_ptr, int nbfra
 
 static void S_ConvertPaintBuffer(portable_sampleframe_t *painted_ptr, void *rb_ptr, int nbframes, int width, int nchannels)
 {
-	int i;
-	float val;
-	if (width == 4)  // 32bit float
-	{
-		float *snd_out = (float*)rb_ptr;
-		if (nchannels == 8)  // 7.1 surround
-		{
-			for (i = 0; i < nbframes; i++, painted_ptr++)
-			{
-				*snd_out++ = painted_ptr->sample[0];
-				*snd_out++ = painted_ptr->sample[1];
-				*snd_out++ = painted_ptr->sample[2];
-				*snd_out++ = painted_ptr->sample[3];
-				*snd_out++ = painted_ptr->sample[4];
-				*snd_out++ = painted_ptr->sample[5];
-				*snd_out++ = painted_ptr->sample[6];
-				*snd_out++ = painted_ptr->sample[7];
-			}
-		}
-		else if (nchannels == 6)  // 5.1 surround
-		{
-			for (i = 0; i < nbframes; i++, painted_ptr++)
-			{
-				*snd_out++ = painted_ptr->sample[0];
-				*snd_out++ = painted_ptr->sample[1];
-				*snd_out++ = painted_ptr->sample[2];
-				*snd_out++ = painted_ptr->sample[3];
-				*snd_out++ = painted_ptr->sample[4];
-				*snd_out++ = painted_ptr->sample[5];
-			}
-		}
-		else if (nchannels == 4)  // 4.0 surround
-		{
-			for (i = 0; i < nbframes; i++, painted_ptr++)
-			{
-				*snd_out++ = painted_ptr->sample[0];
-				*snd_out++ = painted_ptr->sample[1];
-				*snd_out++ = painted_ptr->sample[2];
-				*snd_out++ = painted_ptr->sample[3];
-			}
-		}
-		else if (nchannels == 2)  // 2.0 stereo
-		{
-			for (i = 0; i < nbframes; i++, painted_ptr++)
-			{
-				*snd_out++ = painted_ptr->sample[0];
-				*snd_out++ = painted_ptr->sample[1];
-			}
-		}
-		else if (nchannels == 1)  // 1.0 mono
-		{
-			for (i = 0; i < nbframes; i++, painted_ptr++)
-			{
-				*snd_out++ = painted_ptr->sample[0];
-			}
-		}
-	}
-	else if (width == 2)  // 16bit
+	int i, val;
+
+	// FIXME: add 24bit and 32bit float formats
+	// FIXME: optimize with SSE intrinsics?
+	if (width == 2)  // 16bit
 	{
 		short *snd_out = (short*)rb_ptr;
 		if (nchannels == 8)  // 7.1 surround
@@ -239,6 +185,10 @@ static void S_ConvertPaintBuffer(portable_sampleframe_t *painted_ptr, void *rb_p
 				val = (int)((painted_ptr->sample[0] + painted_ptr->sample[1]) * 16384.0f);*snd_out++ = bound(-32768, val, 32767);
 			}
 		}
+
+		// noise is really really annoying
+		if (cls.timedemo)
+			memset(rb_ptr, 0, nbframes * nchannels * width);
 	}
 	else  // 8bit
 	{
@@ -294,68 +244,12 @@ static void S_ConvertPaintBuffer(portable_sampleframe_t *painted_ptr, void *rb_p
 				val = (int)((painted_ptr->sample[0] + painted_ptr->sample[1]) * 64.0f) + 128; *snd_out++ = bound(0, val, 255);
 			}
 		}
+
+		// noise is really really annoying
+		if (cls.timedemo)
+			memset(rb_ptr, 128, nbframes * nchannels);
 	}
 }
-
-
-
-/*
-===============================================================================
-
-UNDERWATER EFFECT
-
-Muffles the intensity of sounds when the player is underwater
-
-===============================================================================
-*/
-
-static struct
-{
-	float intensity;
-	float alpha;
-	float accum[SND_LISTENERS];
-}
-underwater = {0.f, 1.f, {0.f, 0.f, 0.f, 0.f, 0.f, 0.f, 0.f, 0.f}};
-
-void S_SetUnderwaterIntensity(void)
-{
-	float target = cl.view_underwater ? bound(0.f, snd_waterfx.value, 2.f) : 0.f;
-
-	if (underwater.intensity < target)
-	{
-		underwater.intensity += cl.realframetime * 4.f;
-		underwater.intensity = min(underwater.intensity, target);
-	}
-	else if (underwater.intensity > target)
-	{
-		underwater.intensity -= cl.realframetime * 4.f;
-		underwater.intensity = max(underwater.intensity, target);
-	}
-
-	underwater.alpha = underwater.intensity ? exp(-underwater.intensity * log(12.f)) : 1.f;
-}
-
-static void S_UnderwaterFilter(int endtime)
-{
-	int i;
-	int sl;
-
-	if (!underwater.intensity)
-	{
-		if (endtime > 0)
-			for (sl = 0; sl < SND_LISTENERS; sl++)
-				underwater.accum[sl] = paintbuffer[endtime-1].sample[sl];
-		return;
-	}
-
-	for (i = 0; i < endtime; i++)
-		for (sl = 0; sl < SND_LISTENERS; sl++)
-		{
-			underwater.accum[sl] += underwater.alpha * (paintbuffer[i].sample[sl] - underwater.accum[sl]);
-			paintbuffer[i].sample[sl] = underwater.accum[sl];
-		}
-}
-
 
 
 /*
@@ -395,8 +289,8 @@ void S_MixToBuffer(void *stream, unsigned int bufferframes)
 	double posd;
 	double speedd;
 	float maxvol;
-	qbool looping;
-	qbool silent;
+	qboolean looping;
+	qboolean silent;
 
 	// mix as many times as needed to fill the requested buffer
 	while (bufferframes)
@@ -627,9 +521,6 @@ void S_MixToBuffer(void *stream, unsigned int bufferframes)
 		}
 
 		S_SoftClipPaintBuffer(paintbuffer, totalmixframes, snd_renderbuffer->format.width, snd_renderbuffer->format.channels);
-
-		S_UnderwaterFilter(totalmixframes);
-
 
 #ifdef CONFIG_VIDEO_CAPTURE
 		if (!snd_usethreadedmixing)

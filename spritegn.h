@@ -61,7 +61,7 @@ typedef struct dsprite_s
 	int			height;
 	int			numframes;
 	float		beamlength;
-	int			synctype;
+	synctype_t	synctype;
 } dsprite_t;
 
 typedef struct dspritehl_s
@@ -75,7 +75,7 @@ typedef struct dspritehl_s
 	int			height;
 	int			numframes;
 	float		beamlength;
-	int			synctype;
+	synctype_t	synctype;
 } dspritehl_t;
 
 typedef struct dsprite2frame_s
@@ -128,3 +128,4 @@ typedef struct dspriteframetype_s {
 } dspriteframetype_t;
 
 #endif
+

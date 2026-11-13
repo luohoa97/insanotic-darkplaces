@@ -22,11 +22,10 @@
 */
 
 
-#include "darkplaces.h"
+#include "quakedef.h"
 #include "snd_main.h"
 #include "snd_ogg.h"
 #include "snd_wav.h"
-#include "sound.h"
 
 #ifdef LINK_TO_LIBVORBIS
 #define OV_EXCLUDE_STATIC_CALLBACKS
@@ -42,7 +41,7 @@
 #define qov_read ov_read
 #define qvorbis_comment_query vorbis_comment_query
 
-qbool OGG_OpenLibrary (void) {return true;}
+qboolean OGG_OpenLibrary (void) {return true;}
 void OGG_CloseLibrary (void) {}
 #else
 
@@ -59,10 +58,16 @@ void OGG_CloseLibrary (void) {}
 =================================================================
 */
 
+#ifdef _MSC_VER
+typedef __int64 ogg_int64_t;
+#else
+typedef long long ogg_int64_t;
+#endif
+
 typedef struct
 {
 	size_t	(*read_func)	(void *ptr, size_t size, size_t nmemb, void *datasource);
-	int		(*seek_func)	(void *datasource, int64_t offset, int whence);
+	int		(*seek_func)	(void *datasource, ogg_int64_t offset, int whence);
 	int		(*close_func)	(void *datasource);
 	long	(*tell_func)	(void *datasource);
 } ov_callbacks;
@@ -97,7 +102,7 @@ typedef struct
 	long			body_fill;
 	long			body_returned;
 	int				*lacing_vals;
-	int64_t		*granule_vals;
+	ogg_int64_t		*granule_vals;
 	long			lacing_storage;
 	long			lacing_fill;
 	long			lacing_packet;
@@ -108,8 +113,8 @@ typedef struct
 	int				b_o_s;
 	long			serialno;
 	long			pageno;
-	int64_t		packetno;
-	int64_t		granulepos;
+	ogg_int64_t		packetno;
+	ogg_int64_t		granulepos;
 } ogg_stream_state;
 
 typedef struct
@@ -127,12 +132,12 @@ typedef struct
 	long		W;
 	long		nW;
 	long		centerW;
-	int64_t	granulepos;
-	int64_t	sequence;
-	int64_t	glue_bits;
-	int64_t	time_bits;
-	int64_t	floor_bits;
-	int64_t	res_bits;
+	ogg_int64_t	granulepos;
+	ogg_int64_t	sequence;
+	ogg_int64_t	glue_bits;
+	ogg_int64_t	time_bits;
+	ogg_int64_t	floor_bits;
+	ogg_int64_t	res_bits;
 	void		*backend_state;
 } vorbis_dsp_state;
 
@@ -155,8 +160,8 @@ typedef struct
 	int					pcmend;
 	int					mode;
 	int					eofflag;
-	int64_t			granulepos;
-	int64_t			sequence;
+	ogg_int64_t			granulepos;
+	ogg_int64_t			sequence;
 	vorbis_dsp_state	*vd;
 	void				*localstore;
 	long				localtop;
@@ -182,17 +187,17 @@ typedef struct
 {
 	void				*datasource;
 	int					seekable;
-	int64_t			offset;
-	int64_t			end;
+	ogg_int64_t			offset;
+	ogg_int64_t			end;
 	ogg_sync_state		oy;
 	int					links;
-	int64_t			*offsets;
-	int64_t			*dataoffsets;
+	ogg_int64_t			*offsets;
+	ogg_int64_t			*dataoffsets;
 	long				*serialnos;
-	int64_t			*pcmlengths;
+	ogg_int64_t			*pcmlengths;
 	vorbis_info			*vi;
 	vorbis_comment		*vc;
-	int64_t			pcm_offset;
+	ogg_int64_t			pcm_offset;
 	int					ready_state;
 	long				current_serialno;
 	int					current_link;
@@ -221,8 +226,8 @@ static char * (*qvorbis_comment_query) (vorbis_comment *vc, const char *tag, int
 static int (*qov_open_callbacks) (void *datasource, OggVorbis_File *vf,
 								  char *initial, long ibytes,
 								  ov_callbacks callbacks);
-static int (*qov_pcm_seek) (OggVorbis_File *vf,int64_t pos);
-static int64_t (*qov_pcm_total) (OggVorbis_File *vf,int i);
+static int (*qov_pcm_seek) (OggVorbis_File *vf,ogg_int64_t pos);
+static ogg_int64_t (*qov_pcm_total) (OggVorbis_File *vf,int i);
 static long (*qov_read) (OggVorbis_File *vf,char *buffer,int length,
 						 int bigendianp,int word,int sgned,int *bitstream);
 
@@ -264,7 +269,7 @@ OGG_OpenLibrary
 Try to load the VorbisFile DLL
 ====================
 */
-qbool OGG_OpenLibrary (void)
+qboolean OGG_OpenLibrary (void)
 {
 	const char* dllnames_vo [] =
 	{
@@ -300,13 +305,13 @@ qbool OGG_OpenLibrary (void)
 		return true;
 
 // COMMANDLINEOPTION: Sound: -novorbis disables ogg vorbis sound support
-	if (Sys_CheckParm("-novorbis"))
+	if (COM_CheckParm("-novorbis"))
 		return false;
 
 	// Load the DLLs
 	// We need to load both by hand because some OSes seem to not load
 	// the vorbis DLL automatically when loading the VorbisFile DLL
-	return Sys_LoadDependency (dllnames_vo, &vo_dll, vorbisfuncs) && Sys_LoadDependency (dllnames_vf, &vf_dll, vorbisfilefuncs);
+	return Sys_LoadLibrary (dllnames_vo, &vo_dll, vorbisfuncs) && Sys_LoadLibrary (dllnames_vf, &vf_dll, vorbisfilefuncs);
 }
 
 
@@ -319,8 +324,8 @@ Unload the VorbisFile DLL
 */
 void OGG_CloseLibrary (void)
 {
-	Sys_FreeLibrary (&vf_dll);
-	Sys_FreeLibrary (&vo_dll);
+	Sys_UnloadLibrary (&vf_dll);
+	Sys_UnloadLibrary (&vo_dll);
 }
 
 #endif
@@ -388,7 +393,7 @@ const char *opus_tags_query (const OpusTags *tags, const char *tag, int count);
 #define qop_read op_read
 #define qopus_tags_query opus_tags_query
 
-qbool OPUS_OpenLibrary (void) {return true;}
+qboolean OPUS_OpenLibrary (void) {return true;}
 void OPUS_CloseLibrary (void) {}
 
 #else
@@ -424,7 +429,7 @@ OPUS_OpenLibrary
 Try to load libopusfile (it pulls in libopus and libogg by itself)
 ====================
 */
-qbool OPUS_OpenLibrary (void)
+qboolean OPUS_OpenLibrary (void)
 {
 	const char* dllnames_op [] =
 	{
@@ -445,15 +450,15 @@ qbool OPUS_OpenLibrary (void)
 		return true;
 
 // COMMANDLINEOPTION: Sound: -noopus disables Opus sound support
-	if (Sys_CheckParm("-noopus"))
+	if (COM_CheckParm("-noopus"))
 		return false;
 
-	return Sys_LoadDependency (dllnames_op, &op_dll, opusfilefuncs);
+	return Sys_LoadLibrary (dllnames_op, &op_dll, opusfilefuncs);
 }
 
 void OPUS_CloseLibrary (void)
 {
-	Sys_FreeLibrary (&op_dll);
+	Sys_UnloadLibrary (&op_dll);
 }
 
 #endif
@@ -469,7 +474,7 @@ void OPUS_CloseLibrary (void)
 typedef struct
 {
 	unsigned char *buffer;
-	int64_t ind, buffsize;
+	ogg_int64_t ind, buffsize;
 } ov_decode_t;
 
 static size_t ovcb_read (void *ptr, size_t size, size_t nb, void *datasource)
@@ -488,7 +493,7 @@ static size_t ovcb_read (void *ptr, size_t size, size_t nb, void *datasource)
 	return len / size;
 }
 
-static int ovcb_seek (void *datasource, int64_t offset, int whence)
+static int ovcb_seek (void *datasource, ogg_int64_t offset, int whence)
 {
 	ov_decode_t *ov_decode = (ov_decode_t*)datasource;
 
@@ -525,7 +530,7 @@ static long ovcb_tell (void *ov_decode)
 static int opcb_read (void *datasource, unsigned char *ptr, int nbytes)
 {
 	ov_decode_t *ov_decode = (ov_decode_t*)datasource;
-	int64_t remain = ov_decode->buffsize - ov_decode->ind;
+	ogg_int64_t remain = ov_decode->buffsize - ov_decode->ind;
 
 	if (nbytes > remain)
 		nbytes = (int)remain;
@@ -536,7 +541,7 @@ static int opcb_read (void *datasource, unsigned char *ptr, int nbytes)
 
 static int opcb_seek (void *datasource, long long offset, int whence)
 {
-	return ovcb_seek (datasource, (int64_t)offset, whence);
+	return ovcb_seek (datasource, (ogg_int64_t)offset, whence);
 }
 
 static long long opcb_tell (void *datasource)
@@ -551,7 +556,7 @@ typedef struct
 {
 	unsigned char	*file;
 	size_t			filesize;
-	qbool		opus; ///< the file is Ogg Opus rather than Ogg Vorbis
+	qboolean		opus; ///< the file is Ogg Opus rather than Ogg Vorbis
 } ogg_stream_persfx_t;
 
 // Per-channel data structure
@@ -652,10 +657,10 @@ static void OGG_GetSamplesFloat (channel_t *ch, sfx_t *sfx, int firstsampleframe
 		if (per_sfx->opus)
 			ret = qop_pcm_seek(per_ch->of, (long long)firstsampleframe);
 		else
-			ret = qov_pcm_seek(&per_ch->vf, (int64_t)firstsampleframe);
+			ret = qov_pcm_seek(&per_ch->vf, (ogg_int64_t)firstsampleframe);
 		if (ret != 0)
 		{
-			// LadyHavoc: we can't Con_Printf here, not thread safe...
+			// LordHavoc: we can't Con_Printf here, not thread safe...
 			//Con_Printf("OGG_FetchSound: qov_pcm_seek(..., %d) returned %d\n", firstsampleframe, ret);
 			return;
 		}
@@ -738,14 +743,14 @@ static void OGG_FreeSfx(sfx_t *sfx)
 static const snd_fetcher_t ogg_fetcher = {OGG_GetSamplesFloat, OGG_StopChannel, OGG_FreeSfx};
 
 // Look a tag up in the comments of a Vorbis or an Opus stream
-static const char *OGG_QueryTag(void *tags, qbool opus, const char *name)
+static const char *OGG_QueryTag(void *tags, qboolean opus, const char *name)
 {
 	if (opus)
 		return qopus_tags_query((const OpusTags *)tags, name, 0);
 	return qvorbis_comment_query((vorbis_comment *)tags, name, 0);
 }
 
-static void OGG_DecodeTags(void *vc, qbool opus, unsigned int *start, unsigned int *length, unsigned int numsamples, double *peak, double *gaindb)
+static void OGG_DecodeTags(void *vc, qboolean opus, unsigned int *start, unsigned int *length, unsigned int numsamples, double *peak, double *gaindb)
 {
 	const char *startcomment = NULL, *lengthcomment = NULL, *endcomment = NULL, *thiscomment = NULL;
 
@@ -828,7 +833,7 @@ OGG_IsOpus
 An Ogg file whose first packet is an OpusHead is Opus, anything else Vorbis
 ====================
 */
-static qbool OGG_IsOpus(const unsigned char *data, fs_offset_t filesize)
+static qboolean OGG_IsOpus(const unsigned char *data, fs_offset_t filesize)
 {
 	// 27 byte page header, a segment table, then the first packet
 	if (filesize < 28 || memcmp(data, "OggS", 4) != 0)
@@ -843,7 +848,7 @@ OGG_LoadOpusData
 Set up an Opus sound from the loaded file (which this takes over)
 ====================
 */
-static qbool OGG_LoadOpusData(const char *filename, sfx_t *sfx, unsigned char *data, fs_offset_t filesize)
+static qboolean OGG_LoadOpusData(const char *filename, sfx_t *sfx, unsigned char *data, fs_offset_t filesize)
 {
 	ov_decode_t ov_decode;
 	OggOpusFile *of;
@@ -940,7 +945,7 @@ OGG_LoadVorbisFile
 Load an Ogg Vorbis file into memory
 ====================
 */
-qbool OGG_LoadVorbisFile(const char *filename, sfx_t *sfx)
+qboolean OGG_LoadVorbisFile(const char *filename, sfx_t *sfx)
 {
 	unsigned char *data;
 	fs_offset_t filesize;
@@ -1025,8 +1030,8 @@ qbool OGG_LoadVorbisFile(const char *filename, sfx_t *sfx)
 	{
 		// small sounds are entirely loaded and use the PCM fetcher
 		char *buff;
-		int64_t len;
-		int64_t done;
+		ogg_int64_t len;
+		ogg_int64_t done;
 		int bs;
 		long ret;
 		if (developer_loading.integer >= 2)

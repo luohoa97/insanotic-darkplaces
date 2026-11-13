@@ -22,7 +22,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #ifndef WORLD_H
 #define WORLD_H
 
-#include "qtypes.h"
 #include "collision.h"
 
 #define MOVE_NORMAL     0
@@ -36,14 +35,14 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 typedef struct link_s
 {
-	llist_t list;
 	int entitynumber;
+	struct link_s	*prev, *next;
 } link_t;
 
 typedef struct world_physics_s
 {
 	// for ODE physics engine
-	qbool ode; // if true then ode is activated
+	qboolean ode; // if true then ode is activated
 	void *ode_world;
 	void *ode_space;
 	void *ode_contactgroup;
@@ -112,7 +111,7 @@ void World_PrintAreaStats(world_t *world, const char *worldname);
 void World_UnlinkEdict(struct prvm_edict_s *ent);
 
 /// Needs to be called any time an entity changes origin, mins, maxs
-void World_LinkEdict(world_t *world, struct prvm_edict_s *ent, const vec3_t mins, const vec3_t maxs, qbool link_solid_not);
+void World_LinkEdict(world_t *world, struct prvm_edict_s *ent, const vec3_t mins, const vec3_t maxs);
 
 /// \returns list of entities touching a box
 int World_EntitiesInBox(world_t *world, const vec3_t mins, const vec3_t maxs, int maxlist, struct prvm_edict_s **list);

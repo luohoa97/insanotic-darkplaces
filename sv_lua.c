@@ -25,12 +25,12 @@ of lua_hook is a signature string naming them, e.g. "e0 e1 f4 >f4":
 cvar_t sv_lua_instruction_limit = {0, "sv_lua_instruction_limit", "2000000", "Lua VM instructions one server plugin may execute per entry (loading, or one hook call) before it is killed and disabled"};
 cvar_t sv_lua_memory_limit = {0, "sv_lua_memory_limit", "32", "memory in MB one server plugin may allocate before it is killed and disabled"};
 
-cvar_t sv_lua_disabled = {CF_SERVER | CF_ARCHIVE, "sv_lua_disabled", "", "space separated list of server plugin folder names not to load (plugins/<name>)"};
+cvar_t sv_lua_disabled = {CVAR_SAVE, "sv_lua_disabled", "", "space separated list of server plugin folder names not to load (plugins/<name>)"};
 
 #define SV_LUA_QC_RELOAD "Lua_ReloadPlugins"
 
 // is plugins/<name>/... listed in sv_lua_disabled?
-static qbool SV_Lua_IsDisabled(const char *path)
+static qboolean SV_Lua_IsDisabled(const char *path)
 {
 	const char *name, *end, *p = sv_lua_disabled.string;
 	size_t len;
@@ -86,7 +86,7 @@ typedef struct luaparm_s
 {
 	char t;          // b i f v s e
 	int idx;
-	qbool in, out;
+	qboolean in, out;
 	int ofs;         // global offset, -1 when missing
 	int etype;       // type of the global in progs
 } luaparm_t;
@@ -126,7 +126,7 @@ static luafield_t *LuaMods_Field(prvm_prog_t *prog, const char *name)
 {
 	unsigned int h = LuaSandbox_Hash(name, LUA_HASHSIZE);
 	luafield_t *f;
-	mdef_t *d;
+	ddef_t *d;
 	for (f = luafields[h]; f; f = f->next)
 		if (!strcmp(f->name, name))
 			return f;
@@ -186,7 +186,7 @@ static void LuaMods_PushEntity(lua_State *L, prvm_prog_t *prog, int num)
 		return;
 	}
 	ed = PRVM_EDICT_NUM(num);
-	if (ed->free)
+	if (ed->priv.required->free)
 	{
 		lua_pushnil(L);
 		return;
@@ -208,7 +208,7 @@ static prvm_edict_t *LuaMods_Edict(lua_State *L, int idx, prvm_prog_t **progout)
 	if (!prog || e->num <= 0 || e->num >= prog->num_edicts)
 		return NULL;
 	ed = PRVM_EDICT_NUM(e->num);
-	if (ed->free || ed->priv.required->serial != e->serial)
+	if (ed->priv.required->free || ed->priv.required->serial != e->serial)
 		return NULL;
 	return ed;
 }
@@ -395,7 +395,7 @@ static int LuaEnt_centerprint(lua_State *L)
 
 // a path a page may have: ui/<folder>/<name>.rml in the characters of a
 // file name, no ".." and nothing a console line could be split by
-static qbool LuaMods_PagePathOK(const char *path)
+static qboolean LuaMods_PagePathOK(const char *path)
 {
 	size_t n = strlen(path);
 	const char *c;
@@ -621,7 +621,7 @@ static int LuaXon_find(lua_State *L)
 	for (i = 1; i < prog->num_edicts; i++)
 	{
 		prvm_edict_t *ed = PRVM_EDICT_NUM(i);
-		if (ed->free)
+		if (ed->priv.required->free)
 			continue;
 		if (strcmp(PRVM_GetString(prog, PRVM_EDICTFIELDSTRING(ed, f->ofs)), classname))
 			continue;
@@ -701,7 +701,7 @@ static luasig_t *LuaMods_Signature(prvm_prog_t *prog, const char *sig)
 	s->key = LuaSandbox_StrDup(sv_lua_mempool, sig);
 	while (*p)
 	{
-		qbool out = false;
+		qboolean out = false;
 		char t;
 		int idx, i;
 		while (*p == ' ')
@@ -726,7 +726,7 @@ static luasig_t *LuaMods_Signature(prvm_prog_t *prog, const char *sig)
 		if (i == s->num)
 		{
 			char gname[64];
-			mdef_t *d;
+			ddef_t *d;
 			if (s->num >= LUASIG_MAXPARMS)
 				break;
 			s->num++;
@@ -807,7 +807,7 @@ static void LuaMods_WriteGlobals(prvm_prog_t *prog, luasig_t *sig, luaval_t *val
 			PRVM_GLOBALFIELDEDICT(p->ofs) = v->ent;
 			break;
 		case 's':
-			PRVM_GLOBALFIELDSTRING(p->ofs) = PRVM_SetTempString(prog, v->s ? v->s : "", v->s ? strlen(v->s) : 0);
+			PRVM_GLOBALFIELDSTRING(p->ofs) = PRVM_SetTempString(prog, v->s ? v->s : "");
 			break;
 		}
 	}
@@ -865,11 +865,11 @@ static void LuaMods_PullVal(lua_State *L, prvm_prog_t *prog, int evidx, luaparm_
 	lua_pop(L, 1);
 }
 
-static qbool LuaMods_Dispatch(prvm_prog_t *prog, const char *hook, const char *sigstr)
+static qboolean LuaMods_Dispatch(prvm_prog_t *prog, const char *hook, const char *sigstr)
 {
 	luasig_t *sig;
 	luaval_t vals[LUASIG_MAXPARMS];
-	qbool ret = false;
+	qboolean ret = false;
 	int i, j, k;
 
 	if (LuaSandbox_HookCount(&sv_luahost, hook) <= 0)
@@ -933,7 +933,7 @@ static qbool LuaMods_Dispatch(prvm_prog_t *prog, const char *hook, const char *s
 
 // Called for "rml_reply ..." from a client (sv_user.c). Returns true when a
 // plugin listens to PageReply, so the line is not passed to the game code too.
-qbool LuaMods_PageReply(client_t *c, const char *line)
+qboolean LuaMods_PageReply(client_t *c, const char *line)
 {
 	static double window[256];
 	static int count[256];
@@ -941,16 +941,16 @@ qbool LuaMods_PageReply(client_t *c, const char *line)
 	int slot = (int)(c - svs.clients);
 	char words[PAGEREPLY_MAXWORDS][256];
 	int i, j, argc;
-	qbool handled = false;
+	qboolean handled = false;
 
 	if (!prog || LuaSandbox_HookCount(&sv_luahost, "PageReply") <= 0)
 		return false;
 	if (slot < 0 || slot >= 256 || strlen(line) > PAGEREPLY_MAXLEN)
 		return true; // too much to be a page; do not hand it on either
 	// a page answers to a click, not to a loop: a client cannot flood a plugin
-	if (host.realtime - window[slot] >= 1.0)
+	if (realtime - window[slot] >= 1.0)
 	{
-		window[slot] = host.realtime;
+		window[slot] = realtime;
 		count[slot] = 0;
 	}
 	if (++count[slot] > PAGEREPLY_PERSECOND)
@@ -961,7 +961,7 @@ qbool LuaMods_PageReply(client_t *c, const char *line)
 		const char *p = line;
 		argc = 0;
 		while (argc < PAGEREPLY_MAXWORDS && COM_ParseToken_Console(&p))
-			dp_strlcpy(words[argc++], com_token, sizeof(words[0]));
+			strlcpy(words[argc++], com_token, sizeof(words[0]));
 	}
 	if (argc < 3) // "rml_reply" page action
 		return true;
@@ -1039,12 +1039,12 @@ void VM_SV_lua_hookcount(prvm_prog_t *prog)
 //============================================================================
 // console commands
 
-static void SV_Lua_Plugins_f(cmd_state_t *cmd)
+static void SV_Lua_Plugins_f(void)
 {
 	LuaSandbox_PrintList(&sv_luahost);
 }
 
-static void SV_Lua_Reload_f(cmd_state_t *cmd)
+static void SV_Lua_Reload_f(void)
 {
 	prvm_prog_t *prog = LuaMods_Prog();
 	char paths[LUASANDBOX_MAX][MAX_QPATH];
@@ -1058,7 +1058,7 @@ static void SV_Lua_Reload_f(cmd_state_t *cmd)
 	}
 	n = sv_luahost.num;
 	for (i = 0; i < n; i++)
-		dp_strlcpy(paths[i], sv_luahost.items[i]->path, sizeof(paths[i]));
+		strlcpy(paths[i], sv_luahost.items[i]->path, sizeof(paths[i]));
 	LuaSandbox_CloseAll(&sv_luahost);
 	Con_Printf("[lua] reloading plugins\n");
 
@@ -1074,7 +1074,7 @@ static void SV_Lua_Reload_f(cmd_state_t *cmd)
 	else
 		for (i = 0; i < n; i++)
 			LuaSandbox_Load(&sv_luahost, paths[i]);
-	SV_Lua_Plugins_f(cmd_local);
+	SV_Lua_Plugins_f();
 }
 
 void LuaMods_Init(void)
@@ -1084,6 +1084,6 @@ void LuaMods_Init(void)
 	Cvar_RegisterVariable(&sv_lua_instruction_limit);
 	Cvar_RegisterVariable(&sv_lua_memory_limit);
 	Cvar_RegisterVariable(&sv_lua_disabled);
-	Cmd_AddCommand(CF_SERVER, "sv_lua_plugins", SV_Lua_Plugins_f, "list server Lua plugins and their status");
-	Cmd_AddCommand(CF_SERVER, "sv_lua_reload", SV_Lua_Reload_f, "reload every server Lua plugin without restarting the map");
+	Cmd_AddCommand("sv_lua_plugins", SV_Lua_Plugins_f, "list server Lua plugins and their status");
+	Cmd_AddCommand("sv_lua_reload", SV_Lua_Reload_f, "reload every server Lua plugin without restarting the map");
 }

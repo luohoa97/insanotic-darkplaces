@@ -1,6 +1,5 @@
 /*
 Copyright (C) 1996-1997 Id Software, Inc.
-Copyright (C) 2000-2020 DarkPlaces contributors
 
 This program is free software; you can redistribute it and/or
 modify it under the terms of the GNU General Public License
@@ -22,19 +21,14 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #ifndef CONSOLE_H
 #define CONSOLE_H
 
-#include <stddef.h>
-#include "qtypes.h"
-#include "cmd.h"
-#include "lhnet.h"
-
 //
 // console
 //
 extern int con_totallines;
 extern int con_backscroll;
-extern qbool con_initialized;
+extern qboolean con_initialized;
 
-void Con_Rcon_Redirect_Init(lhnetsocket_t *sock, lhnetaddress_t *dest, qbool proquakeprotocol);
+void Con_Rcon_Redirect_Init(lhnetsocket_t *sock, lhnetaddress_t *dest, qboolean proquakeprotocol);
 void Con_Rcon_Redirect_End(void);
 void Con_Rcon_Redirect_Abort(void);
 
@@ -43,13 +37,13 @@ void Con_CheckResize (void);
 void Con_Init (void);
 void Con_Init_Commands (void);
 void Con_Shutdown (void);
-void Con_DrawConsole (int lines, qbool forcedfullscreen);
+void Con_DrawConsole (int lines);
 
 /// Prints to a chosen console target
-void Con_MaskPrint(unsigned additionalmask, const char *msg);
+void Con_MaskPrint(int mask, const char *msg);
 
 // Prints to a chosen console target
-void Con_MaskPrintf(unsigned mask, const char *fmt, ...) DP_FUNC_PRINTF(2);
+void Con_MaskPrintf(int mask, const char *fmt, ...) DP_FUNC_PRINTF(2);
 
 /// Prints to all appropriate console targets, and adds timestamps
 void Con_Print(const char *txt);
@@ -62,25 +56,22 @@ void Con_DPrint(const char *msg);
 
 /// A Con_Printf that only shows up if the "developer" cvar is set
 void Con_DPrintf(const char *fmt, ...) DP_FUNC_PRINTF(1);
-
-const char *Con_Quakebar(int len, char *bar, size_t bufsize);
-void Con_CenterPrintf(int maxLineLength, const char *fmt, ...) DP_FUNC_PRINTF(2);
-void Con_CenterPrint(const char *str);
-
-void Con_Clear_f(cmd_state_t *cmd);
+void Con_Clear_f (void);
 void Con_DrawNotify (void);
 
 /// Clear all notify lines.
 void Con_ClearNotify (void);
-void Con_ToggleConsole_f(cmd_state_t *cmd);
+void Con_ToggleConsole_f (void);
 
-qbool GetMapList (const char *s, char *completedname, int completednamebufferlength);
+int Nicks_CompleteChatLine(char *buffer, size_t size, unsigned int pos);
+
+qboolean GetMapList (const char *s, char *completedname, int completednamebufferlength);
 
 /// wrapper function to attempt to either complete the command line
 /// or to list possible matches grouped by type
 /// (i.e. will display possible variables, aliases, commands
 /// that match what they've typed so far)
-int Con_CompleteCommandLine(cmd_state_t *cmd, qbool is_console);
+void Con_CompleteCommandLine(void);
 
 /// Generic libs/util/console.c function to display a list
 /// formatted in columns on the console
@@ -98,9 +89,6 @@ void Log_DestBuffer_Flush (void); ///< call this once per frame to send out repl
 void Log_Printf(const char *logfilename, const char *fmt, ...) DP_FUNC_PRINTF(2);
 //@}
 
-#define CON_WARN "^3"
-#define CON_ERROR "^1"
-
 // CON_MASK_PRINT is the default (Con_Print/Con_Printf)
 // CON_MASK_DEVELOPER is used by Con_DPrint/Con_DPrintf
 #define CON_MASK_HIDENOTIFY 128
@@ -113,7 +101,7 @@ typedef struct con_lineinfo_s
 {
 	char *start;
 	size_t len;
-	unsigned mask;
+	int mask;
 
 	/// used only by console.c
 	double addtime;
@@ -123,7 +111,7 @@ con_lineinfo_t;
 
 typedef struct conbuffer_s
 {
-	qbool active;
+	qboolean active;
 	int textsize;
 	char *text;
 	int maxlines;
@@ -154,9 +142,9 @@ void ConBuffer_DeleteLine(conbuffer_t *buf);
 void ConBuffer_DeleteLastLine(conbuffer_t *buf);
 
 /// Appends a given string as a new line to the console.
-void ConBuffer_AddLine(conbuffer_t *buf, const char *line, int len, unsigned mask);
-int ConBuffer_FindPrevLine(conbuffer_t *buf, unsigned mask_must, unsigned mask_mustnot, int start);
-int ConBuffer_FindNextLine(conbuffer_t *buf, unsigned mask_must, unsigned mask_mustnot, int start);
+void ConBuffer_AddLine(conbuffer_t *buf, const char *line, int len, int mask);
+int ConBuffer_FindPrevLine(conbuffer_t *buf, int mask_must, int mask_mustnot, int start);
+int ConBuffer_FindNextLine(conbuffer_t *buf, int mask_must, int mask_mustnot, int start);
 const char *ConBuffer_GetLine(conbuffer_t *buf, int i);
 
 #endif

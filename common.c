@@ -1,6 +1,5 @@
 /*
 Copyright (C) 1996-1997 Id Software, Inc.
-Copyright (C) 2000-2020 DarkPlaces contributors
 
 This program is free software; you can redistribute it and/or
 modify it under the terms of the GNU General Public License
@@ -29,15 +28,554 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "quakedef.h"
 #include "utf8lib.h"
 
-cvar_t registered = {CF_CLIENT | CF_SERVER | CF_READONLY, "registered","0", "indicates if this is running registered quake (whether gfx/pop.lmp was found)"};
-cvar_t cmdline = {CF_CLIENT | CF_SERVER | CF_READONLY, "cmdline","0", "contains commandline the engine was launched with"};
-
-// FIXME: Find a better place for these.
-cvar_t cl_playermodel = {CF_CLIENT | CF_SERVER | CF_USERINFO | CF_ARCHIVE, "playermodel", "", "current player model in Nexuiz/Xonotic"};
-cvar_t cl_playerskin = {CF_CLIENT | CF_SERVER | CF_USERINFO | CF_ARCHIVE, "playerskin", "", "current player skin in Nexuiz/Xonotic"};
+cvar_t registered = {0, "registered","0", "indicates if this is running registered quake (whether gfx/pop.lmp was found)"};
+cvar_t cmdline = {0, "cmdline","0", "contains commandline the engine was launched with"};
 
 char com_token[MAX_INPUTLINE];
-unsigned com_token_len;
+int com_argc;
+const char **com_argv;
+int com_selffd = -1;
+
+gamemode_t gamemode;
+const char *gamename;
+const char *gamenetworkfiltername; // same as gamename currently but with _ in place of spaces so that "getservers" packets parse correctly (this also means the 
+const char *gamedirname1;
+const char *gamedirname2;
+const char *gamescreenshotname;
+const char *gameuserdirname;
+char com_modname[MAX_OSPATH] = "";
+
+
+/*
+============================================================================
+
+					BYTE ORDER FUNCTIONS
+
+============================================================================
+*/
+
+
+float BuffBigFloat (const unsigned char *buffer)
+{
+	union
+	{
+		float f;
+		unsigned int i;
+	}
+	u;
+	u.i = (buffer[0] << 24) | (buffer[1] << 16) | (buffer[2] << 8) | buffer[3];
+	return u.f;
+}
+
+int BuffBigLong (const unsigned char *buffer)
+{
+	return (buffer[0] << 24) | (buffer[1] << 16) | (buffer[2] << 8) | buffer[3];
+}
+
+short BuffBigShort (const unsigned char *buffer)
+{
+	return (buffer[0] << 8) | buffer[1];
+}
+
+float BuffLittleFloat (const unsigned char *buffer)
+{
+	union
+	{
+		float f;
+		unsigned int i;
+	}
+	u;
+	u.i = (buffer[3] << 24) | (buffer[2] << 16) | (buffer[1] << 8) | buffer[0];
+	return u.f;
+}
+
+int BuffLittleLong (const unsigned char *buffer)
+{
+	return (buffer[3] << 24) | (buffer[2] << 16) | (buffer[1] << 8) | buffer[0];
+}
+
+short BuffLittleShort (const unsigned char *buffer)
+{
+	return (buffer[1] << 8) | buffer[0];
+}
+
+void StoreBigLong (unsigned char *buffer, unsigned int i)
+{
+	buffer[0] = (i >> 24) & 0xFF;
+	buffer[1] = (i >> 16) & 0xFF;
+	buffer[2] = (i >>  8) & 0xFF;
+	buffer[3] = i         & 0xFF;
+}
+
+void StoreBigShort (unsigned char *buffer, unsigned short i)
+{
+	buffer[0] = (i >>  8) & 0xFF;
+	buffer[1] = i         & 0xFF;
+}
+
+void StoreLittleLong (unsigned char *buffer, unsigned int i)
+{
+	buffer[0] = i         & 0xFF;
+	buffer[1] = (i >>  8) & 0xFF;
+	buffer[2] = (i >> 16) & 0xFF;
+	buffer[3] = (i >> 24) & 0xFF;
+}
+
+void StoreLittleShort (unsigned char *buffer, unsigned short i)
+{
+	buffer[0] = i         & 0xFF;
+	buffer[1] = (i >>  8) & 0xFF;
+}
+
+/*
+============================================================================
+
+					CRC FUNCTIONS
+
+============================================================================
+*/
+
+// this is a 16 bit, non-reflected CRC using the polynomial 0x1021
+// and the initial and final xor values shown below...  in other words, the
+// CCITT standard CRC used by XMODEM
+
+#define CRC_INIT_VALUE	0xffff
+#define CRC_XOR_VALUE	0x0000
+
+static unsigned short crctable[256] =
+{
+	0x0000,	0x1021,	0x2042,	0x3063,	0x4084,	0x50a5,	0x60c6,	0x70e7,
+	0x8108,	0x9129,	0xa14a,	0xb16b,	0xc18c,	0xd1ad,	0xe1ce,	0xf1ef,
+	0x1231,	0x0210,	0x3273,	0x2252,	0x52b5,	0x4294,	0x72f7,	0x62d6,
+	0x9339,	0x8318,	0xb37b,	0xa35a,	0xd3bd,	0xc39c,	0xf3ff,	0xe3de,
+	0x2462,	0x3443,	0x0420,	0x1401,	0x64e6,	0x74c7,	0x44a4,	0x5485,
+	0xa56a,	0xb54b,	0x8528,	0x9509,	0xe5ee,	0xf5cf,	0xc5ac,	0xd58d,
+	0x3653,	0x2672,	0x1611,	0x0630,	0x76d7,	0x66f6,	0x5695,	0x46b4,
+	0xb75b,	0xa77a,	0x9719,	0x8738,	0xf7df,	0xe7fe,	0xd79d,	0xc7bc,
+	0x48c4,	0x58e5,	0x6886,	0x78a7,	0x0840,	0x1861,	0x2802,	0x3823,
+	0xc9cc,	0xd9ed,	0xe98e,	0xf9af,	0x8948,	0x9969,	0xa90a,	0xb92b,
+	0x5af5,	0x4ad4,	0x7ab7,	0x6a96,	0x1a71,	0x0a50,	0x3a33,	0x2a12,
+	0xdbfd,	0xcbdc,	0xfbbf,	0xeb9e,	0x9b79,	0x8b58,	0xbb3b,	0xab1a,
+	0x6ca6,	0x7c87,	0x4ce4,	0x5cc5,	0x2c22,	0x3c03,	0x0c60,	0x1c41,
+	0xedae,	0xfd8f,	0xcdec,	0xddcd,	0xad2a,	0xbd0b,	0x8d68,	0x9d49,
+	0x7e97,	0x6eb6,	0x5ed5,	0x4ef4,	0x3e13,	0x2e32,	0x1e51,	0x0e70,
+	0xff9f,	0xefbe,	0xdfdd,	0xcffc,	0xbf1b,	0xaf3a,	0x9f59,	0x8f78,
+	0x9188,	0x81a9,	0xb1ca,	0xa1eb,	0xd10c,	0xc12d,	0xf14e,	0xe16f,
+	0x1080,	0x00a1,	0x30c2,	0x20e3,	0x5004,	0x4025,	0x7046,	0x6067,
+	0x83b9,	0x9398,	0xa3fb,	0xb3da,	0xc33d,	0xd31c,	0xe37f,	0xf35e,
+	0x02b1,	0x1290,	0x22f3,	0x32d2,	0x4235,	0x5214,	0x6277,	0x7256,
+	0xb5ea,	0xa5cb,	0x95a8,	0x8589,	0xf56e,	0xe54f,	0xd52c,	0xc50d,
+	0x34e2,	0x24c3,	0x14a0,	0x0481,	0x7466,	0x6447,	0x5424,	0x4405,
+	0xa7db,	0xb7fa,	0x8799,	0x97b8,	0xe75f,	0xf77e,	0xc71d,	0xd73c,
+	0x26d3,	0x36f2,	0x0691,	0x16b0,	0x6657,	0x7676,	0x4615,	0x5634,
+	0xd94c,	0xc96d,	0xf90e,	0xe92f,	0x99c8,	0x89e9,	0xb98a,	0xa9ab,
+	0x5844,	0x4865,	0x7806,	0x6827,	0x18c0,	0x08e1,	0x3882,	0x28a3,
+	0xcb7d,	0xdb5c,	0xeb3f,	0xfb1e,	0x8bf9,	0x9bd8,	0xabbb,	0xbb9a,
+	0x4a75,	0x5a54,	0x6a37,	0x7a16,	0x0af1,	0x1ad0,	0x2ab3,	0x3a92,
+	0xfd2e,	0xed0f,	0xdd6c,	0xcd4d,	0xbdaa,	0xad8b,	0x9de8,	0x8dc9,
+	0x7c26,	0x6c07,	0x5c64,	0x4c45,	0x3ca2,	0x2c83,	0x1ce0,	0x0cc1,
+	0xef1f,	0xff3e,	0xcf5d,	0xdf7c,	0xaf9b,	0xbfba,	0x8fd9,	0x9ff8,
+	0x6e17,	0x7e36,	0x4e55,	0x5e74,	0x2e93,	0x3eb2,	0x0ed1,	0x1ef0
+};
+
+unsigned short CRC_Block(const unsigned char *data, size_t size)
+{
+	unsigned short crc = CRC_INIT_VALUE;
+	while (size--)
+		crc = (crc << 8) ^ crctable[(crc >> 8) ^ (*data++)];
+	return crc ^ CRC_XOR_VALUE;
+}
+
+unsigned short CRC_Block_CaseInsensitive(const unsigned char *data, size_t size)
+{
+	unsigned short crc = CRC_INIT_VALUE;
+	while (size--)
+		crc = (crc << 8) ^ crctable[(crc >> 8) ^ (tolower(*data++))];
+	return crc ^ CRC_XOR_VALUE;
+}
+
+// QuakeWorld
+static unsigned char chktbl[1024 + 4] =
+{
+	0x78,0xd2,0x94,0xe3,0x41,0xec,0xd6,0xd5,0xcb,0xfc,0xdb,0x8a,0x4b,0xcc,0x85,0x01,
+	0x23,0xd2,0xe5,0xf2,0x29,0xa7,0x45,0x94,0x4a,0x62,0xe3,0xa5,0x6f,0x3f,0xe1,0x7a,
+	0x64,0xed,0x5c,0x99,0x29,0x87,0xa8,0x78,0x59,0x0d,0xaa,0x0f,0x25,0x0a,0x5c,0x58,
+	0xfb,0x00,0xa7,0xa8,0x8a,0x1d,0x86,0x80,0xc5,0x1f,0xd2,0x28,0x69,0x71,0x58,0xc3,
+	0x51,0x90,0xe1,0xf8,0x6a,0xf3,0x8f,0xb0,0x68,0xdf,0x95,0x40,0x5c,0xe4,0x24,0x6b,
+	0x29,0x19,0x71,0x3f,0x42,0x63,0x6c,0x48,0xe7,0xad,0xa8,0x4b,0x91,0x8f,0x42,0x36,
+	0x34,0xe7,0x32,0x55,0x59,0x2d,0x36,0x38,0x38,0x59,0x9b,0x08,0x16,0x4d,0x8d,0xf8,
+	0x0a,0xa4,0x52,0x01,0xbb,0x52,0xa9,0xfd,0x40,0x18,0x97,0x37,0xff,0xc9,0x82,0x27,
+	0xb2,0x64,0x60,0xce,0x00,0xd9,0x04,0xf0,0x9e,0x99,0xbd,0xce,0x8f,0x90,0x4a,0xdd,
+	0xe1,0xec,0x19,0x14,0xb1,0xfb,0xca,0x1e,0x98,0x0f,0xd4,0xcb,0x80,0xd6,0x05,0x63,
+	0xfd,0xa0,0x74,0xa6,0x86,0xf6,0x19,0x98,0x76,0x27,0x68,0xf7,0xe9,0x09,0x9a,0xf2,
+	0x2e,0x42,0xe1,0xbe,0x64,0x48,0x2a,0x74,0x30,0xbb,0x07,0xcc,0x1f,0xd4,0x91,0x9d,
+	0xac,0x55,0x53,0x25,0xb9,0x64,0xf7,0x58,0x4c,0x34,0x16,0xbc,0xf6,0x12,0x2b,0x65,
+	0x68,0x25,0x2e,0x29,0x1f,0xbb,0xb9,0xee,0x6d,0x0c,0x8e,0xbb,0xd2,0x5f,0x1d,0x8f,
+	0xc1,0x39,0xf9,0x8d,0xc0,0x39,0x75,0xcf,0x25,0x17,0xbe,0x96,0xaf,0x98,0x9f,0x5f,
+	0x65,0x15,0xc4,0x62,0xf8,0x55,0xfc,0xab,0x54,0xcf,0xdc,0x14,0x06,0xc8,0xfc,0x42,
+	0xd3,0xf0,0xad,0x10,0x08,0xcd,0xd4,0x11,0xbb,0xca,0x67,0xc6,0x48,0x5f,0x9d,0x59,
+	0xe3,0xe8,0x53,0x67,0x27,0x2d,0x34,0x9e,0x9e,0x24,0x29,0xdb,0x69,0x99,0x86,0xf9,
+	0x20,0xb5,0xbb,0x5b,0xb0,0xf9,0xc3,0x67,0xad,0x1c,0x9c,0xf7,0xcc,0xef,0xce,0x69,
+	0xe0,0x26,0x8f,0x79,0xbd,0xca,0x10,0x17,0xda,0xa9,0x88,0x57,0x9b,0x15,0x24,0xba,
+	0x84,0xd0,0xeb,0x4d,0x14,0xf5,0xfc,0xe6,0x51,0x6c,0x6f,0x64,0x6b,0x73,0xec,0x85,
+	0xf1,0x6f,0xe1,0x67,0x25,0x10,0x77,0x32,0x9e,0x85,0x6e,0x69,0xb1,0x83,0x00,0xe4,
+	0x13,0xa4,0x45,0x34,0x3b,0x40,0xff,0x41,0x82,0x89,0x79,0x57,0xfd,0xd2,0x8e,0xe8,
+	0xfc,0x1d,0x19,0x21,0x12,0x00,0xd7,0x66,0xe5,0xc7,0x10,0x1d,0xcb,0x75,0xe8,0xfa,
+	0xb6,0xee,0x7b,0x2f,0x1a,0x25,0x24,0xb9,0x9f,0x1d,0x78,0xfb,0x84,0xd0,0x17,0x05,
+	0x71,0xb3,0xc8,0x18,0xff,0x62,0xee,0xed,0x53,0xab,0x78,0xd3,0x65,0x2d,0xbb,0xc7,
+	0xc1,0xe7,0x70,0xa2,0x43,0x2c,0x7c,0xc7,0x16,0x04,0xd2,0x45,0xd5,0x6b,0x6c,0x7a,
+	0x5e,0xa1,0x50,0x2e,0x31,0x5b,0xcc,0xe8,0x65,0x8b,0x16,0x85,0xbf,0x82,0x83,0xfb,
+	0xde,0x9f,0x36,0x48,0x32,0x79,0xd6,0x9b,0xfb,0x52,0x45,0xbf,0x43,0xf7,0x0b,0x0b,
+	0x19,0x19,0x31,0xc3,0x85,0xec,0x1d,0x8c,0x20,0xf0,0x3a,0xfa,0x80,0x4d,0x2c,0x7d,
+	0xac,0x60,0x09,0xc0,0x40,0xee,0xb9,0xeb,0x13,0x5b,0xe8,0x2b,0xb1,0x20,0xf0,0xce,
+	0x4c,0xbd,0xc6,0x04,0x86,0x70,0xc6,0x33,0xc3,0x15,0x0f,0x65,0x19,0xfd,0xc2,0xd3,
+
+	// map checksum goes here
+	0x00,0x00,0x00,0x00
+};
+
+// QuakeWorld
+unsigned char COM_BlockSequenceCRCByteQW(unsigned char *base, int length, int sequence)
+{
+	unsigned char *p;
+	unsigned char chkb[60 + 4];
+
+	p = chktbl + (sequence % (sizeof(chktbl) - 8));
+
+	if (length > 60)
+		length = 60;
+	memcpy(chkb, base, length);
+
+	chkb[length] = (sequence & 0xff) ^ p[0];
+	chkb[length+1] = p[1];
+	chkb[length+2] = ((sequence>>8) & 0xff) ^ p[2];
+	chkb[length+3] = p[3];
+
+	return CRC_Block(chkb, length + 4) & 0xff;
+}
+
+/*
+==============================================================================
+
+			MESSAGE IO FUNCTIONS
+
+Handles byte ordering and avoids alignment errors
+==============================================================================
+*/
+
+//
+// writing functions
+//
+
+void MSG_WriteChar (sizebuf_t *sb, int c)
+{
+	unsigned char    *buf;
+
+	buf = SZ_GetSpace (sb, 1);
+	buf[0] = c;
+}
+
+void MSG_WriteByte (sizebuf_t *sb, int c)
+{
+	unsigned char    *buf;
+
+	buf = SZ_GetSpace (sb, 1);
+	buf[0] = c;
+}
+
+void MSG_WriteShort (sizebuf_t *sb, int c)
+{
+	unsigned char    *buf;
+
+	buf = SZ_GetSpace (sb, 2);
+	buf[0] = c&0xff;
+	buf[1] = c>>8;
+}
+
+void MSG_WriteLong (sizebuf_t *sb, int c)
+{
+	unsigned char    *buf;
+
+	buf = SZ_GetSpace (sb, 4);
+	buf[0] = c&0xff;
+	buf[1] = (c>>8)&0xff;
+	buf[2] = (c>>16)&0xff;
+	buf[3] = c>>24;
+}
+
+void MSG_WriteFloat (sizebuf_t *sb, float f)
+{
+	union
+	{
+		float   f;
+		int     l;
+	} dat;
+
+
+	dat.f = f;
+	dat.l = LittleLong (dat.l);
+
+	SZ_Write (sb, (unsigned char *)&dat.l, 4);
+}
+
+void MSG_WriteString (sizebuf_t *sb, const char *s)
+{
+	if (!s || !*s)
+		MSG_WriteChar (sb, 0);
+	else
+		SZ_Write (sb, (unsigned char *)s, (int)strlen(s)+1);
+}
+
+void MSG_WriteUnterminatedString (sizebuf_t *sb, const char *s)
+{
+	if (s && *s)
+		SZ_Write (sb, (unsigned char *)s, (int)strlen(s));
+}
+
+void MSG_WriteCoord13i (sizebuf_t *sb, float f)
+{
+	if (f >= 0)
+		MSG_WriteShort (sb, (int)(f * 8.0 + 0.5));
+	else
+		MSG_WriteShort (sb, (int)(f * 8.0 - 0.5));
+}
+
+void MSG_WriteCoord16i (sizebuf_t *sb, float f)
+{
+	if (f >= 0)
+		MSG_WriteShort (sb, (int)(f + 0.5));
+	else
+		MSG_WriteShort (sb, (int)(f - 0.5));
+}
+
+void MSG_WriteCoord32f (sizebuf_t *sb, float f)
+{
+	MSG_WriteFloat (sb, f);
+}
+
+void MSG_WriteCoord (sizebuf_t *sb, float f, protocolversion_t protocol)
+{
+	if (protocol == PROTOCOL_QUAKE || protocol == PROTOCOL_QUAKEDP || protocol == PROTOCOL_NEHAHRAMOVIE || protocol == PROTOCOL_NEHAHRABJP || protocol == PROTOCOL_NEHAHRABJP2 || protocol == PROTOCOL_NEHAHRABJP3 || protocol == PROTOCOL_QUAKEWORLD)
+		MSG_WriteCoord13i (sb, f);
+	else if (protocol == PROTOCOL_DARKPLACES1)
+		MSG_WriteCoord32f (sb, f);
+	else if (protocol == PROTOCOL_DARKPLACES2 || protocol == PROTOCOL_DARKPLACES3 || protocol == PROTOCOL_DARKPLACES4)
+		MSG_WriteCoord16i (sb, f);
+	else
+		MSG_WriteCoord32f (sb, f);
+}
+
+void MSG_WriteVector (sizebuf_t *sb, const vec3_t v, protocolversion_t protocol)
+{
+	MSG_WriteCoord (sb, v[0], protocol);
+	MSG_WriteCoord (sb, v[1], protocol);
+	MSG_WriteCoord (sb, v[2], protocol);
+}
+
+// LordHavoc: round to nearest value, rather than rounding toward zero, fixes crosshair problem
+void MSG_WriteAngle8i (sizebuf_t *sb, float f)
+{
+	if (f >= 0)
+		MSG_WriteByte (sb, (int)(f*(256.0/360.0) + 0.5) & 255);
+	else
+		MSG_WriteByte (sb, (int)(f*(256.0/360.0) - 0.5) & 255);
+}
+
+void MSG_WriteAngle16i (sizebuf_t *sb, float f)
+{
+	if (f >= 0)
+		MSG_WriteShort (sb, (int)(f*(65536.0/360.0) + 0.5) & 65535);
+	else
+		MSG_WriteShort (sb, (int)(f*(65536.0/360.0) - 0.5) & 65535);
+}
+
+void MSG_WriteAngle32f (sizebuf_t *sb, float f)
+{
+	MSG_WriteFloat (sb, f);
+}
+
+void MSG_WriteAngle (sizebuf_t *sb, float f, protocolversion_t protocol)
+{
+	if (protocol == PROTOCOL_QUAKE || protocol == PROTOCOL_QUAKEDP || protocol == PROTOCOL_NEHAHRAMOVIE || protocol == PROTOCOL_NEHAHRABJP || protocol == PROTOCOL_NEHAHRABJP2 || protocol == PROTOCOL_NEHAHRABJP3 || protocol == PROTOCOL_DARKPLACES1 || protocol == PROTOCOL_DARKPLACES2 || protocol == PROTOCOL_DARKPLACES3 || protocol == PROTOCOL_DARKPLACES4 || protocol == PROTOCOL_QUAKEWORLD)
+		MSG_WriteAngle8i (sb, f);
+	else
+		MSG_WriteAngle16i (sb, f);
+}
+
+//
+// reading functions
+//
+
+void MSG_InitReadBuffer (sizebuf_t *buf, unsigned char *data, int size)
+{
+	memset(buf, 0, sizeof(*buf));
+	buf->data = data;
+	buf->maxsize = buf->cursize = size;
+	MSG_BeginReading(buf);
+}
+
+void MSG_BeginReading(sizebuf_t *sb)
+{
+	sb->readcount = 0;
+	sb->badread = false;
+}
+
+int MSG_ReadLittleShort(sizebuf_t *sb)
+{
+	if (sb->readcount+2 > sb->cursize)
+	{
+		sb->badread = true;
+		return -1;
+	}
+	sb->readcount += 2;
+	return (short)(sb->data[sb->readcount-2] | (sb->data[sb->readcount-1]<<8));
+}
+
+int MSG_ReadBigShort (sizebuf_t *sb)
+{
+	if (sb->readcount+2 > sb->cursize)
+	{
+		sb->badread = true;
+		return -1;
+	}
+	sb->readcount += 2;
+	return (short)((sb->data[sb->readcount-2]<<8) + sb->data[sb->readcount-1]);
+}
+
+int MSG_ReadLittleLong (sizebuf_t *sb)
+{
+	if (sb->readcount+4 > sb->cursize)
+	{
+		sb->badread = true;
+		return -1;
+	}
+	sb->readcount += 4;
+	return sb->data[sb->readcount-4] | (sb->data[sb->readcount-3]<<8) | (sb->data[sb->readcount-2]<<16) | (sb->data[sb->readcount-1]<<24);
+}
+
+int MSG_ReadBigLong (sizebuf_t *sb)
+{
+	if (sb->readcount+4 > sb->cursize)
+	{
+		sb->badread = true;
+		return -1;
+	}
+	sb->readcount += 4;
+	return (sb->data[sb->readcount-4]<<24) + (sb->data[sb->readcount-3]<<16) + (sb->data[sb->readcount-2]<<8) + sb->data[sb->readcount-1];
+}
+
+float MSG_ReadLittleFloat (sizebuf_t *sb)
+{
+	union
+	{
+		float f;
+		int l;
+	} dat;
+	if (sb->readcount+4 > sb->cursize)
+	{
+		sb->badread = true;
+		return -1;
+	}
+	sb->readcount += 4;
+	dat.l = sb->data[sb->readcount-4] | (sb->data[sb->readcount-3]<<8) | (sb->data[sb->readcount-2]<<16) | (sb->data[sb->readcount-1]<<24);
+	return dat.f;
+}
+
+float MSG_ReadBigFloat (sizebuf_t *sb)
+{
+	union
+	{
+		float f;
+		int l;
+	} dat;
+	if (sb->readcount+4 > sb->cursize)
+	{
+		sb->badread = true;
+		return -1;
+	}
+	sb->readcount += 4;
+	dat.l = (sb->data[sb->readcount-4]<<24) | (sb->data[sb->readcount-3]<<16) | (sb->data[sb->readcount-2]<<8) | sb->data[sb->readcount-1];
+	return dat.f;
+}
+
+char *MSG_ReadString (sizebuf_t *sb, char *string, size_t maxstring)
+{
+	int c;
+	size_t l = 0;
+	// read string into sbfer, but only store as many characters as will fit
+	while ((c = MSG_ReadByte(sb)) > 0)
+		if (l < maxstring - 1)
+			string[l++] = c;
+	string[l] = 0;
+	return string;
+}
+
+int MSG_ReadBytes (sizebuf_t *sb, int numbytes, unsigned char *out)
+{
+	int l, c;
+	for (l = 0;l < numbytes && (c = MSG_ReadByte(sb)) != -1;l++)
+		out[l] = c;
+	return l;
+}
+
+float MSG_ReadCoord13i (sizebuf_t *sb)
+{
+	return MSG_ReadLittleShort(sb) * (1.0/8.0);
+}
+
+float MSG_ReadCoord16i (sizebuf_t *sb)
+{
+	return (signed short) MSG_ReadLittleShort(sb);
+}
+
+float MSG_ReadCoord32f (sizebuf_t *sb)
+{
+	return MSG_ReadLittleFloat(sb);
+}
+
+float MSG_ReadCoord (sizebuf_t *sb, protocolversion_t protocol)
+{
+	if (protocol == PROTOCOL_QUAKE || protocol == PROTOCOL_QUAKEDP || protocol == PROTOCOL_NEHAHRAMOVIE || protocol == PROTOCOL_NEHAHRABJP || protocol == PROTOCOL_NEHAHRABJP2 || protocol == PROTOCOL_NEHAHRABJP3 || protocol == PROTOCOL_QUAKEWORLD)
+		return MSG_ReadCoord13i(sb);
+	else if (protocol == PROTOCOL_DARKPLACES1)
+		return MSG_ReadCoord32f(sb);
+	else if (protocol == PROTOCOL_DARKPLACES2 || protocol == PROTOCOL_DARKPLACES3 || protocol == PROTOCOL_DARKPLACES4)
+		return MSG_ReadCoord16i(sb);
+	else
+		return MSG_ReadCoord32f(sb);
+}
+
+void MSG_ReadVector (sizebuf_t *sb, vec3_t v, protocolversion_t protocol)
+{
+	v[0] = MSG_ReadCoord(sb, protocol);
+	v[1] = MSG_ReadCoord(sb, protocol);
+	v[2] = MSG_ReadCoord(sb, protocol);
+}
+
+// LordHavoc: round to nearest value, rather than rounding toward zero, fixes crosshair problem
+float MSG_ReadAngle8i (sizebuf_t *sb)
+{
+	return (signed char) MSG_ReadByte (sb) * (360.0/256.0);
+}
+
+float MSG_ReadAngle16i (sizebuf_t *sb)
+{
+	return (signed short)MSG_ReadShort (sb) * (360.0/65536.0);
+}
+
+float MSG_ReadAngle32f (sizebuf_t *sb)
+{
+	return MSG_ReadFloat (sb);
+}
+
+float MSG_ReadAngle (sizebuf_t *sb, protocolversion_t protocol)
+{
+	if (protocol == PROTOCOL_QUAKE || protocol == PROTOCOL_QUAKEDP || protocol == PROTOCOL_NEHAHRAMOVIE || protocol == PROTOCOL_NEHAHRABJP || protocol == PROTOCOL_NEHAHRABJP2 || protocol == PROTOCOL_NEHAHRABJP3 || protocol == PROTOCOL_DARKPLACES1 || protocol == PROTOCOL_DARKPLACES2 || protocol == PROTOCOL_DARKPLACES3 || protocol == PROTOCOL_DARKPLACES4 || protocol == PROTOCOL_QUAKEWORLD)
+		return MSG_ReadAngle8i (sb);
+	else
+		return MSG_ReadAngle16i (sb);
+}
+
 
 //===========================================================================
 
@@ -74,7 +612,7 @@ void SZ_Write (sizebuf_t *buf, const unsigned char *data, int length)
 	memcpy (SZ_GetSpace(buf,length),data,length);
 }
 
-// LadyHavoc: thanks to Fuh for bringing the pure evil of SZ_Print to my
+// LordHavoc: thanks to Fuh for bringing the pure evil of SZ_Print to my
 // attention, it has been eradicated from here, its only (former) use in
 // all of darkplaces.
 
@@ -182,7 +720,7 @@ int COM_Wordwrap(const char *string, size_t length, float continuationWidth, flo
 	//     If it fits, append it. Continue.
 	//     If it doesn't fit, output current line, advance to next line. Append the word. This is a continuation. Continue.
 
-	qbool isContinuation = false;
+	qboolean isContinuation = false;
 	float spaceWidth;
 	const char *startOfLine = string;
 	const char *cursor = string;
@@ -260,7 +798,7 @@ int COM_Wordwrap(const char *string, size_t length, float continuationWidth, flo
 	return result;
 
 /*
-	qbool isContinuation = false;
+	qboolean isContinuation = false;
 	float currentWordSpace = 0;
 	const char *currentWord = 0;
 	float minReserve = 0;
@@ -457,17 +995,16 @@ int COM_Wordwrap(const char *string, size_t length, float continuationWidth, flo
 COM_ParseToken_Simple
 
 Parse a token out of a string
-Writes the token and its strlen to the com_token and com_token_len globals.
 ==============
 */
-qbool COM_ParseToken_Simple(const char **datapointer, qbool returnnewline, qbool parsebackslash, qbool parsecomments)
+int COM_ParseToken_Simple(const char **datapointer, qboolean returnnewline, qboolean parsebackslash, qboolean parsecomments)
 {
 	int len;
 	int c;
 	const char *data = *datapointer;
 
-	com_token_len = len = 0;
-	com_token[0] = '\0';
+	len = 0;
+	com_token[0] = 0;
 
 	if (!data)
 	{
@@ -532,8 +1069,7 @@ skipwhite:
 			if (len < (int)sizeof(com_token) - 1)
 				com_token[len++] = c;
 		}
-		com_token[len] = '\0';
-		com_token_len = len;
+		com_token[len] = 0;
 		if (*data == '\"')
 			data++;
 		*datapointer = data;
@@ -543,8 +1079,7 @@ skipwhite:
 	{
 		// translate Mac line ending to UNIX
 		com_token[len++] = '\n';data++;
-		com_token[len] = '\0';
-		com_token_len = len;
+		com_token[len] = 0;
 		*datapointer = data;
 		return true;
 	}
@@ -552,8 +1087,7 @@ skipwhite:
 	{
 		// single character
 		com_token[len++] = *data++;
-		com_token[len] = '\0';
-		com_token_len = len;
+		com_token[len] = 0;
 		*datapointer = data;
 		return true;
 	}
@@ -563,8 +1097,7 @@ skipwhite:
 		for (;!ISWHITESPACE(*data);data++)
 			if (len < (int)sizeof(com_token) - 1)
 				com_token[len++] = *data;
-		com_token[len] = '\0';
-		com_token_len = len;
+		com_token[len] = 0;
 		*datapointer = data;
 		return true;
 	}
@@ -575,17 +1108,16 @@ skipwhite:
 COM_ParseToken_QuakeC
 
 Parse a token out of a string
-Writes the token and its strlen to the com_token and com_token_len globals.
 ==============
 */
-qbool COM_ParseToken_QuakeC(const char **datapointer, qbool returnnewline)
+int COM_ParseToken_QuakeC(const char **datapointer, qboolean returnnewline)
 {
 	int len;
 	int c;
 	const char *data = *datapointer;
 
-	com_token_len = len = 0;
-	com_token[0] = '\0';
+	len = 0;
+	com_token[0] = 0;
 
 	if (!data)
 	{
@@ -651,8 +1183,7 @@ skipwhite:
 			if (len < (int)sizeof(com_token) - 1)
 				com_token[len++] = c;
 		}
-		com_token[len] = '\0';
-		com_token_len = len;
+		com_token[len] = 0;
 		if (*data == quote)
 			data++;
 		*datapointer = data;
@@ -662,8 +1193,7 @@ skipwhite:
 	{
 		// translate Mac line ending to UNIX
 		com_token[len++] = '\n';data++;
-		com_token[len] = '\0';
-		com_token_len = len;
+		com_token[len] = 0;
 		*datapointer = data;
 		return true;
 	}
@@ -671,8 +1201,7 @@ skipwhite:
 	{
 		// single character
 		com_token[len++] = *data++;
-		com_token[len] = '\0';
-		com_token_len = len;
+		com_token[len] = 0;
 		*datapointer = data;
 		return true;
 	}
@@ -682,8 +1211,7 @@ skipwhite:
 		for (;!ISWHITESPACE(*data) && *data != '{' && *data != '}' && *data != ')' && *data != '(' && *data != ']' && *data != '[' && *data != ':' && *data != ',' && *data != ';';data++)
 			if (len < (int)sizeof(com_token) - 1)
 				com_token[len++] = *data;
-		com_token[len] = '\0';
-		com_token_len = len;
+		com_token[len] = 0;
 		*datapointer = data;
 		return true;
 	}
@@ -694,17 +1222,16 @@ skipwhite:
 COM_ParseToken_VM_Tokenize
 
 Parse a token out of a string
-Writes the token and its strlen to the com_token and com_token_len globals.
 ==============
 */
-qbool COM_ParseToken_VM_Tokenize(const char **datapointer, qbool returnnewline)
+int COM_ParseToken_VM_Tokenize(const char **datapointer, qboolean returnnewline)
 {
 	int len;
 	int c;
 	const char *data = *datapointer;
 
-	com_token_len = len = 0;
-	com_token[0] = '\0';
+	len = 0;
+	com_token[0] = 0;
 
 	if (!data)
 	{
@@ -770,8 +1297,7 @@ skipwhite:
 			if (len < (int)sizeof(com_token) - 1)
 				com_token[len++] = c;
 		}
-		com_token[len] = '\0';
-		com_token_len = len;
+		com_token[len] = 0;
 		if (*data == quote)
 			data++;
 		*datapointer = data;
@@ -781,8 +1307,7 @@ skipwhite:
 	{
 		// translate Mac line ending to UNIX
 		com_token[len++] = '\n';data++;
-		com_token[len] = '\0';
-		com_token_len = len;
+		com_token[len] = 0;
 		*datapointer = data;
 		return true;
 	}
@@ -790,8 +1315,7 @@ skipwhite:
 	{
 		// single character
 		com_token[len++] = *data++;
-		com_token[len] = '\0';
-		com_token_len = len;
+		com_token[len] = 0;
 		*datapointer = data;
 		return true;
 	}
@@ -801,8 +1325,7 @@ skipwhite:
 		for (;!ISWHITESPACE(*data) && *data != '{' && *data != '}' && *data != ')' && *data != '(' && *data != ']' && *data != '[' && *data != ':' && *data != ',' && *data != ';';data++)
 			if (len < (int)sizeof(com_token) - 1)
 				com_token[len++] = *data;
-		com_token[len] = '\0';
-		com_token_len = len;
+		com_token[len] = 0;
 		*datapointer = data;
 		return true;
 	}
@@ -813,16 +1336,15 @@ skipwhite:
 COM_ParseToken_Console
 
 Parse a token out of a string, behaving like the qwcl console
-Writes the token and its strlen to the com_token and com_token_len globals.
 ==============
 */
-qbool COM_ParseToken_Console(const char **datapointer)
+int COM_ParseToken_Console(const char **datapointer)
 {
 	int len;
 	const char *data = *datapointer;
 
-	com_token_len = len = 0;
-	com_token[0] = '\0';
+	len = 0;
+	com_token[0] = 0;
 
 	if (!data)
 	{
@@ -860,8 +1382,7 @@ skipwhite:
 			if (len < (int)sizeof(com_token) - 1)
 				com_token[len++] = *data;
 		}
-		com_token[len] = '\0';
-		com_token_len = len;
+		com_token[len] = 0;
 		if (*data == '\"')
 			data++;
 		*datapointer = data;
@@ -872,42 +1393,211 @@ skipwhite:
 		for (;!ISWHITESPACE(*data);data++)
 			if (len < (int)sizeof(com_token) - 1)
 				com_token[len++] = *data;
-		com_token[len] = '\0';
-		com_token_len = len;
+		com_token[len] = 0;
 		*datapointer = data;
 	}
 
 	return true;
 }
 
+
 /*
-===============
-Com_CalcRoll
+================
+COM_CheckParm
 
-Used by view and sv_user
-===============
+Returns the position (1 to argc-1) in the program's argument list
+where the given parameter apears, or 0 if not present
+================
 */
-float Com_CalcRoll (const vec3_t angles, const vec3_t velocity, const vec_t angleval, const vec_t velocityval)
+int COM_CheckParm (const char *parm)
 {
-	vec3_t	forward, right, up;
-	float	sign;
-	float	side;
+	int i;
 
-	AngleVectors (angles, forward, right, up);
-	side = DotProduct (velocity, right);
-	sign = side < 0 ? -1 : 1;
-	side = fabs(side);
+	for (i=1 ; i<com_argc ; i++)
+	{
+		if (!com_argv[i])
+			continue;               // NEXTSTEP sometimes clears appkit vars.
+		if (!strcmp (parm,com_argv[i]))
+			return i;
+	}
 
-	if (side < velocityval)
-		side = side * angleval / velocityval;
-	else
-		side = angleval;
-
-	return side*sign;
-
+	return 0;
 }
 
 //===========================================================================
+
+// Game mods
+
+gamemode_t com_startupgamemode;
+gamemode_t com_startupgamegroup;
+
+typedef struct gamemode_info_s
+{
+	gamemode_t mode; // this gamemode
+	gamemode_t group; // different games with same group can switch automatically when gamedirs change
+	const char* prog_name; // not null
+	const char* cmdline; // not null
+	const char* gamename; // not null
+	const char*	gamenetworkfiltername; // not null
+	const char* gamedirname1; // not null
+	const char* gamedirname2; // null
+	const char* gamescreenshotname; // not nul
+	const char* gameuserdirname; // not null
+} gamemode_info_t;
+
+static const gamemode_info_t gamemode_info [GAME_COUNT] =
+{// game						basegame					prog_name				cmdline						gamename					gamenetworkfilername		basegame	modgame			screenshot			userdir					   // commandline option
+{ GAME_NORMAL,					GAME_NORMAL,				"",						"-quake",					"DarkPlaces-Quake",			"DarkPlaces-Quake",			"id1",		NULL,			"dp",				"darkplaces"			}, // COMMANDLINEOPTION: Game: -quake runs the game Quake (default)
+{ GAME_HIPNOTIC,				GAME_NORMAL,				"hipnotic",				"-hipnotic",				"Darkplaces-Hipnotic",		"Darkplaces-Hipnotic",		"id1",		"hipnotic",		"dp",				"darkplaces"			}, // COMMANDLINEOPTION: Game: -hipnotic runs Quake mission pack 1: The Scourge of Armagon
+{ GAME_ROGUE,					GAME_NORMAL,				"rogue",				"-rogue",					"Darkplaces-Rogue",			"Darkplaces-Rogue",			"id1",		"rogue",		"dp",				"darkplaces"			}, // COMMANDLINEOPTION: Game: -rogue runs Quake mission pack 2: The Dissolution of Eternity
+{ GAME_NEHAHRA,					GAME_NORMAL,				"nehahra",				"-nehahra",					"DarkPlaces-Nehahra",		"DarkPlaces-Nehahra",		"id1",		"nehahra",		"dp",				"darkplaces"			}, // COMMANDLINEOPTION: Game: -nehahra runs The Seal of Nehahra movie and game
+{ GAME_QUOTH,					GAME_NORMAL,				"quoth",				"-quoth",					"Darkplaces-Quoth",			"Darkplaces-Quoth",			"id1",		"quoth",		"dp",				"darkplaces"			}, // COMMANDLINEOPTION: Game: -quoth runs the Quoth mod for playing community maps made for it
+{ GAME_NEXUIZ,					GAME_NEXUIZ,				"nexuiz",				"-nexuiz",					"Nexuiz",					"Nexuiz",					"data",		NULL,			"nexuiz",			"nexuiz"				}, // COMMANDLINEOPTION: Game: -nexuiz runs the multiplayer game Nexuiz
+{ GAME_XONOTIC,					GAME_XONOTIC,				"xonotic",				"-xonotic",					"Xonotic",					"Xonotic",					"data",		NULL,			"xonotic",			"insanotic"				}, // COMMANDLINEOPTION: Game: -xonotic runs the multiplayer game Xonotic (Insanotic: settings in ~/.insanotic, not stock Xonotic's ~/.xonotic)
+{ GAME_TRANSFUSION,				GAME_TRANSFUSION,			"transfusion",			"-transfusion",				"Transfusion",				"Transfusion",				"basetf",	NULL,			"transfusion",		"transfusion"			}, // COMMANDLINEOPTION: Game: -transfusion runs Transfusion (the recreation of Blood in Quake)
+{ GAME_GOODVSBAD2,				GAME_GOODVSBAD2,			"gvb2",					"-goodvsbad2",				"GoodVs.Bad2",				"GoodVs.Bad2",				"rts",		NULL,			"gvb2",				"gvb2"					}, // COMMANDLINEOPTION: Game: -goodvsbad2 runs the psychadelic RTS FPS game Good Vs Bad 2
+{ GAME_TEU,						GAME_TEU,					"teu",					"-teu",						"TheEvilUnleashed",			"TheEvilUnleashed",			"baseteu",	NULL,			"teu",				"teu"					}, // COMMANDLINEOPTION: Game: -teu runs The Evil Unleashed (this option is obsolete as they are not using darkplaces)
+{ GAME_BATTLEMECH,				GAME_BATTLEMECH,			"battlemech",			"-battlemech",				"Battlemech",				"Battlemech",				"base",		NULL,			"battlemech",		"battlemech"			}, // COMMANDLINEOPTION: Game: -battlemech runs the multiplayer topdown deathmatch game BattleMech
+{ GAME_ZYMOTIC,					GAME_ZYMOTIC,				"zymotic",				"-zymotic",					"Zymotic",					"Zymotic",					"basezym",	NULL,			"zymotic",			"zymotic"				}, // COMMANDLINEOPTION: Game: -zymotic runs the singleplayer game Zymotic
+{ GAME_SETHERAL,				GAME_SETHERAL,				"setheral",				"-setheral",				"Setheral",					"Setheral",					"data",		NULL,			"setheral",			"setheral"				}, // COMMANDLINEOPTION: Game: -setheral runs the multiplayer game Setheral
+{ GAME_TENEBRAE,				GAME_NORMAL,				"tenebrae",				"-tenebrae",				"DarkPlaces-Tenebrae",		"DarkPlaces-Tenebrae",		"id1",		"tenebrae",		"dp",				"darkplaces"			}, // COMMANDLINEOPTION: Game: -tenebrae runs the graphics test mod known as Tenebrae (some features not implemented)
+{ GAME_NEOTERIC,				GAME_NORMAL,				"neoteric",				"-neoteric",				"Neoteric",					"Neoteric",					"id1",		"neobase",		"neo",				"darkplaces"			}, // COMMANDLINEOPTION: Game: -neoteric runs the game Neoteric
+{ GAME_OPENQUARTZ,				GAME_NORMAL,				"openquartz",			"-openquartz",				"OpenQuartz",				"OpenQuartz",				"id1",		NULL,			"openquartz",		"darkplaces"			}, // COMMANDLINEOPTION: Game: -openquartz runs the game OpenQuartz, a standalone GPL replacement of the quake content
+{ GAME_PRYDON,					GAME_NORMAL,				"prydon",				"-prydon",					"PrydonGate",				"PrydonGate",				"id1",		"prydon",		"prydon",			"darkplaces"			}, // COMMANDLINEOPTION: Game: -prydon runs the topdown point and click action-RPG Prydon Gate
+{ GAME_DELUXEQUAKE,				GAME_DELUXEQUAKE,			"dq",					"-dq",						"Deluxe Quake",				"Deluxe_Quake",				"basedq",	"extradq",		"basedq",			"dq"					}, // COMMANDLINEOPTION: Game: -dq runs the game Deluxe Quake
+{ GAME_THEHUNTED,				GAME_THEHUNTED,				"thehunted",			"-thehunted",				"The Hunted",				"The_Hunted",				"thdata",	NULL, 			"th",				"thehunted"				}, // COMMANDLINEOPTION: Game: -thehunted runs the game The Hunted
+{ GAME_DEFEATINDETAIL2,			GAME_DEFEATINDETAIL2,		"did2",					"-did2",					"Defeat In Detail 2",		"Defeat_In_Detail_2",		"data",		NULL, 			"did2_",			"did2"					}, // COMMANDLINEOPTION: Game: -did2 runs the game Defeat In Detail 2
+{ GAME_DARSANA,					GAME_DARSANA,				"darsana",				"-darsana",					"Darsana",					"Darsana",					"ddata",	NULL, 			"darsana",			"darsana"				}, // COMMANDLINEOPTION: Game: -darsana runs the game Darsana
+{ GAME_CONTAGIONTHEORY,			GAME_CONTAGIONTHEORY,		"contagiontheory",		"-contagiontheory",			"Contagion Theory",			"Contagion_Theory",			"ctdata",	NULL, 			"ct",				"contagiontheory"		}, // COMMANDLINEOPTION: Game: -contagiontheory runs the game Contagion Theory
+{ GAME_EDU2P,					GAME_EDU2P,					"edu2p",				"-edu2p",					"EDU2 Prototype",			"EDU2_Prototype",			"id1",		"edu2",			"edu2_p",			"edu2prototype"			}, // COMMANDLINEOPTION: Game: -edu2p runs the game Edu2 prototype
+{ GAME_PROPHECY,				GAME_PROPHECY,				"prophecy",				"-prophecy",				"Prophecy",					"Prophecy",					"gamedata",	NULL,			"phcy",				"prophecy"				}, // COMMANDLINEOPTION: Game: -prophecy runs the game Prophecy
+{ GAME_BLOODOMNICIDE,			GAME_BLOODOMNICIDE,			"omnicide",				"-omnicide",				"Blood Omnicide",			"Blood_Omnicide",			"kain",		NULL,			"omnicide",			"omnicide"				}, // COMMANDLINEOPTION: Game: -omnicide runs the game Blood Omnicide
+{ GAME_STEELSTORM,				GAME_STEELSTORM,			"steelstorm",			"-steelstorm",				"Steel-Storm",				"Steel-Storm",				"gamedata",	NULL,			"ss",				"steelstorm"			}, // COMMANDLINEOPTION: Game: -steelstorm runs the game Steel Storm
+{ GAME_STEELSTORM2,				GAME_STEELSTORM2,			"steelstorm2",			"-steelstorm2",				"Steel Storm 2",			"Steel_Storm_2",			"gamedata",	NULL,			"ss2",				"steelstorm2"			}, // COMMANDLINEOPTION: Game: -steelstorm2 runs the game Steel Storm 2
+{ GAME_SSAMMO,					GAME_SSAMMO,				"steelstorm-ammo",		"-steelstormammo",			"Steel Storm A.M.M.O.",		"Steel_Storm_A.M.M.O.",		"gamedata", NULL,			"ssammo",			"steelstorm-ammo"		}, // COMMANDLINEOPTION: Game: -steelstormammo runs the game Steel Storm A.M.M.O.
+{ GAME_STEELSTORMREVENANTS,		GAME_STEELSTORMREVENANTS,	"steelstorm-revenants", "-steelstormrev",			"Steel Storm: Revenants",	"Steel_Storm_Revenants",	"base", NULL,				"ssrev",			"steelstorm-revenants"	}, // COMMANDLINEOPTION: Game: -steelstormrev runs the game Steel Storm: Revenants
+{ GAME_TOMESOFMEPHISTOPHELES,	GAME_TOMESOFMEPHISTOPHELES,	"tomesofmephistopheles","-tomesofmephistopheles",	"Tomes of Mephistopheles",	"Tomes_of_Mephistopheles",	"gamedata",	NULL,			"tom",				"tomesofmephistopheles"	}, // COMMANDLINEOPTION: Game: -tomesofmephistopheles runs the game Tomes of Mephistopheles
+{ GAME_STRAPBOMB,				GAME_STRAPBOMB,				"strapbomb",			"-strapbomb",				"Strap-on-bomb Car",		"Strap-on-bomb_Car",		"id1",		NULL,			"strap",			"strapbomb"				}, // COMMANDLINEOPTION: Game: -strapbomb runs the game Strap-on-bomb Car
+{ GAME_MOONHELM,				GAME_MOONHELM,				"moonhelm",				"-moonhelm",				"MoonHelm",					"MoonHelm",					"data",		NULL,			"mh",				"moonhelm"				}, // COMMANDLINEOPTION: Game: -moonhelm runs the game MoonHelm
+{ GAME_VORETOURNAMENT,			GAME_VORETOURNAMENT,		"voretournament",		"-voretournament",			"Vore Tournament",			"Vore_Tournament",			"data",		NULL,			"voretournament",	"voretournament"		}, // COMMANDLINEOPTION: Game: -voretournament runs the multiplayer game Vore Tournament
+};
+
+static void COM_SetGameType(int index);
+void COM_InitGameType (void)
+{
+	char name [MAX_OSPATH];
+	int i;
+	int index = 0;
+
+#ifdef FORCEGAME
+	COM_ToLowerString(FORCEGAME, name, sizeof (name));
+#else
+	// check executable filename for keywords, but do it SMARTLY - only check the last path element
+	FS_StripExtension(FS_FileWithoutPath(com_argv[0]), name, sizeof (name));
+	COM_ToLowerString(name, name, sizeof (name));
+#endif
+	for (i = 1;i < (int)(sizeof (gamemode_info) / sizeof (gamemode_info[0]));i++)
+		if (gamemode_info[i].prog_name && gamemode_info[i].prog_name[0] && strstr (name, gamemode_info[i].prog_name))
+			index = i;
+
+	// check commandline options for keywords
+	for (i = 0;i < (int)(sizeof (gamemode_info) / sizeof (gamemode_info[0]));i++)
+		if (COM_CheckParm (gamemode_info[i].cmdline))
+			index = i;
+
+	com_startupgamemode = gamemode_info[index].mode;
+	com_startupgamegroup = gamemode_info[index].group;
+	COM_SetGameType(index);
+}
+
+void COM_ChangeGameTypeForGameDirs(void)
+{
+	int i;
+	int index = -1;
+	// this will not not change the gamegroup
+	// first check if a base game (single gamedir) matches
+	for (i = 0;i < (int)(sizeof (gamemode_info) / sizeof (gamemode_info[0]));i++)
+	{
+		if (gamemode_info[i].group == com_startupgamegroup && !(gamemode_info[i].gamedirname2 && gamemode_info[i].gamedirname2[0]))
+		{
+			index = i;
+			break;
+		}
+	}
+	// now that we have a base game, see if there is a matching derivative game (two gamedirs)
+	if (fs_numgamedirs)
+	{
+		for (i = 0;i < (int)(sizeof (gamemode_info) / sizeof (gamemode_info[0]));i++)
+		{
+			if (gamemode_info[i].group == com_startupgamegroup && (gamemode_info[i].gamedirname2 && gamemode_info[i].gamedirname2[0]) && !strcasecmp(fs_gamedirs[0], gamemode_info[i].gamedirname2))
+			{
+				index = i;
+				break;
+			}
+		}
+	}
+	// we now have a good guess at which game this is meant to be...
+	if (index >= 0 && gamemode != gamemode_info[index].mode)
+		COM_SetGameType(index);
+}
+
+static void COM_SetGameType(int index)
+{
+	static char gamenetworkfilternamebuffer[64];
+	int i, t;
+	if (index < 0 || index >= (int)(sizeof (gamemode_info) / sizeof (gamemode_info[0])))
+		index = 0;
+	gamemode = gamemode_info[index].mode;
+	gamename = gamemode_info[index].gamename;
+	gamenetworkfiltername = gamemode_info[index].gamenetworkfiltername;
+	gamedirname1 = gamemode_info[index].gamedirname1;
+	gamedirname2 = gamemode_info[index].gamedirname2;
+	gamescreenshotname = gamemode_info[index].gamescreenshotname;
+	gameuserdirname = gamemode_info[index].gameuserdirname;
+
+	if (gamemode == com_startupgamemode)
+	{
+		if((t = COM_CheckParm("-customgamename")) && t + 1 < com_argc)
+			gamename = gamenetworkfiltername = com_argv[t+1];
+		if((t = COM_CheckParm("-customgamenetworkfiltername")) && t + 1 < com_argc)
+			gamenetworkfiltername = com_argv[t+1];
+		if((t = COM_CheckParm("-customgamedirname1")) && t + 1 < com_argc)
+			gamedirname1 = com_argv[t+1];
+		if((t = COM_CheckParm("-customgamedirname2")) && t + 1 < com_argc)
+			gamedirname2 = *com_argv[t+1] ? com_argv[t+1] : NULL;
+		if((t = COM_CheckParm("-customgamescreenshotname")) && t + 1 < com_argc)
+			gamescreenshotname = com_argv[t+1];
+		if((t = COM_CheckParm("-customgameuserdirname")) && t + 1 < com_argc)
+			gameuserdirname = com_argv[t+1];
+	}
+
+	if (gamedirname2 && gamedirname2[0])
+		Con_Printf("Game is %s using base gamedirs %s %s", gamename, gamedirname1, gamedirname2);
+	else
+		Con_Printf("Game is %s using base gamedir %s", gamename, gamedirname1);
+	for (i = 0;i < fs_numgamedirs;i++)
+	{
+		if (i == 0)
+			Con_Printf(", with mod gamedirs");
+		Con_Printf(" %s", fs_gamedirs[i]);
+	}
+	Con_Printf("\n");
+
+	if (strchr(gamenetworkfiltername, ' '))
+	{
+		char *s;
+		// if there are spaces in the game's network filter name it would
+		// cause parse errors in getservers in dpmaster, so we need to replace
+		// them with _ characters
+		strlcpy(gamenetworkfilternamebuffer, gamenetworkfiltername, sizeof(gamenetworkfilternamebuffer));
+		while ((s = strchr(gamenetworkfilternamebuffer, ' ')) != NULL)
+			*s = '_';
+		gamenetworkfiltername = gamenetworkfilternamebuffer;
+	}
+
+	Con_Printf("gamename for server filtering: %s\n", gamenetworkfiltername);
+}
+
 
 /*
 ================
@@ -921,17 +1611,13 @@ void COM_Init_Commands (void)
 
 	Cvar_RegisterVariable (&registered);
 	Cvar_RegisterVariable (&cmdline);
-	Cvar_RegisterVariable(&cl_playermodel);
-	Cvar_RegisterVirtual(&cl_playermodel, "_cl_playermodel");
-	Cvar_RegisterVariable(&cl_playerskin);
-	Cvar_RegisterVirtual(&cl_playerskin, "_cl_playerskin");
 
 	// reconstitute the command line for the cmdline externally visible cvar
 	n = 0;
-	for (j = 0;(j < MAX_NUM_ARGVS) && (j < sys.argc);j++)
+	for (j = 0;(j < MAX_NUM_ARGVS) && (j < com_argc);j++)
 	{
 		i = 0;
-		if (strstr(sys.argv[j], " "))
+		if (strstr(com_argv[j], " "))
 		{
 			// arg contains whitespace, store quotes around it
 			// This condition checks whether we can allow to put
@@ -941,17 +1627,17 @@ void COM_Init_Commands (void)
 			com_cmdline[n++] = '\"';
 			// This condition checks whether we can allow one
 			// more character and a quote character.
-			while ((n < ((int)sizeof(com_cmdline) - 2)) && sys.argv[j][i])
+			while ((n < ((int)sizeof(com_cmdline) - 2)) && com_argv[j][i])
 				// FIXME: Doesn't quote special characters.
-				com_cmdline[n++] = sys.argv[j][i++];
+				com_cmdline[n++] = com_argv[j][i++];
 			com_cmdline[n++] = '\"';
 		}
 		else
 		{
 			// This condition checks whether we can allow one
 			// more character.
-			while ((n < ((int)sizeof(com_cmdline) - 1)) && sys.argv[j][i])
-				com_cmdline[n++] = sys.argv[j][i++];
+			while ((n < ((int)sizeof(com_cmdline) - 1)) && com_argv[j][i])
+				com_cmdline[n++] = com_argv[j][i++];
 		}
 		if (n < ((int)sizeof(com_cmdline) - 1))
 			com_cmdline[n++] = ' ';
@@ -959,7 +1645,7 @@ void COM_Init_Commands (void)
 			break;
 	}
 	com_cmdline[n] = 0;
-	Cvar_SetQuick(&cmdline, com_cmdline);
+	Cvar_Set ("cmdline", com_cmdline);
 }
 
 /*
@@ -1018,27 +1704,7 @@ int dpvsnprintf (char *buffer, size_t buffersize, const char *format, va_list ar
 #endif
 	if (result < 0 || (size_t)result >= buffersize)
 	{
-		// _vsnprintf_s returns -1 on error and on truncation (indistinguishable),
-		// vsnprintf returns negative on error and the desired strlen on truncation.
-		buffer[buffersize - 1] = '\0'; // should be unnecessary, but just in case
-		// Basic stdout only: we could be inside Con_Printf, Sys_Printf calls dpvsnprintf,
-		// Windows console doesn't support colours.
-		if (result < 0)
-			Sys_Print("dpvsnprintf: output error!\n", 27);
-		else
-		{
-			char msg[MAX_INPUTLINE];
-#if _MSC_VER >= 1400
-			result = _snprintf_s(msg, sizeof(msg), _TRUNCATE, "dpvsnprintf: truncated to %lu bytes: \"%s\"\n", (unsigned long)buffersize - 1, buffer);
-#else
-			result = snprintf(msg, sizeof(msg), "dpvsnprintf: truncated to %lu bytes: \"%s\"\n", (unsigned long)buffersize - 1, buffer);
-#endif
-			if (result > 0)
-			{
-				msg[sizeof(msg) - 1] = '\n'; // may have been lost in truncation
-				Sys_Print(msg, min((size_t)result, sizeof(msg) - 1));
-			}
-		}
+		buffer[buffersize - 1] = '\0';
 		return -1;
 	}
 
@@ -1048,12 +1714,10 @@ int dpvsnprintf (char *buffer, size_t buffersize, const char *format, va_list ar
 
 //======================================
 
-size_t COM_ToLowerString(const char *in, char *out, size_t size_out)
+void COM_ToLowerString (const char *in, char *out, size_t size_out)
 {
-	const char *out_start = out;
-
 	if (size_out == 0)
-		return 0;
+		return;
 
 	if(utf8_enable.integer)
 	{
@@ -1064,12 +1728,12 @@ size_t COM_ToLowerString(const char *in, char *out, size_t size_out)
 			Uchar ch = u8_getchar_utf8_enabled(in, &in);
 			ch = u8_tolower(ch);
 			n = u8_fromchar(ch, out, size_out);
-			out += n; // before the break so the return is correct
 			if(n <= 0)
 				break;
+			out += n;
 			size_out -= n;
 		}
-		return out - out_start;
+		return;
 	}
 
 	while (*in && size_out > 1)
@@ -1081,15 +1745,12 @@ size_t COM_ToLowerString(const char *in, char *out, size_t size_out)
 		size_out--;
 	}
 	*out = '\0';
-	return out - out_start;
 }
 
-size_t COM_ToUpperString(const char *in, char *out, size_t size_out)
+void COM_ToUpperString (const char *in, char *out, size_t size_out)
 {
-	const char *out_start = out;
-
 	if (size_out == 0)
-		return 0;
+		return;
 
 	if(utf8_enable.integer)
 	{
@@ -1100,12 +1761,12 @@ size_t COM_ToUpperString(const char *in, char *out, size_t size_out)
 			Uchar ch = u8_getchar_utf8_enabled(in, &in);
 			ch = u8_toupper(ch);
 			n = u8_fromchar(ch, out, size_out);
-			out += n; // before the break so the return is correct
 			if(n <= 0)
 				break;
+			out += n;
 			size_out -= n;
 		}
-		return out - out_start;
+		return;
 	}
 
 	while (*in && size_out > 1)
@@ -1117,7 +1778,6 @@ size_t COM_ToUpperString(const char *in, char *out, size_t size_out)
 		size_out--;
 	}
 	*out = '\0';
-	return out - out_start;
 }
 
 int COM_StringBeginsWith(const char *s, const char *match)
@@ -1209,7 +1869,7 @@ all characters until the zero terminator.
 ============
 */
 size_t
-COM_StringLengthNoColors(const char *s, size_t size_s, qbool *valid)
+COM_StringLengthNoColors(const char *s, size_t size_s, qboolean *valid)
 {
 	const char *end = size_s ? (s + size_s) : NULL;
 	size_t len = 0;
@@ -1219,7 +1879,7 @@ COM_StringLengthNoColors(const char *s, size_t size_s, qbool *valid)
 		{
 			case 0:
 				if(valid)
-					*valid = true;
+					*valid = TRUE;
 				return len;
 			case STRING_COLOR_TAG:
 				++s;
@@ -1239,7 +1899,7 @@ COM_StringLengthNoColors(const char *s, size_t size_s, qbool *valid)
 					case 0: // ends with unfinished color code!
 						++len;
 						if(valid)
-							*valid = false;
+							*valid = FALSE;
 						return len;
 					case STRING_COLOR_TAG: // escaped ^
 						++len;
@@ -1271,10 +1931,9 @@ removes color codes from a string.
 If escape_carets is true, the resulting string will be safe for printing. If
 escape_carets is false, the function will just strip color codes (for logging
 for example).
-Returns the number of bytes written to the *out buffer excluding the \0 terminator.
 
-If the output buffer size did not suffice for converting, the function returns 0.
-Generally, if escape_carets is false, the output buffer needs
+If the output buffer size did not suffice for converting, the function returns
+FALSE. Generally, if escape_carets is false, the output buffer needs
 strlen(str)+1 bytes, and if escape_carets is true, it can need strlen(str)*1.5+2
 bytes. In any case, the function makes sure that the resulting string is
 zero terminated.
@@ -1283,22 +1942,20 @@ For size_in, specify the maximum number of characters from in to use, or 0 to us
 all characters until the zero terminator.
 ============
 */
-size_t COM_StringDecolorize(const char *in, size_t size_in, char *out, size_t size_out, qbool escape_carets)
+qboolean
+COM_StringDecolorize(const char *in, size_t size_in, char *out, size_t size_out, qboolean escape_carets)
 {
-#define APPEND(ch) do { if(--size_out) { *out++ = (ch); } else { *out++ = 0; return 0; } } while(0)
-
-	const char *out_start = out;
+#define APPEND(ch) do { if(--size_out) { *out++ = (ch); } else { *out++ = 0; return FALSE; } } while(0)
 	const char *end = size_in ? (in + size_in) : NULL;
-
 	if(size_out < 1)
-		return 0;
+		return FALSE;
 	for(;;)
 	{
 		switch((in == end) ? 0 : *in)
 		{
 			case 0:
-				*out = '\0';
-				return out - out_start;
+				*out++ = 0;
+				return TRUE;
 			case STRING_COLOR_TAG:
 				++in;
 				switch((in == end) ? 0 : *in)
@@ -1321,8 +1978,8 @@ size_t COM_StringDecolorize(const char *in, size_t size_in, char *out, size_t si
 						// finish the code by appending another caret when escaping
 						if(escape_carets)
 							APPEND(STRING_COLOR_TAG);
-						*out = '\0';
-						return out - out_start;
+						*out++ = 0;
+						return TRUE;
 					case STRING_COLOR_TAG: // escaped ^
 						APPEND(STRING_COLOR_TAG);
 						// append a ^ twice when escaping
@@ -1348,90 +2005,230 @@ size_t COM_StringDecolorize(const char *in, size_t size_in, char *out, size_t si
 #undef APPEND
 }
 
+char *InfoString_GetValue(const char *buffer, const char *key, char *value, size_t valuelength)
+{
+	int pos = 0, j;
+	size_t keylength;
+	if (!key)
+		key = "";
+	keylength = strlen(key);
+	if (valuelength < 1 || !value)
+	{
+		Con_Printf("InfoString_GetValue: no room in value\n");
+		return NULL;
+	}
+	value[0] = 0;
+	if (strchr(key, '\\'))
+	{
+		Con_Printf("InfoString_GetValue: key name \"%s\" contains \\ which is not possible in an infostring\n", key);
+		return NULL;
+	}
+	if (strchr(key, '\"'))
+	{
+		Con_Printf("InfoString_SetValue: key name \"%s\" contains \" which is not allowed in an infostring\n", key);
+		return NULL;
+	}
+	if (!key[0])
+	{
+		Con_Printf("InfoString_GetValue: can not look up a key with no name\n");
+		return NULL;
+	}
+	while (buffer[pos] == '\\')
+	{
+		if (!memcmp(buffer + pos+1, key, keylength) &&
+				(buffer[pos+1 + keylength] == 0 ||
+				 buffer[pos+1 + keylength] == '\\'))
+		{
+			pos += 1 + keylength;           // Skip \key
+			if (buffer[pos] == '\\') pos++; // Skip \ before value.
+			for (j = 0;buffer[pos+j] && buffer[pos+j] != '\\' && j < (int)valuelength - 1;j++)
+				value[j] = buffer[pos+j];
+			value[j] = 0;
+			return value;
+		}
+		if (buffer[pos] == '\\') pos++; // Skip \ before value.
+		for (pos++;buffer[pos] && buffer[pos] != '\\';pos++);
+		if (buffer[pos] == '\\') pos++; // Skip \ before value.
+		for (pos++;buffer[pos] && buffer[pos] != '\\';pos++);
+	}
+	// if we reach this point the key was not found
+	return NULL;
+}
+
+void InfoString_SetValue(char *buffer, size_t bufferlength, const char *key, const char *value)
+{
+	int pos = 0, pos2;
+	size_t keylength;
+	if (!key)
+		key = "";
+	if (!value)
+		value = "";
+	keylength = strlen(key);
+	if (strchr(key, '\\') || strchr(value, '\\'))
+	{
+		Con_Printf("InfoString_SetValue: \"%s\" \"%s\" contains \\ which is not possible to store in an infostring\n", key, value);
+		return;
+	}
+	if (strchr(key, '\"') || strchr(value, '\"'))
+	{
+		Con_Printf("InfoString_SetValue: \"%s\" \"%s\" contains \" which is not allowed in an infostring\n", key, value);
+		return;
+	}
+	if (!key[0])
+	{
+		Con_Printf("InfoString_SetValue: can not set a key with no name\n");
+		return;
+	}
+	while (buffer[pos] == '\\')
+	{
+		if (!memcmp(buffer + pos+1, key, keylength) &&
+				(buffer[pos+1 + keylength] == 0 ||
+				 buffer[pos+1 + keylength] == '\\'))
+			break;
+		if (buffer[pos] == '\\') pos++; // Skip \ before value.
+		for (;buffer[pos] && buffer[pos] != '\\';pos++);
+		if (buffer[pos] == '\\') pos++; // Skip \ before value.
+		for (;buffer[pos] && buffer[pos] != '\\';pos++);
+	}
+	// if we found the key, find the end of it because we will be replacing it
+	pos2 = pos;
+	if (buffer[pos] == '\\')
+	{
+		pos2 += 1 + keylength;  // Skip \key
+		if (buffer[pos2] == '\\') pos2++; // Skip \ before value.
+		for (;buffer[pos2] && buffer[pos2] != '\\';pos2++);
+	}
+	if (bufferlength <= pos + 1 + strlen(key) + 1 + strlen(value) + strlen(buffer + pos2))
+	{
+		Con_Printf("InfoString_SetValue: no room for \"%s\" \"%s\" in infostring\n", key, value);
+		return;
+	}
+	if (value[0])
+	{
+		// set the key/value and append the remaining text
+		char tempbuffer[MAX_INPUTLINE];
+		strlcpy(tempbuffer, buffer + pos2, sizeof(tempbuffer));
+		dpsnprintf(buffer + pos, bufferlength - pos, "\\%s\\%s%s", key, value, tempbuffer);
+	}
+	else
+	{
+		// just remove the key from the text
+		strlcpy(buffer + pos, buffer + pos2, bufferlength - pos);
+	}
+}
+
+void InfoString_Print(char *buffer)
+{
+	int i;
+	char key[MAX_INPUTLINE];
+	char value[MAX_INPUTLINE];
+	while (*buffer)
+	{
+		if (*buffer != '\\')
+		{
+			Con_Printf("InfoString_Print: corrupt string\n");
+			return;
+		}
+		for (buffer++, i = 0;*buffer && *buffer != '\\';buffer++)
+			if (i < (int)sizeof(key)-1)
+				key[i++] = *buffer;
+		key[i] = 0;
+		if (*buffer != '\\')
+		{
+			Con_Printf("InfoString_Print: corrupt string\n");
+			return;
+		}
+		for (buffer++, i = 0;*buffer && *buffer != '\\';buffer++)
+			if (i < (int)sizeof(value)-1)
+				value[i++] = *buffer;
+		value[i] = 0;
+		// empty value is an error case
+		Con_Printf("%20s %s\n", key, value[0] ? value : "NO VALUE");
+	}
+}
+
+//========================================================
+// strlcat and strlcpy, from OpenBSD
 
 /*
-============
-String Copying
-
-The glibc implementation of memccpy is several times faster than old functions that
-copy one byte at a time (even at -O3) and its advantage increases with string length.
-============
-*/
-#ifdef WIN32
-	// memccpy() is standard in POSIX.1-2001, POSIX.1-2008, SVr4, 4.3BSD, C23.
-	// Microsoft supports it, but apparently complains if we use it.
-	#undef memccpy
-	#define memccpy _memccpy
-#endif
-
-/** Chain-copies a string with truncation and efficiency (compared to strlcat()).
- * The destination ends at an absolute pointer instead of a relative offset
- * and a pointer to the \0 terminator is returned on success.
- * Truncates, warns, and returns the end pointer on overflow or unterminated source.
- * Guarantees \0 termination.    end = dst + sizeof(src[])
+ * Copyright (c) 1998 Todd C. Miller <Todd.Miller@courtesan.com>
+ *
+ * Permission to use, copy, modify, and distribute this software for any
+ * purpose with or without fee is hereby granted, provided that the above
+ * copyright notice and this permission notice appear in all copies.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+ * WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+ * MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+ * ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+ * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+ * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+ * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
-char *dp_stpecpy(char *dst, char *end, const char *src)
-{
-	char *p = (char *)memccpy(dst, src, '\0', end - dst);
 
-	if (p)
-		return p - 1;
-	end[-1] = '\0';
-	Con_Printf(CON_WARN "%s: src string unterminated or truncated to %lu bytes: \"%s\"\n", __func__, (unsigned long)(dst == end ? 0 : (end - dst) - 1), dst);
-	return end;
-}
+/*	$OpenBSD: strlcat.c,v 1.11 2003/06/17 21:56:24 millert Exp $	*/
+/*	$OpenBSD: strlcpy.c,v 1.8 2003/06/17 21:56:24 millert Exp $	*/
 
-/** Copies a measured byte sequence (unterminated string) to a null-terminated string.
- * Returns a pointer to the \0 terminator. Guarantees \0 termination.
- * Compared to ustr2stp(): truncates and warns on overflow.
- */
-char *dp_ustr2stp(char *dst, size_t dsize, const char *src, size_t slen)
+
+#ifndef HAVE_STRLCAT
+size_t
+strlcat(char *dst, const char *src, size_t siz)
 {
-	if (slen >= dsize)
-	{
-		slen = dsize - 1;
-		Con_Printf(CON_WARN "%s: src string truncated to %lu bytes: \"%.*s\"\n", __func__, (unsigned long)slen, (int)slen, src);
+	register char *d = dst;
+	register const char *s = src;
+	register size_t n = siz;
+	size_t dlen;
+
+	/* Find the end of dst and adjust bytes left but don't go past end */
+	while (n-- != 0 && *d != '\0')
+		d++;
+	dlen = d - dst;
+	n = siz - dlen;
+
+	if (n == 0)
+		return(dlen + strlen(s));
+	while (*s != '\0') {
+		if (n != 1) {
+			*d++ = *s;
+			n--;
+		}
+		s++;
 	}
-	memcpy(dst, src, slen);
-	dst[slen] = '\0';
-	return &dst[slen];
-}
+	*d = '\0';
 
-/** Copies a string, like strlcpy() but with a better return: the number of bytes copied
- * excluding the \0 terminator. Truncates and warns on overflow or unterminated source,
- * whereas strlcpy() truncates silently and overreads (possibly segfaulting).
- * Guarantees \0 termination.
- * See also: dp_stpecpy() and dp_ustr2stp().
- */
-size_t dp__strlcpy(char *dst, const char *src, size_t dsize, const char *func, unsigned line)
+	return(dlen + (s - src));	/* count does not include NUL */
+}
+#endif  // #ifndef HAVE_STRLCAT
+
+
+#ifndef HAVE_STRLCPY
+size_t
+strlcpy(char *dst, const char *src, size_t siz)
 {
-	char *p = (char *)memccpy(dst, src, '\0', dsize);
+	register char *d = dst;
+	register const char *s = src;
+	register size_t n = siz;
 
-	if (p)
-		return (p - 1) - dst;
-	dst[dsize - 1] = '\0';
-	Con_Printf(CON_WARN "%s:%u: src string unterminated or truncated to %lu bytes: \"%s\"\n", func, line, (unsigned long)dsize - 1, dst);
-	return dsize - 1;
+	/* Copy as many bytes as will fit */
+	if (n != 0 && --n != 0) {
+		do {
+			if ((*d++ = *s++) == 0)
+				break;
+		} while (--n != 0);
+	}
+
+	/* Not enough room in dst, add NUL and traverse rest of src */
+	if (n == 0) {
+		if (siz != 0)
+			*d = '\0';		/* NUL-terminate dst */
+		while (*s++)
+			;
+	}
+
+	return(s - src - 1);	/* count does not include NUL */
 }
 
-/** Catenates a string, like strlcat() but with a better return: the number of bytes copied
- * excluding the \0 terminator. Truncates and warns on overflow or unterminated source,
- * whereas strlcat() truncates silently and overreads (possibly segfaulting).
- * Guarantees \0 termination.
- * Inefficient like any strcat(), please use memcpy(), dp_stpecpy() or dp_strlcpy() instead.
- */
-size_t dp__strlcat(char *dst, const char *src, size_t dsize, const char *func, unsigned line)
-{
-	size_t offset;
-	char *p = (char *)memchr(dst, '\0', dsize);
-
-	if (!p)
-		p = dst;
-	offset = p - dst;
-	return dp__strlcpy(p, src, dsize - offset, func, line) + offset;
-}
-
-
+#endif  // #ifndef HAVE_STRLCPY
 
 void FindFraction(double val, int *num, int *denom, int denomMax)
 {
@@ -1469,7 +2266,7 @@ char **XPM_DecodeString(const char *in)
 	while(COM_ParseToken_QuakeC(&in, false))
 	{
 		tokens[line] = lines[line];
-		dp_strlcpy(lines[line++], com_token, sizeof(lines[0]));
+		strlcpy(lines[line++], com_token, sizeof(lines[0]));
 		if(!COM_ParseToken_QuakeC(&in, false))
 			return NULL;
 		if(!strcmp(com_token, "}"))

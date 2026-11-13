@@ -19,8 +19,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include <math.h>
 #include <SDL.h>
 
-#include "darkplaces.h"
-#include "vid.h"
+#include "quakedef.h"
 
 #include "snd_main.h"
 
@@ -29,8 +28,7 @@ static unsigned int sdlaudiotime = 0;
 static int audio_device = 0;
 
 
-// This function is called when the audio device needs more data.
-// Note: SDL obtains the device lock before calling this function, no need to lock it here.
+// Note: SDL calls SDL_LockAudio() right before this function, so no need to lock the audio data here
 static void Buffer_Callback (void *userdata, Uint8 *stream, int len)
 {
 	unsigned int factor, RequestedFrames, MaxFrames, FrameCount;
@@ -42,53 +40,57 @@ static void Buffer_Callback (void *userdata, Uint8 *stream, int len)
 
 	RequestedFrames = (unsigned int)len / factor;
 
-	if (snd_usethreadedmixing)
+	if (SndSys_LockRenderBuffer())
 	{
-		S_MixToBuffer(stream, RequestedFrames);
-		if (snd_blocked)
-			memset(stream, snd_renderbuffer->format.width == 1 ? 0x80 : 0, len);
-		return;
+		if (snd_usethreadedmixing)
+		{
+			S_MixToBuffer(stream, RequestedFrames);
+			if (snd_blocked)
+				memset(stream, snd_renderbuffer->format.width == 1 ? 0x80 : 0, len);
+			SndSys_UnlockRenderBuffer();
+			return;
+		}
+
+		// Transfert up to a chunk of samples from snd_renderbuffer to stream
+		MaxFrames = snd_renderbuffer->endframe - snd_renderbuffer->startframe;
+		if (MaxFrames > RequestedFrames)
+			FrameCount = RequestedFrames;
+		else
+			FrameCount = MaxFrames;
+		StartOffset = snd_renderbuffer->startframe % snd_renderbuffer->maxframes;
+		EndOffset = (snd_renderbuffer->startframe + FrameCount) % snd_renderbuffer->maxframes;
+		if (StartOffset > EndOffset)  // if the buffer wraps
+		{
+			unsigned int PartialLength1, PartialLength2;
+
+			PartialLength1 = (snd_renderbuffer->maxframes - StartOffset) * factor;
+			memcpy(stream, &snd_renderbuffer->ring[StartOffset * factor], PartialLength1);
+
+			PartialLength2 = FrameCount * factor - PartialLength1;
+			memcpy(&stream[PartialLength1], &snd_renderbuffer->ring[0], PartialLength2);
+
+			// As of SDL 2.0 buffer needs to be fully initialized, so fill leftover part with silence
+			// FIXME this is another place that assumes 8bit is always unsigned and others always signed
+			memset(&stream[PartialLength1 + PartialLength2], snd_renderbuffer->format.width == 1 ? 0x80 : 0, len - (PartialLength1 + PartialLength2));
+		}
+		else
+		{
+			memcpy(stream, &snd_renderbuffer->ring[StartOffset * factor], FrameCount * factor);
+
+			// As of SDL 2.0 buffer needs to be fully initialized, so fill leftover part with silence
+			// FIXME this is another place that assumes 8bit is always unsigned and others always signed
+			memset(&stream[FrameCount * factor], snd_renderbuffer->format.width == 1 ? 0x80 : 0, len - (FrameCount * factor));
+		}
+
+		snd_renderbuffer->startframe += FrameCount;
+
+		if (FrameCount < RequestedFrames && developer_insane.integer && vid_activewindow)
+			Con_DPrintf("SDL sound: %u sample frames missing\n", RequestedFrames - FrameCount);
+
+		sdlaudiotime += RequestedFrames;
+
+		SndSys_UnlockRenderBuffer();
 	}
-
-	// Transfert up to a chunk of samples from snd_renderbuffer to stream
-	MaxFrames = snd_renderbuffer->endframe - snd_renderbuffer->startframe;
-	if (MaxFrames > RequestedFrames)
-		FrameCount = RequestedFrames;
-	else
-		FrameCount = MaxFrames;
-	StartOffset = snd_renderbuffer->startframe % snd_renderbuffer->maxframes;
-	EndOffset = (snd_renderbuffer->startframe + FrameCount) % snd_renderbuffer->maxframes;
-	if (snd_blocked)
-		memset(stream, snd_renderbuffer->format.width == 1 ? 0x80 : 0, len);
-	else if (StartOffset > EndOffset)  // if the buffer wraps
-	{
-		unsigned int PartialLength1, PartialLength2;
-
-		PartialLength1 = (snd_renderbuffer->maxframes - StartOffset) * factor;
-		memcpy(stream, &snd_renderbuffer->ring[StartOffset * factor], PartialLength1);
-
-		PartialLength2 = FrameCount * factor - PartialLength1;
-		memcpy(&stream[PartialLength1], &snd_renderbuffer->ring[0], PartialLength2);
-
-		// As of SDL 2.0 buffer needs to be fully initialized, so fill leftover part with silence
-		// FIXME this is another place that assumes 8bit is always unsigned and others always signed
-		memset(&stream[PartialLength1 + PartialLength2], snd_renderbuffer->format.width == 1 ? 0x80 : 0, len - (PartialLength1 + PartialLength2));
-	}
-	else
-	{
-		memcpy(stream, &snd_renderbuffer->ring[StartOffset * factor], FrameCount * factor);
-
-		// As of SDL 2.0 buffer needs to be fully initialized, so fill leftover part with silence
-		// FIXME this is another place that assumes 8bit is always unsigned and others always signed
-		memset(&stream[FrameCount * factor], snd_renderbuffer->format.width == 1 ? 0x80 : 0, len - (FrameCount * factor));
-	}
-
-	snd_renderbuffer->startframe += FrameCount;
-
-	if (FrameCount < RequestedFrames && developer_insane.integer && vid_activewindow)
-		Con_DPrintf("SDL sound: %u sample frames missing\n", RequestedFrames - FrameCount);
-
-	sdlaudiotime += RequestedFrames;
 }
 
 
@@ -100,7 +102,7 @@ Create "snd_renderbuffer" with the proper sound format if the call is successful
 May return a suggested format if the requested format isn't available
 ====================
 */
-qbool SndSys_Init (snd_format_t* fmt)
+qboolean SndSys_Init (const snd_format_t* requested, snd_format_t* suggested)
 {
 	unsigned int buffersize;
 	SDL_AudioSpec wantspec;
@@ -120,47 +122,61 @@ qbool SndSys_Init (snd_format_t* fmt)
 	// Insanotic: phones mix every frame at a steady 60 fps, so a 512 sample
 	// device buffer (about 11 ms at 48 kHz) is safe and keeps shots and the
 	// sound coming back after the app returns to the front immediate
-	buffersize = 512;
+	buffersize = (unsigned int)ceil((double)requested->speed / 100.0);
 #else
-	// SDL2 wiki recommends this range
-	buffersize = bound(512, ceil((double)fmt->speed * snd_bufferlength.value / 1000.0), 8192);
+	buffersize = (unsigned int)ceil((double)requested->speed / 25.0); // 2048 bytes on 24kHz to 48kHz
 #endif
 
 	// Init the SDL Audio subsystem
-	memset(&wantspec, 0, sizeof(wantspec));
 	wantspec.callback = Buffer_Callback;
 	wantspec.userdata = NULL;
-	wantspec.freq = fmt->speed;
-	wantspec.format = fmt->width == 1 ? AUDIO_U8 : (fmt->width == 2 ? AUDIO_S16SYS : AUDIO_F32);
-	wantspec.channels = fmt->channels;
+	wantspec.freq = requested->speed;
+	wantspec.format = ((requested->width == 1) ? AUDIO_U8 : AUDIO_S16SYS);
+	wantspec.channels = requested->channels;
 	wantspec.samples = CeilPowerOf2(buffersize);  // needs to be a power of 2 on some platforms.
 
 	Con_Printf("Wanted audio Specification:\n"
-				"    Channels  : %i\n"
-				"    Format    : 0x%X\n"
-				"    Frequency : %i\n"
-				"    Samples   : %i\n",
+				"\tChannels  : %i\n"
+				"\tFormat    : 0x%X\n"
+				"\tFrequency : %i\n"
+				"\tSamples   : %i\n",
 				wantspec.channels, wantspec.format, wantspec.freq, wantspec.samples);
 
-	if ((audio_device = SDL_OpenAudioDevice(NULL, 0, &wantspec, &obtainspec, SDL_AUDIO_ALLOW_FREQUENCY_CHANGE | SDL_AUDIO_ALLOW_CHANNELS_CHANGE)) == 0)
+	if ((audio_device = SDL_OpenAudioDevice(NULL, 0, &wantspec, &obtainspec, 0)) == 0)
 	{
-		Con_Printf(CON_ERROR "Failed to open the audio device! (%s)\n", SDL_GetError() );
+		Con_Printf( "Failed to open the audio device! (%s)\n", SDL_GetError() );
 		return false;
 	}
 
 	Con_Printf("Obtained audio specification:\n"
-				"    Channels  : %i\n"
-				"    Format    : 0x%X\n"
-				"    Frequency : %i\n"
-				"    Samples   : %i\n",
+				"\tChannels  : %i\n"
+				"\tFormat    : 0x%X\n"
+				"\tFrequency : %i\n"
+				"\tSamples   : %i\n",
 				obtainspec.channels, obtainspec.format, obtainspec.freq, obtainspec.samples);
 
-	fmt->speed = obtainspec.freq;
-	fmt->channels = obtainspec.channels;
+	// If we haven't obtained what we wanted
+	if (wantspec.freq != obtainspec.freq ||
+		wantspec.format != obtainspec.format ||
+		wantspec.channels != obtainspec.channels)
+	{
+		SDL_CloseAudioDevice(audio_device);
+
+		// Pass the obtained format as a suggested format
+		if (suggested != NULL)
+		{
+			suggested->speed = obtainspec.freq;
+			// FIXME: check the format more carefully. There are plenty of unsupported cases
+			suggested->width = ((obtainspec.format == AUDIO_U8) ? 1 : 2);
+			suggested->channels = obtainspec.channels;
+		}
+
+		return false;
+	}
 
 	snd_threaded = true;
 
-	snd_renderbuffer = Snd_CreateRingBuffer(fmt, 0, NULL);
+	snd_renderbuffer = Snd_CreateRingBuffer(requested, 0, NULL);
 	if (snd_channellayout.integer == SND_CHANNELLAYOUT_AUTO)
 		Cvar_SetValueQuick (&snd_channellayout, SND_CHANNELLAYOUT_STANDARD);
 
@@ -226,7 +242,7 @@ SndSys_LockRenderBuffer
 Get the exclusive lock on "snd_renderbuffer"
 ====================
 */
-qbool SndSys_LockRenderBuffer (void)
+qboolean SndSys_LockRenderBuffer (void)
 {
 	SDL_LockAudioDevice(audio_device);
 	return true;

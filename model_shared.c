@@ -28,42 +28,20 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "r_shadow.h"
 #include "polygon.h"
 
-cvar_t r_mipskins = {CF_CLIENT | CF_ARCHIVE, "r_mipskins", "0", "mipmaps model skins so they render faster in the distance and do not display noise artifacts, can cause discoloration of skins if they contain undesirable border colors"};
-cvar_t r_mipnormalmaps = {CF_CLIENT | CF_ARCHIVE, "r_mipnormalmaps", "1", "mipmaps normalmaps (turning it off looks sharper but may have aliasing)"};
-cvar_t mod_generatelightmaps_unitspersample = {CF_CLIENT | CF_ARCHIVE, "mod_generatelightmaps_unitspersample", "8", "lightmap resolution"};
-cvar_t mod_generatelightmaps_borderpixels = {CF_CLIENT | CF_ARCHIVE, "mod_generatelightmaps_borderpixels", "2", "extra space around polygons to prevent sampling artifacts"};
-cvar_t mod_generatelightmaps_texturesize = {CF_CLIENT | CF_ARCHIVE, "mod_generatelightmaps_texturesize", "1024", "size of lightmap textures"};
-cvar_t mod_generatelightmaps_lightmapsamples = {CF_CLIENT | CF_ARCHIVE, "mod_generatelightmaps_lightmapsamples", "16", "number of shadow tests done per lightmap pixel"};
-cvar_t mod_generatelightmaps_vertexsamples = {CF_CLIENT | CF_ARCHIVE, "mod_generatelightmaps_vertexsamples", "16", "number of shadow tests done per vertex"};
-cvar_t mod_generatelightmaps_gridsamples = {CF_CLIENT | CF_ARCHIVE, "mod_generatelightmaps_gridsamples", "64", "number of shadow tests done per lightgrid cell"};
-cvar_t mod_generatelightmaps_lightmapradius = {CF_CLIENT | CF_ARCHIVE, "mod_generatelightmaps_lightmapradius", "16", "sampling area around each lightmap pixel"};
-cvar_t mod_generatelightmaps_vertexradius = {CF_CLIENT | CF_ARCHIVE, "mod_generatelightmaps_vertexradius", "16", "sampling area around each vertex"};
-cvar_t mod_generatelightmaps_gridradius = {CF_CLIENT | CF_ARCHIVE, "mod_generatelightmaps_gridradius", "64", "sampling area around each lightgrid cell center"};
+cvar_t r_enableshadowvolumes = {CVAR_SAVE, "r_enableshadowvolumes", "1", "Enables use of Stencil Shadow Volume shadowing methods, saves some memory if turned off"};
+cvar_t r_mipskins = {CVAR_SAVE, "r_mipskins", "0", "mipmaps model skins so they render faster in the distance and do not display noise artifacts, can cause discoloration of skins if they contain undesirable border colors"};
+cvar_t r_mipnormalmaps = {CVAR_SAVE, "r_mipnormalmaps", "1", "mipmaps normalmaps (turning it off looks sharper but may have aliasing)"};
+cvar_t mod_generatelightmaps_unitspersample = {CVAR_SAVE, "mod_generatelightmaps_unitspersample", "8", "lightmap resolution"};
+cvar_t mod_generatelightmaps_borderpixels = {CVAR_SAVE, "mod_generatelightmaps_borderpixels", "2", "extra space around polygons to prevent sampling artifacts"};
+cvar_t mod_generatelightmaps_texturesize = {CVAR_SAVE, "mod_generatelightmaps_texturesize", "1024", "size of lightmap textures"};
+cvar_t mod_generatelightmaps_lightmapsamples = {CVAR_SAVE, "mod_generatelightmaps_lightmapsamples", "16", "number of shadow tests done per lightmap pixel"};
+cvar_t mod_generatelightmaps_vertexsamples = {CVAR_SAVE, "mod_generatelightmaps_vertexsamples", "16", "number of shadow tests done per vertex"};
+cvar_t mod_generatelightmaps_gridsamples = {CVAR_SAVE, "mod_generatelightmaps_gridsamples", "64", "number of shadow tests done per lightgrid cell"};
+cvar_t mod_generatelightmaps_lightmapradius = {CVAR_SAVE, "mod_generatelightmaps_lightmapradius", "16", "sampling area around each lightmap pixel"};
+cvar_t mod_generatelightmaps_vertexradius = {CVAR_SAVE, "mod_generatelightmaps_vertexradius", "16", "sampling area around each vertex"};
+cvar_t mod_generatelightmaps_gridradius = {CVAR_SAVE, "mod_generatelightmaps_gridradius", "64", "sampling area around each lightgrid cell center"};
 
-model_t *loadmodel;
-
-// Supported model formats
-static modloader_t loader[] =
-{
-	{"obj", NULL, 0, Mod_OBJ_Load},
-	{NULL, "IDPO", 4, Mod_IDP0_Load},
-	{NULL, "IDP2", 4, Mod_IDP2_Load},
-	{NULL, "IDP3", 4, Mod_IDP3_Load},
-	{NULL, "IDSP", 4, Mod_IDSP_Load},
-	{NULL, "IDS2", 4, Mod_IDS2_Load},
-	{NULL, "\035", 1, Mod_Q1BSP_Load},
-	{NULL, "\036", 1, Mod_HLBSP_Load},
-	{NULL, "BSP2", 4, Mod_BSP2_Load},
-	{NULL, "2PSB", 4, Mod_2PSB_Load},
-	{NULL, "IBSP", 4, Mod_IBSP_Load},
-	{NULL, "VBSP", 4, Mod_VBSP_Load},
-	{NULL, "ZYMOTICMODEL", 13, Mod_ZYMOTICMODEL_Load},
-	{NULL, "DARKPLACESMODEL", 16, Mod_DARKPLACESMODEL_Load},
-	{NULL, "ACTRHEAD", 9, Mod_PSKMODEL_Load},
-	{NULL, "INTERQUAKEMODEL", 16, Mod_INTERQUAKEMODEL_Load},
-	{"map", NULL, 0, Mod_MAP_Load},
-	{NULL, NULL, 0, NULL}
-};
+dp_model_t *loadmodel;
 
 static mempool_t *mod_mempool;
 static memexpandablearray_t models;
@@ -71,7 +49,7 @@ static memexpandablearray_t models;
 static mempool_t* q3shaders_mem;
 typedef struct q3shader_hash_entry_s
 {
-  shader_t shader;
+  q3shaderinfo_t shader;
   struct q3shader_hash_entry_s* chain;
 } q3shader_hash_entry_t;
 #define Q3SHADER_HASH_SIZE  1021
@@ -87,19 +65,19 @@ static void mod_start(void)
 {
 	int i, count;
 	int nummodels = (int)Mem_ExpandableArray_IndexRange(&models);
-	model_t *mod;
+	dp_model_t *mod;
 
-	SCR_PushLoadingScreen("Loading models", 1.0);
+	SCR_PushLoadingScreen(false, "Loading models", 1.0);
 	count = 0;
 	for (i = 0;i < nummodels;i++)
-		if ((mod = (model_t*) Mem_ExpandableArray_RecordAtIndex(&models, i)) && mod->name[0] && mod->name[0] != '*')
+		if ((mod = (dp_model_t*) Mem_ExpandableArray_RecordAtIndex(&models, i)) && mod->name[0] && mod->name[0] != '*')
 			if (mod->used)
 				++count;
 	for (i = 0;i < nummodels;i++)
-		if ((mod = (model_t*) Mem_ExpandableArray_RecordAtIndex(&models, i)) && mod->name[0] && mod->name[0] != '*')
+		if ((mod = (dp_model_t*) Mem_ExpandableArray_RecordAtIndex(&models, i)) && mod->name[0] && mod->name[0] != '*')
 			if (mod->used)
 			{
-				SCR_PushLoadingScreen(mod->name, 1.0 / count);
+				SCR_PushLoadingScreen(true, mod->name, 1.0 / count);
 				Mod_LoadModel(mod, true, false);
 				SCR_PopLoadingScreen(false);
 			}
@@ -110,10 +88,10 @@ static void mod_shutdown(void)
 {
 	int i;
 	int nummodels = (int)Mem_ExpandableArray_IndexRange(&models);
-	model_t *mod;
+	dp_model_t *mod;
 
 	for (i = 0;i < nummodels;i++)
-		if ((mod = (model_t*) Mem_ExpandableArray_RecordAtIndex(&models, i)) && (mod->loaded || mod->mempool))
+		if ((mod = (dp_model_t*) Mem_ExpandableArray_RecordAtIndex(&models, i)) && (mod->loaded || mod->mempool))
 			Mod_UnloadModel(mod);
 
 	Mod_FreeQ3Shaders();
@@ -125,11 +103,11 @@ static void mod_newmap(void)
 	msurface_t *surface;
 	int i, j, k, l, surfacenum, ssize, tsize;
 	int nummodels = (int)Mem_ExpandableArray_IndexRange(&models);
-	model_t *mod;
+	dp_model_t *mod;
 
 	for (i = 0;i < nummodels;i++)
 	{
-		if ((mod = (model_t*) Mem_ExpandableArray_RecordAtIndex(&models, i)) && mod->mempool)
+		if ((mod = (dp_model_t*) Mem_ExpandableArray_RecordAtIndex(&models, i)) && mod->mempool)
 		{
 			for (j = 0;j < mod->num_textures && mod->data_textures;j++)
 			{
@@ -151,7 +129,7 @@ static void mod_newmap(void)
 
 	for (i = 0;i < nummodels;i++)
 	{
-		if ((mod = (model_t*) Mem_ExpandableArray_RecordAtIndex(&models, i)) && mod->mempool && mod->data_surfaces)
+		if ((mod = (dp_model_t*) Mem_ExpandableArray_RecordAtIndex(&models, i)) && mod->mempool && mod->data_surfaces)
 		{
 			for (surfacenum = 0, surface = mod->data_surfaces;surfacenum < mod->num_surfaces;surfacenum++, surface++)
 			{
@@ -172,20 +150,23 @@ static void mod_newmap(void)
 Mod_Init
 ===============
 */
-static void Mod_Print_f(cmd_state_t *cmd);
-static void Mod_Precache_f(cmd_state_t *cmd);
-static void Mod_Decompile_f(cmd_state_t *cmd);
-static void Mod_GenerateLightmaps_f(cmd_state_t *cmd);
+static void Mod_Print(void);
+static void Mod_Precache (void);
+static void Mod_Decompile_f(void);
+static void Mod_GenerateLightmaps_f(void);
 extern cvar_t mod_lazyload_budget;
 void Mod_Init (void)
 {
 	mod_mempool = Mem_AllocPool("modelinfo", 0, NULL);
-	Mem_ExpandableArray_NewArray(&models, mod_mempool, sizeof(model_t), 16);
+	Mem_ExpandableArray_NewArray(&models, mod_mempool, sizeof(dp_model_t), 16);
 
 	Mod_BrushInit();
 	Mod_AliasInit();
 	Mod_SpriteInit();
 
+	Cvar_RegisterVariable(&r_enableshadowvolumes);
+	Cvar_RegisterVariable(&mod_lazyload);
+	Cvar_RegisterVariable(&mod_lazyload_budget);
 	Cvar_RegisterVariable(&r_mipskins);
 	Cvar_RegisterVariable(&r_mipnormalmaps);
 	Cvar_RegisterVariable(&mod_generatelightmaps_unitspersample);
@@ -198,13 +179,11 @@ void Mod_Init (void)
 	Cvar_RegisterVariable(&mod_generatelightmaps_lightmapradius);
 	Cvar_RegisterVariable(&mod_generatelightmaps_vertexradius);
 	Cvar_RegisterVariable(&mod_generatelightmaps_gridradius);
-	Cvar_RegisterVariable(&mod_lazyload);
-	Cvar_RegisterVariable(&mod_lazyload_budget);
 
-	Cmd_AddCommand(CF_CLIENT, "modellist", Mod_Print_f, "prints a list of loaded models");
-	Cmd_AddCommand(CF_CLIENT, "modelprecache", Mod_Precache_f, "load a model");
-	Cmd_AddCommand(CF_CLIENT, "modeldecompile", Mod_Decompile_f, "exports a model in several formats for editing purposes");
-	Cmd_AddCommand(CF_CLIENT, "mod_generatelightmaps", Mod_GenerateLightmaps_f, "rebuilds lighting on current worldmodel");
+	Cmd_AddCommand ("modellist", Mod_Print, "prints a list of loaded models");
+	Cmd_AddCommand ("modelprecache", Mod_Precache, "load a model");
+	Cmd_AddCommand ("modeldecompile", Mod_Decompile_f, "exports a model in several formats for editing purposes");
+	Cmd_AddCommand ("mod_generatelightmaps", Mod_GenerateLightmaps_f, "rebuilds lighting on current worldmodel");
 }
 
 void Mod_RenderInit(void)
@@ -212,45 +191,37 @@ void Mod_RenderInit(void)
 	R_RegisterModule("Models", mod_start, mod_shutdown, mod_newmap, NULL, NULL);
 }
 
-void Mod_UnloadModel (model_t *mod)
+void Mod_UnloadModel (dp_model_t *mod)
 {
 	char name[MAX_QPATH];
-	qbool used;
-	model_t *parentmodel;
+	qboolean used;
+	dp_model_t *parentmodel;
 
 	if (developer_loading.integer)
 		Con_Printf("unloading model %s\n", mod->name);
 
-	dp_strlcpy(name, mod->name, sizeof(name));
+	strlcpy(name, mod->name, sizeof(name));
 	parentmodel = mod->brush.parentmodel;
 	used = mod->used;
 	if (mod->mempool)
 	{
-		if (mod->surfmesh.data_element3i_indexbuffer && !mod->surfmesh.data_element3i_indexbuffer->isdynamic)
+		if (mod->surfmesh.data_element3i_indexbuffer)
 			R_Mesh_DestroyMeshBuffer(mod->surfmesh.data_element3i_indexbuffer);
 		mod->surfmesh.data_element3i_indexbuffer = NULL;
-		if (mod->surfmesh.data_element3s_indexbuffer && !mod->surfmesh.data_element3s_indexbuffer->isdynamic)
+		if (mod->surfmesh.data_element3s_indexbuffer)
 			R_Mesh_DestroyMeshBuffer(mod->surfmesh.data_element3s_indexbuffer);
 		mod->surfmesh.data_element3s_indexbuffer = NULL;
-		if (mod->surfmesh.data_vertex3f_vertexbuffer && !mod->surfmesh.data_vertex3f_vertexbuffer->isdynamic)
-			R_Mesh_DestroyMeshBuffer(mod->surfmesh.data_vertex3f_vertexbuffer);
-		mod->surfmesh.data_vertex3f_vertexbuffer = NULL;
-		mod->surfmesh.data_svector3f_vertexbuffer = NULL;
-		mod->surfmesh.data_tvector3f_vertexbuffer = NULL;
-		mod->surfmesh.data_normal3f_vertexbuffer = NULL;
-		mod->surfmesh.data_texcoordtexture2f_vertexbuffer = NULL;
-		mod->surfmesh.data_texcoordlightmap2f_vertexbuffer = NULL;
-		mod->surfmesh.data_lightmapcolor4f_vertexbuffer = NULL;
-		mod->surfmesh.data_skeletalindex4ub_vertexbuffer = NULL;
-		mod->surfmesh.data_skeletalweight4ub_vertexbuffer = NULL;
+		if (mod->surfmesh.vbo_vertexbuffer)
+			R_Mesh_DestroyMeshBuffer(mod->surfmesh.vbo_vertexbuffer);
+		mod->surfmesh.vbo_vertexbuffer = NULL;
 	}
 	// free textures/memory attached to the model
 	R_FreeTexturePool(&mod->texturepool);
 	Mem_FreePool(&mod->mempool);
 	// clear the struct to make it available
-	memset(mod, 0, sizeof(model_t));
+	memset(mod, 0, sizeof(dp_model_t));
 	// restore the fields we want to preserve
-	dp_strlcpy(mod->name, name, sizeof(mod->name));
+	strlcpy(mod->name, name, sizeof(mod->name));
 	mod->brush.parentmodel = parentmodel;
 	mod->used = used;
 	mod->loaded = false;
@@ -262,7 +233,7 @@ static void R_Model_Null_Draw(entity_render_t *ent)
 }
 
 
-typedef void (*mod_framegroupify_parsegroups_t) (unsigned int i, int start, int len, float fps, qbool loop, const char *name, void *pass);
+typedef void (*mod_framegroupify_parsegroups_t) (unsigned int i, int start, int len, float fps, qboolean loop, const char *name, void *pass);
 
 static int Mod_FrameGroupify_ParseGroups(const char *buf, mod_framegroupify_parsegroups_t cb, void *pass)
 {
@@ -270,7 +241,7 @@ static int Mod_FrameGroupify_ParseGroups(const char *buf, mod_framegroupify_pars
 	int start, len;
 	float fps;
 	unsigned int i;
-	qbool loop;
+	qboolean loop;
 	char name[64];
 
 	bufptr = buf;
@@ -319,7 +290,7 @@ static int Mod_FrameGroupify_ParseGroups(const char *buf, mod_framegroupify_pars
 		name[0] = 0;
 		if (bufptr && strcmp(com_token, "\n"))
 		{
-			dp_strlcpy(name, com_token, sizeof(name));
+			strlcpy(name, com_token, sizeof(name));
 			COM_ParseToken_Simple(&bufptr, true, false, true);
 		}
 
@@ -337,12 +308,12 @@ static int Mod_FrameGroupify_ParseGroups(const char *buf, mod_framegroupify_pars
 	return i;
 }
 
-static void Mod_FrameGroupify_ParseGroups_Store (unsigned int i, int start, int len, float fps, qbool loop, const char *name, void *pass)
+static void Mod_FrameGroupify_ParseGroups_Store (unsigned int i, int start, int len, float fps, qboolean loop, const char *name, void *pass)
 {
-	model_t *mod = (model_t *) pass;
+	dp_model_t *mod = (dp_model_t *) pass;
 	animscene_t *anim = &mod->animscenes[i];
 	if(name)
-		dp_strlcpy(anim->name, name, sizeof(anim[i].name));
+		strlcpy(anim->name, name, sizeof(anim[i].name));
 	else
 		dpsnprintf(anim->name, sizeof(anim[i].name), "groupified_%d_anim", i);
 	anim->firstframe = bound(0, start, mod->num_poses - 1);
@@ -352,7 +323,7 @@ static void Mod_FrameGroupify_ParseGroups_Store (unsigned int i, int start, int 
 	//Con_Printf("frame group %d is %d %d %f %d\n", i, start, len, fps, loop);
 }
 
-static void Mod_FrameGroupify(model_t *mod, const char *buf)
+static void Mod_FrameGroupify(dp_model_t *mod, const char *buf)
 {
 	unsigned int cnt;
 
@@ -373,7 +344,7 @@ static void Mod_FrameGroupify(model_t *mod, const char *buf)
 	Mod_FrameGroupify_ParseGroups(buf, Mod_FrameGroupify_ParseGroups_Store, mod);
 }
 
-static void Mod_FindPotentialDeforms(model_t *mod)
+static void Mod_FindPotentialDeforms(dp_model_t *mod)
 {
 	int i, j;
 	texture_t *texture;
@@ -407,17 +378,18 @@ Mod_LoadModel
 Loads a model
 ==================
 */
-static model_t *Mod_LoadModel_Inner(model_t *mod, qbool crash, qbool checkdisk);
-model_t *Mod_LoadModel(model_t *mod, qbool crash, qbool checkdisk)
+static dp_model_t *Mod_LoadModel_Inner(dp_model_t *mod, qboolean crash, qboolean checkdisk);
+dp_model_t *Mod_LoadModel(dp_model_t *mod, qboolean crash, qboolean checkdisk)
 {
 	double t = Sys_DirtyTime();
-	model_t *r = Mod_LoadModel_Inner(mod, crash, checkdisk);
+	dp_model_t *r = Mod_LoadModel_Inner(mod, crash, checkdisk);
 	loadtimes.models += Sys_DirtyTime() - t;
 	loadtimes.models_count++;
 	return r;
 }
-static model_t *Mod_LoadModel_Inner(model_t *mod, qbool crash, qbool checkdisk)
+static dp_model_t *Mod_LoadModel_Inner(dp_model_t *mod, qboolean crash, qboolean checkdisk)
 {
+	int num;
 	unsigned int crc;
 	void *buf;
 	fs_offset_t filesize = 0;
@@ -493,9 +465,9 @@ static model_t *Mod_LoadModel_Inner(model_t *mod, qbool crash, qbool checkdisk)
 	if (developer_loading.integer)
 		Con_Printf("loading model %s\n", mod->name);
 	
-	SCR_PushLoadingScreen(mod->name, 1);
+	SCR_PushLoadingScreen(true, mod->name, 1);
 
-	// LadyHavoc: unload the existing model in this slot (if there is one)
+	// LordHavoc: unload the existing model in this slot (if there is one)
 	if (mod->loaded || mod->mempool)
 		Mod_UnloadModel(mod);
 
@@ -525,46 +497,46 @@ static model_t *Mod_LoadModel_Inner(model_t *mod, qbool crash, qbool checkdisk)
 
 	if (buf)
 	{
-		int i;
-		const char *ext = FS_FileExtension(mod->name);	
 		char *bufend = (char *)buf + filesize;
+
 		// all models use memory, so allocate a memory pool
 		mod->mempool = Mem_AllocPool(mod->name, 0, NULL);
 
-		// We need to have a reference to the base model in case we're parsing submodels
+		num = LittleLong(*((int *)buf));
+		// call the apropriate loader
 		loadmodel = mod;
+		if (!strcasecmp(FS_FileExtension(mod->name), "obj")) Mod_OBJ_Load(mod, buf, bufend);
+		else if (!memcmp(buf, "IDPO", 4)) Mod_IDP0_Load(mod, buf, bufend);
+		else if (!memcmp(buf, "IDP2", 4)) Mod_IDP2_Load(mod, buf, bufend);
+		else if (!memcmp(buf, "IDP3", 4)) Mod_IDP3_Load(mod, buf, bufend);
+		else if (!memcmp(buf, "IDSP", 4)) Mod_IDSP_Load(mod, buf, bufend);
+		else if (!memcmp(buf, "IDS2", 4)) Mod_IDS2_Load(mod, buf, bufend);
+		else if (!memcmp(buf, "IBSP", 4)) Mod_IBSP_Load(mod, buf, bufend);
+		else if (!memcmp(buf, "ZYMOTICMODEL", 12)) Mod_ZYMOTICMODEL_Load(mod, buf, bufend);
+		else if (!memcmp(buf, "DARKPLACESMODEL", 16)) Mod_DARKPLACESMODEL_Load(mod, buf, bufend);
+		else if (!memcmp(buf, "ACTRHEAD", 8)) Mod_PSKMODEL_Load(mod, buf, bufend);
+		else if (!memcmp(buf, "INTERQUAKEMODEL", 16)) Mod_INTERQUAKEMODEL_Load(mod, buf, bufend);
+		else if (strlen(mod->name) >= 4 && !strcmp(mod->name + strlen(mod->name) - 4, ".map")) Mod_MAP_Load(mod, buf, bufend);
+		else if (num == BSPVERSION || num == 30 || !memcmp(buf, "BSP2", 4) || !memcmp(buf, "2PSB", 4)) Mod_Q1BSP_Load(mod, buf, bufend);
+		else Con_Printf("Mod_LoadModel: model \"%s\" is of unknown/unsupported type\n", mod->name);
+		Mem_Free(buf);
 
-		// Call the appropriate loader. Try matching magic bytes.
-		for (i = 0; loader[i].Load; i++)
+		Mod_FindPotentialDeforms(mod);
+
+		buf = FS_LoadFile(va(vabuf, sizeof(vabuf), "%s.framegroups", mod->name), tempmempool, false, &filesize);
+		if(buf)
 		{
-			// Headerless formats can just load based on extension. Otherwise match the magic string.
-			if((loader[i].extension && !strcasecmp(ext, loader[i].extension) && !loader[i].header) ||
-			   (loader[i].header && !memcmp(buf, loader[i].header, loader[i].headersize)))
-			{
-				// Matched. Load it.
-				loader[i].Load(mod, buf, bufend);
-				Mem_Free(buf);
-
-				Mod_FindPotentialDeforms(mod);
-
-				buf = FS_LoadFile(va(vabuf, sizeof(vabuf), "%s.framegroups", mod->name), tempmempool, false, &filesize);
-				if(buf)
-				{
-					Mod_FrameGroupify(mod, (const char *)buf);
-					Mem_Free(buf);
-				}
-
-				Mod_SetDrawSkyAndWater(mod);
-				Mod_BuildVBOs();
-				break;
-			}
+			Mod_FrameGroupify(mod, (const char *)buf);
+			Mem_Free(buf);
 		}
-		if(!loader[i].Load)
-			Con_Printf(CON_ERROR "Mod_LoadModel: model \"%s\" is of unknown/unsupported type\n", mod->name);
+
+		Mod_BuildVBOs();
 	}
 	else if (crash)
-		// LadyHavoc: Sys_Error was *ANNOYING*
-		Con_Printf (CON_ERROR "Mod_LoadModel: %s not found\n", mod->name);
+	{
+		// LordHavoc: Sys_Error was *ANNOYING*
+		Con_Printf ("Mod_LoadModel: %s not found\n", mod->name);
+	}
 
 	// no fatal errors occurred, so this model is ready to use.
 	mod->loaded = true;
@@ -578,16 +550,16 @@ void Mod_ClearUsed(void)
 {
 	int i;
 	int nummodels = (int)Mem_ExpandableArray_IndexRange(&models);
-	model_t *mod;
+	dp_model_t *mod;
 	for (i = 0;i < nummodels;i++)
-		if ((mod = (model_t*) Mem_ExpandableArray_RecordAtIndex(&models, i)) && mod->name[0])
+		if ((mod = (dp_model_t*) Mem_ExpandableArray_RecordAtIndex(&models, i)) && mod->name[0])
 			mod->used = false;
 }
 
-cvar_t mod_lazyload = {CF_CLIENT | CF_ARCHIVE, "mod_lazyload", "1", "precached models load on first use, the rest in the background after the map started (Insanotic; 0 = load everything up front like stock DarkPlaces)"};
-cvar_t mod_lazyload_budget = {CF_CLIENT | CF_ARCHIVE, "mod_lazyload_budget", "2", "milliseconds per frame spent loading not yet used models in the background"};
+cvar_t mod_lazyload = {CVAR_SAVE, "mod_lazyload", "1", "precached models load on first use, the rest in the background after the map started (Insanotic; 0 = load everything up front like stock DarkPlaces)"};
+cvar_t mod_lazyload_budget = {CVAR_SAVE, "mod_lazyload_budget", "2", "milliseconds per frame spent loading not yet used models in the background"};
 
-model_t *Mod_Ensure(model_t *mod)
+dp_model_t *Mod_Ensure(dp_model_t *mod)
 {
 	if (mod && !mod->loaded && mod->name[0])
 		Mod_LoadModel(mod, false, false);
@@ -598,12 +570,12 @@ void Mod_LoadPending(double budget_seconds)
 {
 	int i, nummodels = (int)Mem_ExpandableArray_IndexRange(&models);
 	double start = Sys_DirtyTime();
-	model_t *mod;
+	dp_model_t *mod;
 	if (budget_seconds <= 0)
 		budget_seconds = mod_lazyload_budget.value * 0.001;
 	for (i = 0; i < nummodels; i++)
 	{
-		if ((mod = (model_t*) Mem_ExpandableArray_RecordAtIndex(&models, i)) && mod->name[0] && mod->used && !mod->loaded)
+		if ((mod = (dp_model_t*) Mem_ExpandableArray_RecordAtIndex(&models, i)) && mod->name[0] && mod->used && !mod->loaded)
 		{
 			Mod_LoadModel(mod, false, false);
 			if (Sys_DirtyTime() - start >= budget_seconds)
@@ -616,10 +588,10 @@ void Mod_PurgeUnused(void)
 {
 	int i;
 	int nummodels = (int)Mem_ExpandableArray_IndexRange(&models);
-	model_t *mod;
+	dp_model_t *mod;
 	for (i = 0;i < nummodels;i++)
 	{
-		if ((mod = (model_t*) Mem_ExpandableArray_RecordAtIndex(&models, i)) && mod->name[0] && !mod->used)
+		if ((mod = (dp_model_t*) Mem_ExpandableArray_RecordAtIndex(&models, i)) && mod->name[0] && !mod->used)
 		{
 			Mod_UnloadModel(mod);
 			Mem_ExpandableArray_FreeRecord(&models, mod);
@@ -633,14 +605,17 @@ Mod_FindName
 
 ==================
 */
-model_t *Mod_FindName(const char *name, const char *parentname)
+dp_model_t *Mod_FindName(const char *name, const char *parentname)
 {
 	int i;
 	int nummodels;
-	model_t *mod;
+	dp_model_t *mod;
 
 	if (!parentname)
 		parentname = "";
+
+	// if we're not dedicatd, the renderer calls will crash without video
+	Host_StartVideo();
 
 	nummodels = (int)Mem_ExpandableArray_IndexRange(&models);
 
@@ -650,7 +625,7 @@ model_t *Mod_FindName(const char *name, const char *parentname)
 	// search the currently loaded models
 	for (i = 0;i < nummodels;i++)
 	{
-		if ((mod = (model_t*) Mem_ExpandableArray_RecordAtIndex(&models, i)) && mod->name[0] && !strcmp(mod->name, name) && ((!mod->brush.parentmodel && !parentname[0]) || (mod->brush.parentmodel && parentname[0] && !strcmp(mod->brush.parentmodel->name, parentname))))
+		if ((mod = (dp_model_t*) Mem_ExpandableArray_RecordAtIndex(&models, i)) && mod->name[0] && !strcmp(mod->name, name) && ((!mod->brush.parentmodel && !parentname[0]) || (mod->brush.parentmodel && parentname[0] && !strcmp(mod->brush.parentmodel->name, parentname))))
 		{
 			mod->used = true;
 			return mod;
@@ -658,8 +633,8 @@ model_t *Mod_FindName(const char *name, const char *parentname)
 	}
 
 	// no match found, create a new one
-	mod = (model_t *) Mem_ExpandableArray_AllocRecord(&models);
-	dp_strlcpy(mod->name, name, sizeof(mod->name));
+	mod = (dp_model_t *) Mem_ExpandableArray_AllocRecord(&models);
+	strlcpy(mod->name, name, sizeof(mod->name));
 	if (parentname[0])
 		mod->brush.parentmodel = Mod_FindName(parentname, NULL);
 	else
@@ -669,8 +644,6 @@ model_t *Mod_FindName(const char *name, const char *parentname)
 	return mod;
 }
 
-extern qbool vid_opened;
-
 /*
 ==================
 Mod_ForName
@@ -678,14 +651,9 @@ Mod_ForName
 Loads in a model for the given name
 ==================
 */
-model_t *Mod_ForName(const char *name, qbool crash, qbool checkdisk, const char *parentname)
+dp_model_t *Mod_ForName(const char *name, qboolean crash, qboolean checkdisk, const char *parentname)
 {
-	model_t *model;
-
-	// FIXME: So we don't crash if a server is started early.
-	if(!vid_opened)
-		CL_StartVideo();
-
+	dp_model_t *model;
 	model = Mod_FindName(name, parentname);
 	if (!model->loaded || checkdisk)
 		Mod_LoadModel(model, crash, checkdisk);
@@ -703,17 +671,17 @@ void Mod_Reload(void)
 {
 	int i, count;
 	int nummodels = (int)Mem_ExpandableArray_IndexRange(&models);
-	model_t *mod;
+	dp_model_t *mod;
 
-	SCR_PushLoadingScreen("Reloading models", 1.0);
+	SCR_PushLoadingScreen(false, "Reloading models", 1.0);
 	count = 0;
 	for (i = 0;i < nummodels;i++)
-		if ((mod = (model_t *) Mem_ExpandableArray_RecordAtIndex(&models, i)) && mod->name[0] && mod->name[0] != '*' && mod->used)
+		if ((mod = (dp_model_t *) Mem_ExpandableArray_RecordAtIndex(&models, i)) && mod->name[0] && mod->name[0] != '*' && mod->used)
 			++count;
 	for (i = 0;i < nummodels;i++)
-		if ((mod = (model_t *) Mem_ExpandableArray_RecordAtIndex(&models, i)) && mod->name[0] && mod->name[0] != '*' && mod->used)
+		if ((mod = (dp_model_t *) Mem_ExpandableArray_RecordAtIndex(&models, i)) && mod->name[0] && mod->name[0] != '*' && mod->used)
 		{
-			SCR_PushLoadingScreen(mod->name, 1.0 / count);
+			SCR_PushLoadingScreen(true, mod->name, 1.0 / count);
 			Mod_LoadModel(mod, true, true);
 			SCR_PopLoadingScreen(false);
 		}
@@ -730,16 +698,16 @@ unsigned char *mod_base;
 Mod_Print
 ================
 */
-static void Mod_Print_f(cmd_state_t *cmd)
+static void Mod_Print(void)
 {
 	int i;
 	int nummodels = (int)Mem_ExpandableArray_IndexRange(&models);
-	model_t *mod;
+	dp_model_t *mod;
 
 	Con_Print("Loaded models:\n");
 	for (i = 0;i < nummodels;i++)
 	{
-		if ((mod = (model_t *) Mem_ExpandableArray_RecordAtIndex(&models, i)) && mod->name[0] && mod->name[0] != '*')
+		if ((mod = (dp_model_t *) Mem_ExpandableArray_RecordAtIndex(&models, i)) && mod->name[0] && mod->name[0] != '*')
 		{
 			if (mod->brush.numsubmodels)
 				Con_Printf("%4iK %s (%i submodels)\n", mod->mempool ? (int)((mod->mempool->totalsize + 1023) / 1024) : 0, mod->name, mod->brush.numsubmodels);
@@ -754,10 +722,10 @@ static void Mod_Print_f(cmd_state_t *cmd)
 Mod_Precache
 ================
 */
-static void Mod_Precache_f(cmd_state_t *cmd)
+static void Mod_Precache(void)
 {
-	if (Cmd_Argc(cmd) == 2)
-		Mod_ForName(Cmd_Argv(cmd, 1), false, true, Cmd_Argv(cmd, 1)[0] == '*' ? cl.model_name[1] : NULL);
+	if (Cmd_Argc() == 2)
+		Mod_ForName(Cmd_Argv(1), false, true, Cmd_Argv(1)[0] == '*' ? cl.model_name[1] : NULL);
 	else
 		Con_Print("usage: modelprecache <filename>\n");
 }
@@ -776,75 +744,138 @@ int Mod_BuildVertexRemapTableFromElements(int numelements, const int *elements, 
 	return count;
 }
 
-qbool Mod_ValidateElements(int *element3i, unsigned short *element3s, int numtriangles, int firstvertex, int numvertices, const char *filename, int fileline)
+#if 1
+// fast way, using an edge hash
+#define TRIANGLEEDGEHASH 8192
+void Mod_BuildTriangleNeighbors(int *neighbors, const int *elements, int numtriangles)
 {
-	int first = firstvertex, last = first + numvertices - 1, numelements = numtriangles * 3;
-	int i;
-	int invalidintcount = 0, invalidintexample = 0;
-	int invalidshortcount = 0, invalidshortexample = 0;
-	int invalidmismatchcount = 0, invalidmismatchexample = 0;
-	if (element3i)
+	int i, j, p, e1, e2, *n, hashindex, count, match;
+	const int *e;
+	typedef struct edgehashentry_s
 	{
-		for (i = 0; i < numelements; i++)
+		struct edgehashentry_s *next;
+		int triangle;
+		int element[2];
+	}
+	edgehashentry_t;
+	static edgehashentry_t **edgehash;
+	edgehashentry_t *edgehashentries, *hash;
+	if (!numtriangles)
+		return;
+	edgehash = (edgehashentry_t **)Mem_Alloc(tempmempool, TRIANGLEEDGEHASH * sizeof(*edgehash));
+	// if there are too many triangles for the stack array, allocate larger buffer
+	edgehashentries = (edgehashentry_t *)Mem_Alloc(tempmempool, numtriangles * 3 * sizeof(edgehashentry_t));
+	// find neighboring triangles
+	for (i = 0, e = elements, n = neighbors;i < numtriangles;i++, e += 3, n += 3)
+	{
+		for (j = 0, p = 2;j < 3;p = j, j++)
 		{
-			if (element3i[i] < first || element3i[i] > last)
-			{
-				invalidintcount++;
-				invalidintexample = i;
-			}
+			e1 = e[p];
+			e2 = e[j];
+			// this hash index works for both forward and backward edges
+			hashindex = (unsigned int)(e1 + e2) % TRIANGLEEDGEHASH;
+			hash = edgehashentries + i * 3 + j;
+			hash->next = edgehash[hashindex];
+			edgehash[hashindex] = hash;
+			hash->triangle = i;
+			hash->element[0] = e1;
+			hash->element[1] = e2;
 		}
 	}
-	if (element3s)
+	for (i = 0, e = elements, n = neighbors;i < numtriangles;i++, e += 3, n += 3)
 	{
-		for (i = 0; i < numelements; i++)
+		for (j = 0, p = 2;j < 3;p = j, j++)
 		{
-			if (element3s[i] < first || element3s[i] > last)
+			e1 = e[p];
+			e2 = e[j];
+			// this hash index works for both forward and backward edges
+			hashindex = (unsigned int)(e1 + e2) % TRIANGLEEDGEHASH;
+			count = 0;
+			match = -1;
+			for (hash = edgehash[hashindex];hash;hash = hash->next)
 			{
-				invalidintcount++;
-				invalidintexample = i;
+				if (hash->element[0] == e2 && hash->element[1] == e1)
+				{
+					if (hash->triangle != i)
+						match = hash->triangle;
+					count++;
+				}
+				else if ((hash->element[0] == e1 && hash->element[1] == e2))
+					count++;
 			}
+			// detect edges shared by three triangles and make them seams
+			if (count > 2)
+				match = -1;
+			n[p] = match;
 		}
-	}
-	if (element3i && element3s)
-	{
-		for (i = 0; i < numelements; i++)
-		{
-			if (element3s[i] != element3i[i])
-			{
-				invalidmismatchcount++;
-				invalidmismatchexample = i;
-			}
-		}
-	}
-	if (invalidintcount || invalidshortcount || invalidmismatchcount)
-	{
-		Con_Printf("Mod_ValidateElements(%i, %i, %i, %p, %p) called at %s:%d", numelements, first, last, (void *)element3i, (void *)element3s, filename, fileline);
-		Con_Printf(", %i elements are invalid in element3i (example: element3i[%i] == %i)", invalidintcount, invalidintexample, element3i ? element3i[invalidintexample] : 0);
-		Con_Printf(", %i elements are invalid in element3s (example: element3s[%i] == %i)", invalidshortcount, invalidshortexample, element3s ? element3s[invalidshortexample] : 0);
-		Con_Printf(", %i elements mismatch between element3i and element3s (example: element3s[%i] is %i and element3i[%i] is %i)", invalidmismatchcount, invalidmismatchexample, element3s ? element3s[invalidmismatchexample] : 0, invalidmismatchexample, element3i ? element3i[invalidmismatchexample] : 0);
-		Con_Print(".  Please debug the engine code - these elements have been modified to not crash, but nothing more.\n");
 
-		// edit the elements to make them safer, as the driver will crash otherwise
-		if (element3i)
-			for (i = 0; i < numelements; i++)
-				if (element3i[i] < first || element3i[i] > last)
-					element3i[i] = first;
-		if (element3s)
-			for (i = 0; i < numelements; i++)
-				if (element3s[i] < first || element3s[i] > last)
-					element3s[i] = first;
-		if (element3i && element3s)
-			for (i = 0; i < numelements; i++)
-				if (element3s[i] != element3i[i])
-					element3s[i] = element3i[i];
-
-		return false;
+		// also send a keepalive here (this can take a while too!)
+		CL_KeepaliveMessage(false);
 	}
-	return true;
+	// free the allocated buffer
+	Mem_Free(edgehashentries);
+	Mem_Free(edgehash);
+}
+#else
+// very slow but simple way
+static int Mod_FindTriangleWithEdge(const int *elements, int numtriangles, int start, int end, int ignore)
+{
+	int i, match, count;
+	count = 0;
+	match = -1;
+	for (i = 0;i < numtriangles;i++, elements += 3)
+	{
+		     if ((elements[0] == start && elements[1] == end)
+		      || (elements[1] == start && elements[2] == end)
+		      || (elements[2] == start && elements[0] == end))
+		{
+			if (i != ignore)
+				match = i;
+			count++;
+		}
+		else if ((elements[1] == start && elements[0] == end)
+		      || (elements[2] == start && elements[1] == end)
+		      || (elements[0] == start && elements[2] == end))
+			count++;
+	}
+	// detect edges shared by three triangles and make them seams
+	if (count > 2)
+		match = -1;
+	return match;
+}
+
+void Mod_BuildTriangleNeighbors(int *neighbors, const int *elements, int numtriangles)
+{
+	int i, *n;
+	const int *e;
+	for (i = 0, e = elements, n = neighbors;i < numtriangles;i++, e += 3, n += 3)
+	{
+		n[0] = Mod_FindTriangleWithEdge(elements, numtriangles, e[1], e[0], i);
+		n[1] = Mod_FindTriangleWithEdge(elements, numtriangles, e[2], e[1], i);
+		n[2] = Mod_FindTriangleWithEdge(elements, numtriangles, e[0], e[2], i);
+	}
+}
+#endif
+
+void Mod_ValidateElements(int *elements, int numtriangles, int firstvertex, int numverts, const char *filename, int fileline)
+{
+	int i, warned = false, endvertex = firstvertex + numverts;
+	for (i = 0;i < numtriangles * 3;i++)
+	{
+		if (elements[i] < firstvertex || elements[i] >= endvertex)
+		{
+			if (!warned)
+			{
+				warned = true;
+				Con_Printf("Mod_ValidateElements: out of bounds elements detected at %s:%d\n", filename, fileline);
+			}
+			elements[i] = firstvertex;
+		}
+	}
 }
 
 // warning: this is an expensive function!
-void Mod_BuildNormals(int firstvertex, int numvertices, int numtriangles, const float *vertex3f, const int *elements, float *normal3f, qbool areaweighting)
+void Mod_BuildNormals(int firstvertex, int numvertices, int numtriangles, const float *vertex3f, const int *elements, float *normal3f, qboolean areaweighting)
 {
 	int i, j;
 	const int *element;
@@ -931,7 +962,7 @@ static void Mod_BuildBumpVectors(const float *v0, const float *v1, const float *
 #endif
 
 // warning: this is a very expensive function!
-void Mod_BuildTextureVectorsFromNormals(int firstvertex, int numvertices, int numtriangles, const float *vertex3f, const float *texcoord2f, const float *normal3f, const int *elements, float *svector3f, float *tvector3f, qbool areaweighting)
+void Mod_BuildTextureVectorsFromNormals(int firstvertex, int numvertices, int numtriangles, const float *vertex3f, const float *texcoord2f, const float *normal3f, const int *elements, float *svector3f, float *tvector3f, qboolean areaweighting)
 {
 	int i, tnum;
 	float sdir[3], tdir[3], normal[3], *svec, *tvec;
@@ -1011,10 +1042,10 @@ void Mod_BuildTextureVectorsFromNormals(int firstvertex, int numvertices, int nu
 	}
 }
 
-void Mod_AllocSurfMesh(mempool_t *mempool, int numvertices, int numtriangles, qbool lightmapoffsets, qbool vertexcolors)
+void Mod_AllocSurfMesh(mempool_t *mempool, int numvertices, int numtriangles, qboolean lightmapoffsets, qboolean vertexcolors, qboolean neighbors)
 {
 	unsigned char *data;
-	data = (unsigned char *)Mem_Alloc(mempool, numvertices * (3 + 3 + 3 + 3 + 2 + 2 + (vertexcolors ? 4 : 0)) * sizeof(float) + numvertices * (lightmapoffsets ? 1 : 0) * sizeof(int) + numtriangles * sizeof(int[3]) + (numvertices <= 65536 ? numtriangles * sizeof(unsigned short[3]) : 0));
+	data = (unsigned char *)Mem_Alloc(mempool, numvertices * (3 + 3 + 3 + 3 + 2 + 2 + (vertexcolors ? 4 : 0)) * sizeof(float) + numvertices * (lightmapoffsets ? 1 : 0) * sizeof(int) + numtriangles * (3 + (neighbors ? 3 : 0)) * sizeof(int) + (numvertices <= 65536 ? numtriangles * sizeof(unsigned short[3]) : 0));
 	loadmodel->surfmesh.num_vertices = numvertices;
 	loadmodel->surfmesh.num_triangles = numtriangles;
 	if (loadmodel->surfmesh.num_vertices)
@@ -1033,16 +1064,34 @@ void Mod_AllocSurfMesh(mempool_t *mempool, int numvertices, int numtriangles, qb
 	if (loadmodel->surfmesh.num_triangles)
 	{
 		loadmodel->surfmesh.data_element3i = (int *)data, data += sizeof(int[3]) * loadmodel->surfmesh.num_triangles;
+		if (neighbors)
+			loadmodel->surfmesh.data_neighbor3i = (int *)data, data += sizeof(int[3]) * loadmodel->surfmesh.num_triangles;
 		if (loadmodel->surfmesh.num_vertices <= 65536)
 			loadmodel->surfmesh.data_element3s = (unsigned short *)data, data += sizeof(unsigned short[3]) * loadmodel->surfmesh.num_triangles;
 	}
 }
 
-shadowmesh_t *Mod_ShadowMesh_Alloc(mempool_t *mempool, int maxverts, int maxtriangles)
+shadowmesh_t *Mod_ShadowMesh_Alloc(mempool_t *mempool, int maxverts, int maxtriangles, rtexture_t *map_diffuse, rtexture_t *map_specular, rtexture_t *map_normal, int light, int neighbors, int expandable)
 {
 	shadowmesh_t *newmesh;
-	newmesh = (shadowmesh_t *)Mem_Alloc(mempool, sizeof(shadowmesh_t));
-	newmesh->mempool = mempool;
+	unsigned char *data;
+	int size;
+	size = sizeof(shadowmesh_t);
+	size += maxverts * sizeof(float[3]);
+	if (light)
+		size += maxverts * sizeof(float[11]);
+	size += maxtriangles * sizeof(int[3]);
+	if (maxverts <= 65536)
+		size += maxtriangles * sizeof(unsigned short[3]);
+	if (neighbors)
+		size += maxtriangles * sizeof(int[3]);
+	if (expandable)
+		size += SHADOWMESHVERTEXHASH * sizeof(shadowmeshvertexhash_t *) + maxverts * sizeof(shadowmeshvertexhash_t);
+	data = (unsigned char *)Mem_Alloc(mempool, size);
+	newmesh = (shadowmesh_t *)data;data += sizeof(*newmesh);
+	newmesh->map_diffuse = map_diffuse;
+	newmesh->map_specular = map_specular;
+	newmesh->map_normal = map_normal;
 	newmesh->maxverts = maxverts;
 	newmesh->maxtriangles = maxtriangles;
 	newmesh->numverts = 0;
@@ -1050,157 +1099,283 @@ shadowmesh_t *Mod_ShadowMesh_Alloc(mempool_t *mempool, int maxverts, int maxtria
 	memset(newmesh->sideoffsets, 0, sizeof(newmesh->sideoffsets));
 	memset(newmesh->sidetotals, 0, sizeof(newmesh->sidetotals));
 
-	newmesh->vertex3f = (float *)Mem_Alloc(mempool, maxverts * sizeof(float[3]));
-	newmesh->element3i = (int *)Mem_Alloc(mempool, maxtriangles * sizeof(int[3]));
-	newmesh->vertexhashtable = (shadowmeshvertexhash_t **)Mem_Alloc(mempool, SHADOWMESHVERTEXHASH * sizeof(shadowmeshvertexhash_t *));
-	newmesh->vertexhashentries = (shadowmeshvertexhash_t *)Mem_Alloc(mempool, maxverts * sizeof(shadowmeshvertexhash_t));
+	newmesh->vertex3f = (float *)data;data += maxverts * sizeof(float[3]);
+	if (light)
+	{
+		newmesh->svector3f = (float *)data;data += maxverts * sizeof(float[3]);
+		newmesh->tvector3f = (float *)data;data += maxverts * sizeof(float[3]);
+		newmesh->normal3f = (float *)data;data += maxverts * sizeof(float[3]);
+		newmesh->texcoord2f = (float *)data;data += maxverts * sizeof(float[2]);
+	}
+	newmesh->element3i = (int *)data;data += maxtriangles * sizeof(int[3]);
+	if (neighbors)
+	{
+		newmesh->neighbor3i = (int *)data;data += maxtriangles * sizeof(int[3]);
+	}
+	if (expandable)
+	{
+		newmesh->vertexhashtable = (shadowmeshvertexhash_t **)data;data += SHADOWMESHVERTEXHASH * sizeof(shadowmeshvertexhash_t *);
+		newmesh->vertexhashentries = (shadowmeshvertexhash_t *)data;data += maxverts * sizeof(shadowmeshvertexhash_t);
+	}
+	if (maxverts <= 65536)
+		newmesh->element3s = (unsigned short *)data;data += maxtriangles * sizeof(unsigned short[3]);
 	return newmesh;
 }
 
-int Mod_ShadowMesh_AddVertex(shadowmesh_t *mesh, const float *vertex3f)
+shadowmesh_t *Mod_ShadowMesh_ReAlloc(mempool_t *mempool, shadowmesh_t *oldmesh, int light, int neighbors)
+{
+	shadowmesh_t *newmesh;
+	newmesh = Mod_ShadowMesh_Alloc(mempool, oldmesh->numverts, oldmesh->numtriangles, oldmesh->map_diffuse, oldmesh->map_specular, oldmesh->map_normal, light, neighbors, false);
+	newmesh->numverts = oldmesh->numverts;
+	newmesh->numtriangles = oldmesh->numtriangles;
+	memcpy(newmesh->sideoffsets, oldmesh->sideoffsets, sizeof(oldmesh->sideoffsets));
+	memcpy(newmesh->sidetotals, oldmesh->sidetotals, sizeof(oldmesh->sidetotals));
+
+	memcpy(newmesh->vertex3f, oldmesh->vertex3f, oldmesh->numverts * sizeof(float[3]));
+	if (newmesh->svector3f && oldmesh->svector3f)
+	{
+		memcpy(newmesh->svector3f, oldmesh->svector3f, oldmesh->numverts * sizeof(float[3]));
+		memcpy(newmesh->tvector3f, oldmesh->tvector3f, oldmesh->numverts * sizeof(float[3]));
+		memcpy(newmesh->normal3f, oldmesh->normal3f, oldmesh->numverts * sizeof(float[3]));
+		memcpy(newmesh->texcoord2f, oldmesh->texcoord2f, oldmesh->numverts * sizeof(float[2]));
+	}
+	memcpy(newmesh->element3i, oldmesh->element3i, oldmesh->numtriangles * sizeof(int[3]));
+	if (newmesh->neighbor3i && oldmesh->neighbor3i)
+		memcpy(newmesh->neighbor3i, oldmesh->neighbor3i, oldmesh->numtriangles * sizeof(int[3]));
+	return newmesh;
+}
+
+int Mod_ShadowMesh_AddVertex(shadowmesh_t *mesh, float *vertex14f)
 {
 	int hashindex, vnum;
 	shadowmeshvertexhash_t *hash;
 	// this uses prime numbers intentionally
-	hashindex = (unsigned int) (vertex3f[0] * 2003 + vertex3f[1] * 4001 + vertex3f[2] * 7919) % SHADOWMESHVERTEXHASH;
+	hashindex = (unsigned int) (vertex14f[0] * 2003 + vertex14f[1] * 4001 + vertex14f[2] * 7919) % SHADOWMESHVERTEXHASH;
 	for (hash = mesh->vertexhashtable[hashindex];hash;hash = hash->next)
 	{
 		vnum = (hash - mesh->vertexhashentries);
-		if (mesh->vertex3f[vnum * 3 + 0] == vertex3f[0] && mesh->vertex3f[vnum * 3 + 1] == vertex3f[1] && mesh->vertex3f[vnum * 3 + 2] == vertex3f[2])
+		if ((mesh->vertex3f == NULL || (mesh->vertex3f[vnum * 3 + 0] == vertex14f[0] && mesh->vertex3f[vnum * 3 + 1] == vertex14f[1] && mesh->vertex3f[vnum * 3 + 2] == vertex14f[2]))
+		 && (mesh->svector3f == NULL || (mesh->svector3f[vnum * 3 + 0] == vertex14f[3] && mesh->svector3f[vnum * 3 + 1] == vertex14f[4] && mesh->svector3f[vnum * 3 + 2] == vertex14f[5]))
+		 && (mesh->tvector3f == NULL || (mesh->tvector3f[vnum * 3 + 0] == vertex14f[6] && mesh->tvector3f[vnum * 3 + 1] == vertex14f[7] && mesh->tvector3f[vnum * 3 + 2] == vertex14f[8]))
+		 && (mesh->normal3f == NULL || (mesh->normal3f[vnum * 3 + 0] == vertex14f[9] && mesh->normal3f[vnum * 3 + 1] == vertex14f[10] && mesh->normal3f[vnum * 3 + 2] == vertex14f[11]))
+		 && (mesh->texcoord2f == NULL || (mesh->texcoord2f[vnum * 2 + 0] == vertex14f[12] && mesh->texcoord2f[vnum * 2 + 1] == vertex14f[13])))
 			return hash - mesh->vertexhashentries;
 	}
 	vnum = mesh->numverts++;
 	hash = mesh->vertexhashentries + vnum;
 	hash->next = mesh->vertexhashtable[hashindex];
 	mesh->vertexhashtable[hashindex] = hash;
-	mesh->vertex3f[vnum * 3 + 0] = vertex3f[0];
-	mesh->vertex3f[vnum * 3 + 1] = vertex3f[1];
-	mesh->vertex3f[vnum * 3 + 2] = vertex3f[2];
+	if (mesh->vertex3f) {mesh->vertex3f[vnum * 3 + 0] = vertex14f[0];mesh->vertex3f[vnum * 3 + 1] = vertex14f[1];mesh->vertex3f[vnum * 3 + 2] = vertex14f[2];}
+	if (mesh->svector3f) {mesh->svector3f[vnum * 3 + 0] = vertex14f[3];mesh->svector3f[vnum * 3 + 1] = vertex14f[4];mesh->svector3f[vnum * 3 + 2] = vertex14f[5];}
+	if (mesh->tvector3f) {mesh->tvector3f[vnum * 3 + 0] = vertex14f[6];mesh->tvector3f[vnum * 3 + 1] = vertex14f[7];mesh->tvector3f[vnum * 3 + 2] = vertex14f[8];}
+	if (mesh->normal3f) {mesh->normal3f[vnum * 3 + 0] = vertex14f[9];mesh->normal3f[vnum * 3 + 1] = vertex14f[10];mesh->normal3f[vnum * 3 + 2] = vertex14f[11];}
+	if (mesh->texcoord2f) {mesh->texcoord2f[vnum * 2 + 0] = vertex14f[12];mesh->texcoord2f[vnum * 2 + 1] = vertex14f[13];}
 	return vnum;
 }
 
-void Mod_ShadowMesh_AddMesh(shadowmesh_t *mesh, const float *vertex3f, int numtris, const int *element3i)
+void Mod_ShadowMesh_AddTriangle(mempool_t *mempool, shadowmesh_t *mesh, rtexture_t *map_diffuse, rtexture_t *map_specular, rtexture_t *map_normal, float *vertex14f)
 {
-	int i;
+	if (mesh->numtriangles == 0)
+	{
+		// set the properties on this empty mesh to be more favorable...
+		// (note: this case only occurs for the first triangle added to a new mesh chain)
+		mesh->map_diffuse = map_diffuse;
+		mesh->map_specular = map_specular;
+		mesh->map_normal = map_normal;
+	}
+	while (mesh->map_diffuse != map_diffuse || mesh->map_specular != map_specular || mesh->map_normal != map_normal || mesh->numverts + 3 > mesh->maxverts || mesh->numtriangles + 1 > mesh->maxtriangles)
+	{
+		if (mesh->next == NULL)
+			mesh->next = Mod_ShadowMesh_Alloc(mempool, max(mesh->maxverts, 300), max(mesh->maxtriangles, 100), map_diffuse, map_specular, map_normal, mesh->svector3f != NULL, mesh->neighbor3i != NULL, true);
+		mesh = mesh->next;
+	}
+	mesh->element3i[mesh->numtriangles * 3 + 0] = Mod_ShadowMesh_AddVertex(mesh, vertex14f + 14 * 0);
+	mesh->element3i[mesh->numtriangles * 3 + 1] = Mod_ShadowMesh_AddVertex(mesh, vertex14f + 14 * 1);
+	mesh->element3i[mesh->numtriangles * 3 + 2] = Mod_ShadowMesh_AddVertex(mesh, vertex14f + 14 * 2);
+	mesh->numtriangles++;
+}
 
+void Mod_ShadowMesh_AddMesh(mempool_t *mempool, shadowmesh_t *mesh, rtexture_t *map_diffuse, rtexture_t *map_specular, rtexture_t *map_normal, const float *vertex3f, const float *svector3f, const float *tvector3f, const float *normal3f, const float *texcoord2f, int numtris, const int *element3i)
+{
+	int i, j, e;
+	float vbuf[3*14], *v;
+	memset(vbuf, 0, sizeof(vbuf));
 	for (i = 0;i < numtris;i++)
 	{
-		if ((mesh->numtriangles * 3 + 2) * sizeof(int) + 1 >= Mem_Size(mesh->element3i))
+		for (j = 0, v = vbuf;j < 3;j++, v += 14)
 		{
-			// FIXME: we didn't allocate enough space for all the tris, see R_Mod_CompileShadowMap
-			Con_Print(CON_WARN "Mod_ShadowMesh_AddMesh: insufficient memory allocated!\n");
-			return;
+			e = *element3i++;
+			if (vertex3f)
+			{
+				v[0] = vertex3f[e * 3 + 0];
+				v[1] = vertex3f[e * 3 + 1];
+				v[2] = vertex3f[e * 3 + 2];
+			}
+			if (svector3f)
+			{
+				v[3] = svector3f[e * 3 + 0];
+				v[4] = svector3f[e * 3 + 1];
+				v[5] = svector3f[e * 3 + 2];
+			}
+			if (tvector3f)
+			{
+				v[6] = tvector3f[e * 3 + 0];
+				v[7] = tvector3f[e * 3 + 1];
+				v[8] = tvector3f[e * 3 + 2];
+			}
+			if (normal3f)
+			{
+				v[9] = normal3f[e * 3 + 0];
+				v[10] = normal3f[e * 3 + 1];
+				v[11] = normal3f[e * 3 + 2];
+			}
+			if (texcoord2f)
+			{
+				v[12] = texcoord2f[e * 2 + 0];
+				v[13] = texcoord2f[e * 2 + 1];
+			}
 		}
-		mesh->element3i[mesh->numtriangles * 3 + 0] = Mod_ShadowMesh_AddVertex(mesh, vertex3f + 3 * element3i[i * 3 + 0]);
-		mesh->element3i[mesh->numtriangles * 3 + 1] = Mod_ShadowMesh_AddVertex(mesh, vertex3f + 3 * element3i[i * 3 + 1]);
-		mesh->element3i[mesh->numtriangles * 3 + 2] = Mod_ShadowMesh_AddVertex(mesh, vertex3f + 3 * element3i[i * 3 + 2]);
-		mesh->numtriangles++;
+		Mod_ShadowMesh_AddTriangle(mempool, mesh, map_diffuse, map_specular, map_normal, vbuf);
 	}
 
 	// the triangle calculation can take a while, so let's do a keepalive here
 	CL_KeepaliveMessage(false);
 }
 
-shadowmesh_t *Mod_ShadowMesh_Begin(mempool_t *mempool, int maxverts, int maxtriangles)
+shadowmesh_t *Mod_ShadowMesh_Begin(mempool_t *mempool, int maxverts, int maxtriangles, rtexture_t *map_diffuse, rtexture_t *map_specular, rtexture_t *map_normal, int light, int neighbors, int expandable)
 {
 	// the preparation before shadow mesh initialization can take a while, so let's do a keepalive here
 	CL_KeepaliveMessage(false);
 
-	return Mod_ShadowMesh_Alloc(mempool, maxverts, maxtriangles);
+	return Mod_ShadowMesh_Alloc(mempool, maxverts, maxtriangles, map_diffuse, map_specular, map_normal, light, neighbors, expandable);
 }
 
-static void Mod_ShadowMesh_CreateVBOs(shadowmesh_t *mesh)
+static void Mod_ShadowMesh_CreateVBOs(shadowmesh_t *mesh, mempool_t *mempool)
 {
 	if (!mesh->numverts)
 		return;
 
-	// make sure we don't crash inside the driver if something went wrong, as it's annoying to debug
-	Mod_ValidateElements(mesh->element3i, mesh->element3s, mesh->numtriangles, 0, mesh->numverts, __FILE__, __LINE__);
+	// build r_vertexmesh_t array
+	// (compressed interleaved array for D3D)
+	if (!mesh->vertexmesh && mesh->texcoord2f && vid.useinterleavedarrays)
+	{
+		int vertexindex;
+		int numvertices = mesh->numverts;
+		r_vertexmesh_t *vertexmesh;
+		mesh->vertexmesh = vertexmesh = (r_vertexmesh_t*)Mem_Alloc(mempool, numvertices * sizeof(*mesh->vertexmesh));
+		for (vertexindex = 0;vertexindex < numvertices;vertexindex++, vertexmesh++)
+		{
+			VectorCopy(mesh->vertex3f + 3*vertexindex, vertexmesh->vertex3f);
+			VectorScale(mesh->svector3f + 3*vertexindex, 1.0f, vertexmesh->svector3f);
+			VectorScale(mesh->tvector3f + 3*vertexindex, 1.0f, vertexmesh->tvector3f);
+			VectorScale(mesh->normal3f + 3*vertexindex, 1.0f, vertexmesh->normal3f);
+			Vector2Copy(mesh->texcoord2f + 2*vertexindex, vertexmesh->texcoordtexture2f);
+		}
+	}
 
 	// upload short indices as a buffer
 	if (mesh->element3s && !mesh->element3s_indexbuffer)
-		mesh->element3s_indexbuffer = R_Mesh_CreateMeshBuffer(mesh->element3s, mesh->numtriangles * sizeof(short[3]), "shadowmesh", true, false, false, true);
+		mesh->element3s_indexbuffer = R_Mesh_CreateMeshBuffer(mesh->element3s, mesh->numtriangles * sizeof(short[3]), loadmodel->name, true, false, false, true);
 
 	// upload int indices as a buffer
 	if (mesh->element3i && !mesh->element3i_indexbuffer && !mesh->element3s)
-		mesh->element3i_indexbuffer = R_Mesh_CreateMeshBuffer(mesh->element3i, mesh->numtriangles * sizeof(int[3]), "shadowmesh", true, false, false, false);
+		mesh->element3i_indexbuffer = R_Mesh_CreateMeshBuffer(mesh->element3i, mesh->numtriangles * sizeof(int[3]), loadmodel->name, true, false, false, false);
 
 	// vertex buffer is several arrays and we put them in the same buffer
 	//
 	// is this wise?  the texcoordtexture2f array is used with dynamic
 	// vertex/svector/tvector/normal when rendering animated models, on the
 	// other hand animated models don't use a lot of vertices anyway...
-	if (!mesh->vbo_vertexbuffer)
+	if (!mesh->vbo_vertexbuffer && !vid.useinterleavedarrays)
 	{
-		mesh->vbooffset_vertex3f = 0;
-		mesh->vbo_vertexbuffer = R_Mesh_CreateMeshBuffer(mesh->vertex3f, mesh->numverts * sizeof(float[3]), "shadowmesh", false, false, false, false);
+		int size;
+		unsigned char *mem;
+		size = 0;
+		mesh->vbooffset_vertexmesh         = size;if (mesh->vertexmesh        ) size += mesh->numverts * sizeof(r_vertexmesh_t);
+		mesh->vbooffset_vertex3f           = size;if (mesh->vertex3f          ) size += mesh->numverts * sizeof(float[3]);
+		mesh->vbooffset_svector3f          = size;if (mesh->svector3f         ) size += mesh->numverts * sizeof(float[3]);
+		mesh->vbooffset_tvector3f          = size;if (mesh->tvector3f         ) size += mesh->numverts * sizeof(float[3]);
+		mesh->vbooffset_normal3f           = size;if (mesh->normal3f          ) size += mesh->numverts * sizeof(float[3]);
+		mesh->vbooffset_texcoord2f         = size;if (mesh->texcoord2f        ) size += mesh->numverts * sizeof(float[2]);
+		mem = (unsigned char *)Mem_Alloc(tempmempool, size);
+		if (mesh->vertexmesh        ) memcpy(mem + mesh->vbooffset_vertexmesh        , mesh->vertexmesh        , mesh->numverts * sizeof(r_vertexmesh_t));
+		if (mesh->vertex3f          ) memcpy(mem + mesh->vbooffset_vertex3f          , mesh->vertex3f          , mesh->numverts * sizeof(float[3]));
+		if (mesh->svector3f         ) memcpy(mem + mesh->vbooffset_svector3f         , mesh->svector3f         , mesh->numverts * sizeof(float[3]));
+		if (mesh->tvector3f         ) memcpy(mem + mesh->vbooffset_tvector3f         , mesh->tvector3f         , mesh->numverts * sizeof(float[3]));
+		if (mesh->normal3f          ) memcpy(mem + mesh->vbooffset_normal3f          , mesh->normal3f          , mesh->numverts * sizeof(float[3]));
+		if (mesh->texcoord2f        ) memcpy(mem + mesh->vbooffset_texcoord2f        , mesh->texcoord2f        , mesh->numverts * sizeof(float[2]));
+		mesh->vbo_vertexbuffer = R_Mesh_CreateMeshBuffer(mem, size, "shadowmesh", false, false, false, false);
+		Mem_Free(mem);
 	}
 }
 
-shadowmesh_t *Mod_ShadowMesh_Finish(shadowmesh_t *mesh, qbool createvbo)
+shadowmesh_t *Mod_ShadowMesh_Finish(mempool_t *mempool, shadowmesh_t *firstmesh, qboolean light, qboolean neighbors, qboolean createvbo)
 {
-	if (mesh->numverts >= 3 && mesh->numtriangles >= 1)
+	shadowmesh_t *mesh, *newmesh, *nextmesh;
+	// reallocate meshs to conserve space
+	for (mesh = firstmesh, firstmesh = NULL;mesh;mesh = nextmesh)
 	{
-		if (mesh->vertexhashentries)
-			Mem_Free(mesh->vertexhashentries);
-		mesh->vertexhashentries = NULL;
-		if (mesh->vertexhashtable)
-			Mem_Free(mesh->vertexhashtable);
-		mesh->vertexhashtable = NULL;
-		if (mesh->maxverts > mesh->numverts)
+		nextmesh = mesh->next;
+		if (mesh->numverts >= 3 && mesh->numtriangles >= 1)
 		{
-			mesh->vertex3f = (float *)Mem_Realloc(mesh->mempool, mesh->vertex3f, mesh->numverts * sizeof(float[3]));
-			mesh->maxverts = mesh->numverts;
+			newmesh = Mod_ShadowMesh_ReAlloc(mempool, mesh, light, neighbors);
+			newmesh->next = firstmesh;
+			firstmesh = newmesh;
+			if (newmesh->element3s)
+			{
+				int i;
+				for (i = 0;i < newmesh->numtriangles*3;i++)
+					newmesh->element3s[i] = newmesh->element3i[i];
+			}
+			if (createvbo)
+				Mod_ShadowMesh_CreateVBOs(newmesh, mempool);
 		}
-		if (mesh->maxtriangles > mesh->numtriangles)
-		{
-			mesh->element3i = (int *)Mem_Realloc(mesh->mempool, mesh->element3i, mesh->numtriangles * sizeof(int[3]));
-			mesh->maxtriangles = mesh->numtriangles;
-		}
-		if (mesh->numverts <= 65536)
-		{
-			int i;
-			mesh->element3s = (unsigned short *)Mem_Alloc(mesh->mempool, mesh->numtriangles * sizeof(unsigned short[3]));
-			for (i = 0;i < mesh->numtriangles*3;i++)
-				mesh->element3s[i] = mesh->element3i[i];
-		}
-		if (createvbo)
-			Mod_ShadowMesh_CreateVBOs(mesh);
+		Mem_Free(mesh);
 	}
 
 	// this can take a while, so let's do a keepalive here
 	CL_KeepaliveMessage(false);
 
-	return mesh;
+	return firstmesh;
 }
 
-void Mod_ShadowMesh_CalcBBox(shadowmesh_t *mesh, vec3_t mins, vec3_t maxs, vec3_t center, float *radius)
+void Mod_ShadowMesh_CalcBBox(shadowmesh_t *firstmesh, vec3_t mins, vec3_t maxs, vec3_t center, float *radius)
 {
 	int i;
+	shadowmesh_t *mesh;
 	vec3_t nmins, nmaxs, ncenter, temp;
 	float nradius2, dist2, *v;
 	VectorClear(nmins);
 	VectorClear(nmaxs);
 	// calculate bbox
-	VectorCopy(mesh->vertex3f, nmins);
-	VectorCopy(mesh->vertex3f, nmaxs);
-	for (i = 0, v = mesh->vertex3f;i < mesh->numverts;i++, v += 3)
+	for (mesh = firstmesh;mesh;mesh = mesh->next)
 	{
-		if (nmins[0] > v[0]) { nmins[0] = v[0]; } if (nmaxs[0] < v[0]) { nmaxs[0] = v[0]; }
-		if (nmins[1] > v[1]) { nmins[1] = v[1]; } if (nmaxs[1] < v[1]) { nmaxs[1] = v[1]; }
-		if (nmins[2] > v[2]) { nmins[2] = v[2]; } if (nmaxs[2] < v[2]) { nmaxs[2] = v[2]; }
+		if (mesh == firstmesh)
+		{
+			VectorCopy(mesh->vertex3f, nmins);
+			VectorCopy(mesh->vertex3f, nmaxs);
+		}
+		for (i = 0, v = mesh->vertex3f;i < mesh->numverts;i++, v += 3)
+		{
+			if (nmins[0] > v[0]) { nmins[0] = v[0]; } if (nmaxs[0] < v[0]) { nmaxs[0] = v[0]; }
+			if (nmins[1] > v[1]) { nmins[1] = v[1]; } if (nmaxs[1] < v[1]) { nmaxs[1] = v[1]; }
+			if (nmins[2] > v[2]) { nmins[2] = v[2]; } if (nmaxs[2] < v[2]) { nmaxs[2] = v[2]; }
+		}
 	}
 	// calculate center and radius
 	ncenter[0] = (nmins[0] + nmaxs[0]) * 0.5f;
 	ncenter[1] = (nmins[1] + nmaxs[1]) * 0.5f;
 	ncenter[2] = (nmins[2] + nmaxs[2]) * 0.5f;
 	nradius2 = 0;
-	for (i = 0, v = mesh->vertex3f;i < mesh->numverts;i++, v += 3)
+	for (mesh = firstmesh;mesh;mesh = mesh->next)
 	{
-		VectorSubtract(v, ncenter, temp);
-		dist2 = DotProduct(temp, temp);
-		if (nradius2 < dist2)
-			nradius2 = dist2;
+		for (i = 0, v = mesh->vertex3f;i < mesh->numverts;i++, v += 3)
+		{
+			VectorSubtract(v, ncenter, temp);
+			dist2 = DotProduct(temp, temp);
+			if (nradius2 < dist2)
+				nradius2 = dist2;
+		}
 	}
 	// return data
 	if (mins)
@@ -1215,29 +1390,24 @@ void Mod_ShadowMesh_CalcBBox(shadowmesh_t *mesh, vec3_t mins, vec3_t maxs, vec3_
 
 void Mod_ShadowMesh_Free(shadowmesh_t *mesh)
 {
-	if (mesh->element3i_indexbuffer)
-		R_Mesh_DestroyMeshBuffer(mesh->element3i_indexbuffer);
-	if (mesh->element3s_indexbuffer)
-		R_Mesh_DestroyMeshBuffer(mesh->element3s_indexbuffer);
-	if (mesh->vbo_vertexbuffer)
-		R_Mesh_DestroyMeshBuffer(mesh->vbo_vertexbuffer);
-	if (mesh->vertex3f)
-		Mem_Free(mesh->vertex3f);
-	if (mesh->element3i)
-		Mem_Free(mesh->element3i);
-	if (mesh->element3s)
-		Mem_Free(mesh->element3s);
-	if (mesh->vertexhashentries)
-		Mem_Free(mesh->vertexhashentries);
-	if (mesh->vertexhashtable)
-		Mem_Free(mesh->vertexhashtable);
-	Mem_Free(mesh);
+	shadowmesh_t *nextmesh;
+	for (;mesh;mesh = nextmesh)
+	{
+		if (mesh->element3i_indexbuffer)
+			R_Mesh_DestroyMeshBuffer(mesh->element3i_indexbuffer);
+		if (mesh->element3s_indexbuffer)
+			R_Mesh_DestroyMeshBuffer(mesh->element3s_indexbuffer);
+		if (mesh->vbo_vertexbuffer)
+			R_Mesh_DestroyMeshBuffer(mesh->vbo_vertexbuffer);
+		nextmesh = mesh->next;
+		Mem_Free(mesh);
+	}
 }
 
-void Mod_CreateCollisionMesh(model_t *mod)
+void Mod_CreateCollisionMesh(dp_model_t *mod)
 {
 	int k, numcollisionmeshtriangles;
-	qbool usesinglecollisionmesh = false;
+	qboolean usesinglecollisionmesh = false;
 	const msurface_t *surface = NULL;
 
 	mempool_t *mempool = mod->mempool;
@@ -1246,9 +1416,9 @@ void Mod_CreateCollisionMesh(model_t *mod)
 	// make a single combined collision mesh for physics engine use
 	// TODO rewrite this to use the collision brushes as source, to fix issues with e.g. common/caulk which creates no drawsurface
 	numcollisionmeshtriangles = 0;
-	for (k = mod->submodelsurfaces_start;k < mod->submodelsurfaces_end;k++)
+	for (k = 0;k < mod->nummodelsurfaces;k++)
 	{
-		surface = mod->data_surfaces + k;
+		surface = mod->data_surfaces + mod->firstmodelsurface + k;
 		if (!strcmp(surface->texture->name, "collision") || !strcmp(surface->texture->name, "collisionconvex")) // found collision mesh
 		{
 			usesinglecollisionmesh = true;
@@ -1259,20 +1429,20 @@ void Mod_CreateCollisionMesh(model_t *mod)
 			continue;
 		numcollisionmeshtriangles += surface->num_triangles;
 	}
-	mod->brush.collisionmesh = Mod_ShadowMesh_Begin(mempool, numcollisionmeshtriangles * 3, numcollisionmeshtriangles);
+	mod->brush.collisionmesh = Mod_ShadowMesh_Begin(mempool, numcollisionmeshtriangles * 3, numcollisionmeshtriangles, NULL, NULL, NULL, false, false, true);
 	if (usesinglecollisionmesh)
-		Mod_ShadowMesh_AddMesh(mod->brush.collisionmesh, mod->surfmesh.data_vertex3f, surface->num_triangles, (mod->surfmesh.data_element3i + 3 * surface->num_firsttriangle));
+		Mod_ShadowMesh_AddMesh(mempool, mod->brush.collisionmesh, NULL, NULL, NULL, mod->surfmesh.data_vertex3f, NULL, NULL, NULL, NULL, surface->num_triangles, (mod->surfmesh.data_element3i + 3 * surface->num_firsttriangle));
 	else
 	{
-		for (k = mod->submodelsurfaces_start; k < mod->submodelsurfaces_end; k++)
+		for (k = 0;k < mod->nummodelsurfaces;k++)
 		{
-			surface = mod->data_surfaces + k;
+			surface = mod->data_surfaces + mod->firstmodelsurface + k;
 			if (!(surface->texture->supercontents & SUPERCONTENTS_SOLID))
 				continue;
-			Mod_ShadowMesh_AddMesh(mod->brush.collisionmesh, mod->surfmesh.data_vertex3f, surface->num_triangles, (mod->surfmesh.data_element3i + 3 * surface->num_firsttriangle));
+			Mod_ShadowMesh_AddMesh(mempool, mod->brush.collisionmesh, NULL, NULL, NULL, mod->surfmesh.data_vertex3f, NULL, NULL, NULL, NULL, surface->num_triangles, (mod->surfmesh.data_element3i + 3 * surface->num_firsttriangle));
 		}
 	}
-	mod->brush.collisionmesh = Mod_ShadowMesh_Finish(mod->brush.collisionmesh, false);
+	mod->brush.collisionmesh = Mod_ShadowMesh_Finish(mempool, mod->brush.collisionmesh, false, false, false);
 }
 
 #if 0
@@ -1316,7 +1486,7 @@ static void Mod_GetTerrainVertexFromBGRA(const unsigned char *imagepixels, int i
 	VectorAdd(normal3f, nl, normal3f);
 }
 
-static void Mod_ConstructTerrainPatchFromBGRA(const unsigned char *imagepixels, int imagewidth, int imageheight, int x1, int y1, int width, int height, int *element3i, float *vertex3f, float *svector3f, float *tvector3f, float *normal3f, float *texcoord2f, matrix4x4_t *pixelstepmatrix, matrix4x4_t *pixeltexturestepmatrix)
+static void Mod_ConstructTerrainPatchFromBGRA(const unsigned char *imagepixels, int imagewidth, int imageheight, int x1, int y1, int width, int height, int *element3i, int *neighbor3i, float *vertex3f, float *svector3f, float *tvector3f, float *normal3f, float *texcoord2f, matrix4x4_t *pixelstepmatrix, matrix4x4_t *pixeltexturestepmatrix)
 {
 	int x, y, ix, iy, *e;
 	e = element3i;
@@ -1333,6 +1503,7 @@ static void Mod_ConstructTerrainPatchFromBGRA(const unsigned char *imagepixels, 
 			e += 6;
 		}
 	}
+	Mod_BuildTriangleNeighbors(neighbor3i, element3i, width*height*2);
 	for (y = 0, iy = y1;y < height + 1;y++, iy++)
 		for (x = 0, ix = x1;x < width + 1;x++, ix++, vertex3f += 3, texcoord2f += 2, svector3f += 3, tvector3f += 3, normal3f += 3)
 			Mod_GetTerrainVertexFromBGRA(imagepixels, imagewidth, imageheight, ix, iy, vertex3f, texcoord2f, svector3f, tvector3f, normal3f, pixelstepmatrix, pixeltexturestepmatrix);
@@ -1340,7 +1511,7 @@ static void Mod_ConstructTerrainPatchFromBGRA(const unsigned char *imagepixels, 
 #endif
 
 #if 0
-void Mod_Terrain_SurfaceRecurseChunk(model_t *model, int stepsize, int x, int y)
+void Mod_Terrain_SurfaceRecurseChunk(dp_model_t *model, int stepsize, int x, int y)
 {
 	float mins[3];
 	float maxs[3];
@@ -1411,7 +1582,7 @@ void Mod_Terrain_SurfaceRecurseChunk(model_t *model, int stepsize, int x, int y)
 	// TODO: emit skirt vertices
 }
 
-void Mod_Terrain_UpdateSurfacesForViewOrigin(model_t *model)
+void Mod_Terrain_UpdateSurfacesForViewOrigin(dp_model_t *model)
 {
 	for (y = 0;y < model->terrain.size[1];y += model->terrain.
 	Mod_Terrain_SurfaceRecurseChunk(model, model->terrain.maxstepsize, x, y);
@@ -1446,7 +1617,7 @@ void Mod_FreeQ3Shaders(void)
 	Mem_FreePool(&q3shaders_mem);
 }
 
-static void Q3Shader_AddToHash (shader_t* shader)
+static void Q3Shader_AddToHash (q3shaderinfo_t* shader)
 {
 	unsigned short hash = CRC_Block_CaseInsensitive ((const unsigned char *)shader->name, strlen (shader->name));
 	q3shader_hash_entry_t* entry = q3shader_data->hash + (hash % Q3SHADER_HASH_SIZE);
@@ -1501,9 +1672,17 @@ static void Q3Shader_AddToHash (shader_t* shader)
 		/* else: head of chain, in hash entry array */
 		entry = lastEntry;
 	}
-	memcpy (&entry->shader, shader, sizeof (shader_t));
+	memcpy (&entry->shader, shader, sizeof (q3shaderinfo_t));
 }
 
+extern cvar_t mod_noshader_default_offsetmapping;
+extern cvar_t mod_q3shader_default_offsetmapping;
+extern cvar_t mod_q3shader_default_offsetmapping_scale;
+extern cvar_t mod_q3shader_default_offsetmapping_bias;
+extern cvar_t mod_q3shader_default_polygonoffset;
+extern cvar_t mod_q3shader_default_polygonfactor;
+extern cvar_t mod_q3shader_force_addalpha;
+extern cvar_t mod_q3shader_force_terrain_alphaflag;
 void Mod_LoadQ3Shaders(void)
 {
 	int j;
@@ -1511,14 +1690,14 @@ void Mod_LoadQ3Shaders(void)
 	fssearch_t *search;
 	char *f;
 	const char *text;
-	shader_t shader;
+	q3shaderinfo_t shader;
 	q3shaderinfo_layer_t *layer;
 	int numparameters;
 	char parameter[TEXTURE_MAXFRAMES + 4][Q3PATHLENGTH];
 	char *custsurfaceparmnames[256]; // VorteX: q3map2 has 64 but well, someone will need more
 	unsigned long custsurfaceflags[256]; 
 	int numcustsurfaceflags;
-	qbool dpshaderkill;
+	qboolean dpshaderkill;
 
 	Mod_FreeQ3Shaders();
 
@@ -1559,7 +1738,7 @@ void Mod_LoadQ3Shaders(void)
 					// name
 					j = (int)strlen(com_token)+1;
 					custsurfaceparmnames[numcustsurfaceflags] = (char *)Mem_Alloc(tempmempool, j);
-					dp_strlcpy(custsurfaceparmnames[numcustsurfaceflags], com_token, j+1);
+					strlcpy(custsurfaceparmnames[numcustsurfaceflags], com_token, j+1);
 					// value
 					if (COM_ParseToken_QuakeC(&text, false))
 						custsurfaceflags[numcustsurfaceflags] = strtol(com_token, NULL, 0);
@@ -1573,7 +1752,7 @@ void Mod_LoadQ3Shaders(void)
 	}
 
 	// parse shaders
-	search = FS_Search("scripts/*.shader", true, false, NULL);
+	search = FS_Search("scripts/*.shader", true, false);
 	if (!search)
 		return;
 	for (fileindex = 0;fileindex < search->numfilenames;fileindex++)
@@ -1621,7 +1800,7 @@ void Mod_LoadQ3Shaders(void)
 			// WHEN ADDING DEFAULTS HERE, REMEMBER TO PUT DEFAULTS IN ALL LOADERS
 			// JUST GREP FOR "specularscalemod = 1".
 
-			dp_strlcpy(shader.name, com_token, sizeof(shader.name));
+			strlcpy(shader.name, com_token, sizeof(shader.name));
 			if (!COM_ParseToken_QuakeC(&text, false) || strcasecmp(com_token, "{"))
 			{
 				Con_DPrintf("%s parsing error - expected \"{\", found \"%s\"\n", search->filenames[fileindex], com_token);
@@ -1664,7 +1843,7 @@ void Mod_LoadQ3Shaders(void)
 								if(j == 0 && !strncasecmp(com_token, "dp_", 3))
 									dpsnprintf(parameter[j], sizeof(parameter[j]), "dp%s", &com_token[3]);
 								else
-									dp_strlcpy(parameter[j], com_token, sizeof(parameter[j]));
+									strlcpy(parameter[j], com_token, sizeof(parameter[j]));
 								numparameters = j + 1;
 							}
 							if (!COM_ParseToken_QuakeC(&text, true))
@@ -1919,7 +2098,7 @@ void Mod_LoadQ3Shaders(void)
 						if(j == 0 && !strncasecmp(com_token, "dp_", 3))
 							dpsnprintf(parameter[j], sizeof(parameter[j]), "dp%s", &com_token[3]);
 						else
-							dp_strlcpy(parameter[j], com_token, sizeof(parameter[j]));
+							strlcpy(parameter[j], com_token, sizeof(parameter[j]));
 						numparameters = j + 1;
 					}
 					if (!COM_ParseToken_QuakeC(&text, true))
@@ -2029,13 +2208,13 @@ void Mod_LoadQ3Shaders(void)
 				else if (!strcasecmp(parameter[0], "dpnortlight"))
 					shader.dpnortlight = true;
 				else if (!strcasecmp(parameter[0], "dpreflectcube"))
-					dp_strlcpy(shader.dpreflectcube, parameter[1], sizeof(shader.dpreflectcube));
+					strlcpy(shader.dpreflectcube, parameter[1], sizeof(shader.dpreflectcube));
 				else if (!strcasecmp(parameter[0], "dpmeshcollisions"))
 					shader.dpmeshcollisions = true;
 				// this sets dpshaderkill to true if dpshaderkillifcvarzero was used, and to false if dpnoshaderkillifcvarzero was used
 				else if (((dpshaderkill = !strcasecmp(parameter[0], "dpshaderkillifcvarzero")) || !strcasecmp(parameter[0], "dpnoshaderkillifcvarzero")) && numparameters >= 2)
 				{
-					if (Cvar_VariableValue(&cvars_all, parameter[1], ~0) == 0.0f)
+					if (Cvar_VariableValue(parameter[1]) == 0.0f)
 						shader.dpshaderkill = dpshaderkill;
 				}
 				// this sets dpshaderkill to true if dpshaderkillifcvar was used, and to false if dpnoshaderkillifcvar was used
@@ -2046,37 +2225,37 @@ void Mod_LoadQ3Shaders(void)
 						op = parameter[2];
 					if(!op)
 					{
-						if (Cvar_VariableValue(&cvars_all, parameter[1], ~0) != 0.0f)
+						if (Cvar_VariableValue(parameter[1]) != 0.0f)
 							shader.dpshaderkill = dpshaderkill;
 					}
 					else if (numparameters >= 4 && !strcmp(op, "=="))
 					{
-						if (Cvar_VariableValue(&cvars_all, parameter[1], ~0) == atof(parameter[3]))
+						if (Cvar_VariableValue(parameter[1]) == atof(parameter[3]))
 							shader.dpshaderkill = dpshaderkill;
 					}
 					else if (numparameters >= 4 && !strcmp(op, "!="))
 					{
-						if (Cvar_VariableValue(&cvars_all, parameter[1], ~0) != atof(parameter[3]))
+						if (Cvar_VariableValue(parameter[1]) != atof(parameter[3]))
 							shader.dpshaderkill = dpshaderkill;
 					}
 					else if (numparameters >= 4 && !strcmp(op, ">"))
 					{
-						if (Cvar_VariableValue(&cvars_all, parameter[1], ~0) > atof(parameter[3]))
+						if (Cvar_VariableValue(parameter[1]) > atof(parameter[3]))
 							shader.dpshaderkill = dpshaderkill;
 					}
 					else if (numparameters >= 4 && !strcmp(op, "<"))
 					{
-						if (Cvar_VariableValue(&cvars_all, parameter[1], ~0) < atof(parameter[3]))
+						if (Cvar_VariableValue(parameter[1]) < atof(parameter[3]))
 							shader.dpshaderkill = dpshaderkill;
 					}
 					else if (numparameters >= 4 && !strcmp(op, ">="))
 					{
-						if (Cvar_VariableValue(&cvars_all, parameter[1], ~0) >= atof(parameter[3]))
+						if (Cvar_VariableValue(parameter[1]) >= atof(parameter[3]))
 							shader.dpshaderkill = dpshaderkill;
 					}
 					else if (numparameters >= 4 && !strcmp(op, "<="))
 					{
-						if (Cvar_VariableValue(&cvars_all, parameter[1], ~0) <= atof(parameter[3]))
+						if (Cvar_VariableValue(parameter[1]) <= atof(parameter[3]))
 							shader.dpshaderkill = dpshaderkill;
 					}
 					else
@@ -2088,14 +2267,14 @@ void Mod_LoadQ3Shaders(void)
 				{
 					// some q3 skies don't have the sky parm set
 					shader.surfaceparms |= Q3SURFACEPARM_SKY;
-					dp_strlcpy(shader.skyboxname, parameter[1], sizeof(shader.skyboxname));
+					strlcpy(shader.skyboxname, parameter[1], sizeof(shader.skyboxname));
 				}
 				else if (!strcasecmp(parameter[0], "skyparms") && numparameters >= 2)
 				{
 					// some q3 skies don't have the sky parm set
 					shader.surfaceparms |= Q3SURFACEPARM_SKY;
 					if (!atoi(parameter[1]) && strcasecmp(parameter[1], "-"))
-						dp_strlcpy(shader.skyboxname, parameter[1], sizeof(shader.skyboxname));
+						strlcpy(shader.skyboxname, parameter[1], sizeof(shader.skyboxname));
 				}
 				else if (!strcasecmp(parameter[0], "cull") && numparameters >= 2)
 				{
@@ -2257,7 +2436,7 @@ void Mod_LoadQ3Shaders(void)
 		Mem_Free(custsurfaceparmnames[j]);
 }
 
-shader_t *Mod_LookupQ3Shader(const char *name)
+q3shaderinfo_t *Mod_LookupQ3Shader(const char *name)
 {
 	unsigned short hash;
 	q3shader_hash_entry_t* entry;
@@ -2274,9 +2453,9 @@ shader_t *Mod_LookupQ3Shader(const char *name)
 	return NULL;
 }
 
-texture_shaderpass_t *Mod_CreateShaderPass(mempool_t *mempool, skinframe_t *skinframe)
+texture_shaderpass_t *Mod_CreateShaderPass(skinframe_t *skinframe)
 {
-	texture_shaderpass_t *shaderpass = (texture_shaderpass_t *)Mem_Alloc(mempool, sizeof(*shaderpass));
+	texture_shaderpass_t *shaderpass = (texture_shaderpass_t *)Mem_Alloc(loadmodel->mempool, sizeof(*shaderpass));
 	shaderpass->framerate = 0.0f;
 	shaderpass->numframes = 1;
 	shaderpass->blendfunc[0] = GL_ONE;
@@ -2289,10 +2468,10 @@ texture_shaderpass_t *Mod_CreateShaderPass(mempool_t *mempool, skinframe_t *skin
 	return shaderpass;
 }
 
-texture_shaderpass_t *Mod_CreateShaderPassFromQ3ShaderLayer(mempool_t *mempool, const char *modelname, q3shaderinfo_layer_t *layer, int layerindex, int texflags, const char *texturename)
+texture_shaderpass_t *Mod_CreateShaderPassFromQ3ShaderLayer(q3shaderinfo_layer_t *layer, int layerindex, int texflags, const char *texturename)
 {
 	int j;
-	texture_shaderpass_t *shaderpass = (texture_shaderpass_t *)Mem_Alloc(mempool, sizeof(*shaderpass));
+	texture_shaderpass_t *shaderpass = (texture_shaderpass_t *)Mem_Alloc(loadmodel->mempool, sizeof(*shaderpass));
 	shaderpass->alphatest = layer->alphatest != 0;
 	shaderpass->framerate = layer->framerate;
 	shaderpass->numframes = layer->numframes;
@@ -2304,18 +2483,28 @@ texture_shaderpass_t *Mod_CreateShaderPassFromQ3ShaderLayer(mempool_t *mempool, 
 	for (j = 0; j < Q3MAXTCMODS && layer->tcmods[j].tcmod != Q3TCMOD_NONE; j++)
 		shaderpass->tcmods[j] = layer->tcmods[j];
 	for (j = 0; j < layer->numframes; j++)
-		shaderpass->skinframes[j] = R_SkinFrame_LoadExternal(layer->texturename[j], texflags, false, true);
+	{
+		if (cls.state == ca_dedicated)
+		{
+			shaderpass->skinframes[j] = NULL;
+		}
+		else if (!(shaderpass->skinframes[j] = R_SkinFrame_LoadExternal(layer->texturename[j], texflags, false)))
+		{
+			Con_Printf("^1%s:^7 could not load texture ^3\"%s\"^7 (frame %i) for layer %i of shader ^2\"%s\"\n", loadmodel->name, layer->texturename[j], j, layerindex, texturename);
+			shaderpass->skinframes[j] = R_SkinFrame_LoadMissing();
+		}
+	}
 	return shaderpass;
 }
 
-qbool Mod_LoadTextureFromQ3Shader(mempool_t *mempool, const char *modelname, texture_t *texture, const char *name, qbool warnmissing, qbool fallback, int defaulttexflags, int defaultmaterialflags)
+qboolean Mod_LoadTextureFromQ3Shader(texture_t *texture, const char *name, qboolean warnmissing, qboolean fallback, int defaulttexflags)
 {
 	int texflagsmask, texflagsor;
-	qbool success = true;
-	shader_t *shader;
+	qboolean success = true;
+	q3shaderinfo_t *shader;
 	if (!name)
 		name = "";
-	dp_strlcpy(texture->name, name, sizeof(texture->name));
+	strlcpy(texture->name, name, sizeof(texture->name));
 	texture->basealpha = 1.0f;
 	shader = name[0] ? Mod_LookupQ3Shader(name) : NULL;
 
@@ -2344,12 +2533,12 @@ qbool Mod_LoadTextureFromQ3Shader(mempool_t *mempool, const char *modelname, tex
 	if (shader)
 	{
 		if (developer_loading.integer)
-			Con_Printf("%s: loaded shader for %s\n", modelname, name);
+			Con_Printf("%s: loaded shader for %s\n", loadmodel->name, name);
 
 		if (shader->surfaceparms & Q3SURFACEPARM_SKY)
 		{
 			texture->basematerialflags = MATERIALFLAG_SKY;
-			if (shader->skyboxname[0] && loadmodel)
+			if (shader->skyboxname[0])
 			{
 				// quake3 seems to append a _ to the skybox name, so this must do so as well
 				dpsnprintf(loadmodel->brush.skybox, sizeof(loadmodel->brush.skybox), "%s_", shader->skyboxname);
@@ -2475,9 +2664,6 @@ nothing                GL_ZERO GL_ONE
 				materiallayer = rgbgenvertexlayer;
 				endofprelayers = rgbgenvertexlayer;
 				firstpostlayer = rgbgenvertexlayer + 1;
-				// special case for rgbgen vertex if MATERIALFLAG_VERTEXCOLOR is expected on this material
-				if (defaultmaterialflags & MATERIALFLAG_VERTEXCOLOR)
-					texture->basematerialflags |= MATERIALFLAG_VERTEXCOLOR | MATERIALFLAG_ALPHAGEN_VERTEX;
 			}
 			else if (rgbgendiffuselayer >= 0)
 			{
@@ -2499,19 +2685,19 @@ nothing                GL_ZERO GL_ONE
 			// convert the main material layer
 			// FIXME: if alphagenspecularlayer is used, we should pass a specular texture name to R_SkinFrame_LoadExternal and have it load that texture instead of the assumed name for _gloss texture
 			if (materiallayer >= 0)
-				texture->materialshaderpass = texture->shaderpasses[shaderpassindex++] = Mod_CreateShaderPassFromQ3ShaderLayer(mempool, modelname, &shader->layers[materiallayer], materiallayer, (shader->layers[materiallayer].dptexflags & texflagsmask) | texflagsor, texture->name);
+				texture->materialshaderpass = texture->shaderpasses[shaderpassindex++] = Mod_CreateShaderPassFromQ3ShaderLayer(&shader->layers[materiallayer], materiallayer, (shader->layers[materiallayer].dptexflags & texflagsmask) | texflagsor, texture->name);
 			// convert the terrain background blend layer (if any)
 			if (terrainbackgroundlayer >= 0)
-				texture->backgroundshaderpass = texture->shaderpasses[shaderpassindex++] = Mod_CreateShaderPassFromQ3ShaderLayer(mempool, modelname, &shader->layers[terrainbackgroundlayer], terrainbackgroundlayer, (shader->layers[terrainbackgroundlayer].dptexflags & texflagsmask) | texflagsor, texture->name);
+				texture->backgroundshaderpass = texture->shaderpasses[shaderpassindex++] = Mod_CreateShaderPassFromQ3ShaderLayer(&shader->layers[terrainbackgroundlayer], terrainbackgroundlayer, (shader->layers[terrainbackgroundlayer].dptexflags & texflagsmask) | texflagsor, texture->name);
 			// convert the prepass layers (if any)
 			texture->startpreshaderpass = shaderpassindex;
 			for (i = 0; i < endofprelayers; i++)
-				texture->shaderpasses[shaderpassindex++] = Mod_CreateShaderPassFromQ3ShaderLayer(mempool, modelname, &shader->layers[i], i, (shader->layers[i].dptexflags & texflagsmask) | texflagsor, texture->name);
+				texture->shaderpasses[shaderpassindex++] = Mod_CreateShaderPassFromQ3ShaderLayer(&shader->layers[i], i, (shader->layers[i].dptexflags & texflagsmask) | texflagsor, texture->name);
 			texture->endpreshaderpass = shaderpassindex;
 			texture->startpostshaderpass = shaderpassindex;
 			// convert the postpass layers (if any)
 			for (i = firstpostlayer; i < shader->numlayers; i++)
-				texture->shaderpasses[shaderpassindex++] = Mod_CreateShaderPassFromQ3ShaderLayer(mempool, modelname, &shader->layers[i], i, (shader->layers[i].dptexflags & texflagsmask) | texflagsor, texture->name);
+				texture->shaderpasses[shaderpassindex++] = Mod_CreateShaderPassFromQ3ShaderLayer(&shader->layers[i], i, (shader->layers[i].dptexflags & texflagsmask) | texflagsor, texture->name);
 			texture->startpostshaderpass = shaderpassindex;
 		}
 
@@ -2538,7 +2724,6 @@ nothing                GL_ZERO GL_ONE
 		texture->specularscalemod = shader->specularscalemod;
 		texture->specularpowermod = shader->specularpowermod;
 		texture->rtlightambient = shader->rtlightambient;
-		texture->refractive_index = mod_q3shader_default_refractive_index.value;
 		if (shader->dpreflectcube[0])
 			texture->reflectcubetexture = R_GetCubemap(shader->dpreflectcube);
 
@@ -2622,39 +2807,38 @@ nothing                GL_ZERO GL_ONE
 		if (shader->dpmeshcollisions)
 			texture->basematerialflags |= MATERIALFLAG_MESHCOLLISIONS;
 		if (shader->dpshaderkill && developer_extra.integer)
-			Con_DPrintf("^1%s:^7 killing shader ^3\"%s\" because of cvar\n", modelname, name);
+			Con_DPrintf("^1%s:^7 killing shader ^3\"%s\" because of cvar\n", loadmodel->name, name);
 	}
 	else if (!strcmp(texture->name, "noshader") || !texture->name[0])
 	{
 		if (developer_extra.integer)
-			Con_DPrintf("^1%s:^7 using fallback noshader material for ^3\"%s\"\n", modelname, name);
-		texture->basematerialflags = defaultmaterialflags;
+			Con_DPrintf("^1%s:^7 using fallback noshader material for ^3\"%s\"\n", loadmodel->name, name);
 		texture->supercontents = SUPERCONTENTS_SOLID | SUPERCONTENTS_OPAQUE;
 	}
 	else if (!strcmp(texture->name, "common/nodraw") || !strcmp(texture->name, "textures/common/nodraw"))
 	{
 		if (developer_extra.integer)
-			Con_DPrintf("^1%s:^7 using fallback nodraw material for ^3\"%s\"\n", modelname, name);
+			Con_DPrintf("^1%s:^7 using fallback nodraw material for ^3\"%s\"\n", loadmodel->name, name);
 		texture->basematerialflags = MATERIALFLAG_NODRAW | MATERIALFLAG_NOSHADOW;
 		texture->supercontents = SUPERCONTENTS_SOLID;
 	}
 	else
 	{
 		if (developer_extra.integer)
-			Con_DPrintf("^1%s:^7 No shader found for texture ^3\"%s\"\n", modelname, texture->name);
+			Con_DPrintf("^1%s:^7 No shader found for texture ^3\"%s\"\n", loadmodel->name, texture->name);
 		if (texture->surfaceflags & Q3SURFACEFLAG_NODRAW)
 		{
-			texture->basematerialflags = MATERIALFLAG_NODRAW | MATERIALFLAG_NOSHADOW;
+			texture->basematerialflags |= MATERIALFLAG_NODRAW | MATERIALFLAG_NOSHADOW;
 			texture->supercontents = SUPERCONTENTS_SOLID;
 		}
 		else if (texture->surfaceflags & Q3SURFACEFLAG_SKY)
 		{
-			texture->basematerialflags = MATERIALFLAG_SKY;
+			texture->basematerialflags |= MATERIALFLAG_SKY;
 			texture->supercontents = SUPERCONTENTS_SKY;
 		}
 		else
 		{
-			texture->basematerialflags = defaultmaterialflags;
+			texture->basematerialflags |= MATERIALFLAG_WALL;
 			texture->supercontents = SUPERCONTENTS_SOLID | SUPERCONTENTS_OPAQUE;
 		}
 		if(cls.state == ca_dedicated)
@@ -2664,26 +2848,29 @@ nothing                GL_ZERO GL_ONE
 		}
 		else
 		{
-			skinframe_t *skinframe = R_SkinFrame_LoadExternal(texture->name, defaulttexflags, false, fallback);
-			if (skinframe)
+			if (fallback)
 			{
-				texture->materialshaderpass = texture->shaderpasses[0] = Mod_CreateShaderPass(mempool, skinframe);
-				if (texture->materialshaderpass->skinframes[0]->hasalpha)
-					texture->basematerialflags |= MATERIALFLAG_ALPHA | MATERIALFLAG_BLENDED | MATERIALFLAG_NOSHADOW;
-				if (texture->q2contents)
-					texture->supercontents = Mod_Q2BSP_SuperContentsFromNativeContents(texture->q2contents);
+				texture->materialshaderpass = texture->shaderpasses[0] = Mod_CreateShaderPass(R_SkinFrame_LoadExternal(texture->name, defaulttexflags, false));
+				if (texture->materialshaderpass->skinframes[0])
+				{
+					if (texture->materialshaderpass->skinframes[0]->hasalpha)
+						texture->basematerialflags |= MATERIALFLAG_ALPHA | MATERIALFLAG_BLENDED | MATERIALFLAG_NOSHADOW;
+					if (texture->q2contents)
+						texture->supercontents = Mod_Q2BSP_SuperContentsFromNativeContents(texture->q2contents);
+				}
+				else
+					success = false;
 			}
 			else
 				success = false;
 			if (!success && warnmissing)
-				Con_Printf("^1%s:^7 could not load texture ^3\"%s\"\n", modelname, texture->name);
+				Con_Printf("^1%s:^7 could not load texture ^3\"%s\"\n", loadmodel->name, texture->name);
 		}
 	}
 	// init the animation variables
 	texture->currentframe = texture;
-	texture->currentmaterialflags = texture->basematerialflags;
 	if (!texture->materialshaderpass)
-		texture->materialshaderpass = texture->shaderpasses[0] = Mod_CreateShaderPass(mempool, R_SkinFrame_LoadMissing());
+		texture->materialshaderpass = texture->shaderpasses[0] = Mod_CreateShaderPass(R_SkinFrame_LoadMissing());
 	if (!texture->materialshaderpass->skinframes[0])
 		texture->materialshaderpass->skinframes[0] = R_SkinFrame_LoadMissing();
 	texture->currentskinframe = texture->materialshaderpass ? texture->materialshaderpass->skinframes[0] : NULL;
@@ -2691,14 +2878,13 @@ nothing                GL_ZERO GL_ONE
 	return success;
 }
 
-void Mod_LoadCustomMaterial(mempool_t *mempool, texture_t *texture, const char *name, int supercontents, int materialflags, skinframe_t *skinframe)
+void Mod_LoadCustomMaterial(texture_t *texture, const char *name, int supercontents, int materialflags, skinframe_t *skinframe)
 {
 	if (!(materialflags & (MATERIALFLAG_WALL | MATERIALFLAG_SKY)))
-		Con_DPrintf("^1Custom texture ^3\"%s\" does not have MATERIALFLAG_WALL set\n", texture->name);
-
-	dp_strlcpy(texture->name, name, sizeof(texture->name));
+		Con_DPrintf("^1%s:^7 Custom texture ^3\"%s\" does not have MATERIALFLAG_WALL set\n", loadmodel->name, texture->name);
+	strlcpy(texture->name, name, sizeof(texture->name));
 	texture->basealpha = 1.0f;
-	texture->basematerialflags = materialflags;
+	texture->basematerialflags = texture->currentmaterialflags = materialflags;
 	texture->supercontents = supercontents;
 
 	texture->offsetmapping = (mod_noshader_default_offsetmapping.value) ? OFFSETMAPPING_DEFAULT : OFFSETMAPPING_OFF;
@@ -2712,35 +2898,17 @@ void Mod_LoadCustomMaterial(mempool_t *mempool, texture_t *texture, const char *
 	// JUST GREP FOR "specularscalemod = 1".
 
 	if (developer_extra.integer)
-		Con_DPrintf("^1Custom texture ^3\"%s\"\n", texture->name);
-	if (skinframe)
-		texture->materialshaderpass = texture->shaderpasses[0] = Mod_CreateShaderPass(mempool, skinframe);
+		Con_DPrintf("^1%s:^7 Custom texture ^3\"%s\"\n", loadmodel->name, texture->name);
+	texture->materialshaderpass = texture->shaderpasses[0] = Mod_CreateShaderPass(skinframe);
 
 	// init the animation variables
-	texture->currentmaterialflags = texture->basematerialflags;
 	texture->currentframe = texture;
-	texture->currentskinframe = skinframe;
-	texture->backgroundcurrentskinframe = NULL;
-}
-
-void Mod_UnloadCustomMaterial(texture_t *texture, qbool purgeskins)
-{
-	long unsigned int i, j;
-	for (i = 0; i < sizeof(texture->shaderpasses) / sizeof(texture->shaderpasses[0]); i++)
-	{
-		if (texture->shaderpasses[i])
-		{
-			if (purgeskins)
-				for (j = 0; j < sizeof(texture->shaderpasses[i]->skinframes) / sizeof(skinframe_t *);j++)
-					if (texture->shaderpasses[i]->skinframes[j] && texture->shaderpasses[i]->skinframes[j]->base)
-						R_SkinFrame_PurgeSkinFrame(texture->shaderpasses[i]->skinframes[j]);
-			Mem_Free(texture->shaderpasses[i]);
-			texture->shaderpasses[i] = NULL;
-		}
-	}
-	texture->materialshaderpass = NULL;
-	texture->currentskinframe = NULL;
-	texture->backgroundcurrentskinframe = NULL;
+	if (!texture->materialshaderpass)
+		texture->materialshaderpass = texture->shaderpasses[0] = Mod_CreateShaderPass(R_SkinFrame_LoadMissing());
+	if (!texture->materialshaderpass->skinframes[0])
+		texture->materialshaderpass->skinframes[0] = R_SkinFrame_LoadMissing();
+	texture->currentskinframe = texture->materialshaderpass ? texture->materialshaderpass->skinframes[0] : NULL;
+	texture->backgroundcurrentskinframe = texture->backgroundshaderpass ? texture->backgroundshaderpass->skinframes[0] : NULL;
 }
 
 skinfile_t *Mod_LoadSkinFiles(void)
@@ -2796,7 +2964,7 @@ tag_torso,
 			do
 			{
 				if (words < 10)
-					dp_strlcpy(word[words++], com_token, sizeof (word[0]));
+					strlcpy(word[words++], com_token, sizeof (word[0]));
 				else
 					wordsoverflow = true;
 			}
@@ -2816,8 +2984,8 @@ tag_torso,
 					skinfileitem = (skinfileitem_t *)Mem_Alloc(loadmodel->mempool, sizeof(skinfileitem_t));
 					skinfileitem->next = skinfile->items;
 					skinfile->items = skinfileitem;
-					dp_strlcpy (skinfileitem->name, word[1], sizeof (skinfileitem->name));
-					dp_strlcpy (skinfileitem->replacement, word[2], sizeof (skinfileitem->replacement));
+					strlcpy (skinfileitem->name, word[1], sizeof (skinfileitem->name));
+					strlcpy (skinfileitem->replacement, word[2], sizeof (skinfileitem->replacement));
 				}
 				else
 					Con_Printf("Mod_LoadSkinFiles: parsing error in file \"%s_%i.skin\" on line #%i: wrong number of parameters to command \"%s\", see documentation in DP_GFX_SKINFILES extension in dpextensions.qc\n", loadmodel->name, i, line, word[0]);
@@ -2835,8 +3003,8 @@ tag_torso,
 				skinfileitem = (skinfileitem_t *)Mem_Alloc(loadmodel->mempool, sizeof(skinfileitem_t));
 				skinfileitem->next = skinfile->items;
 				skinfile->items = skinfileitem;
-				dp_strlcpy (skinfileitem->name, word[0], sizeof (skinfileitem->name));
-				dp_strlcpy (skinfileitem->replacement, word[2], sizeof (skinfileitem->replacement));
+				strlcpy (skinfileitem->name, word[0], sizeof (skinfileitem->name));
+				strlcpy (skinfileitem->replacement, word[2], sizeof (skinfileitem->replacement));
 			}
 			else
 				Con_Printf("Mod_LoadSkinFiles: parsing error in file \"%s_%i.skin\" on line #%i: does not look like tag or mesh specification, or replace command, see documentation in DP_GFX_SKINFILES extension in dpextensions.qc\n", loadmodel->name, i, line);
@@ -2925,88 +3093,41 @@ void Mod_VertexRangeFromElements(int numelements, const int *elements, int *firs
 		*lastvertexpointer = lastvertex;
 }
 
-void Mod_SetDrawSkyAndWater(model_t* mod)
-{
-	int j;
-	uint64_t basematerialflags = 0;
-	// by default assume there is no sky or water used in this model
-	mod->DrawSky = NULL;
-	mod->DrawAddWaterPlanes = NULL;
-	// combine all basematerialflags observed in the submodelsurfaces range, then check for special flags
-	for (j = mod->submodelsurfaces_start; j < mod->submodelsurfaces_end; j++)
-		if (mod->data_surfaces[j].texture)
-			basematerialflags |= mod->data_surfaces[j].texture->basematerialflags;
-	if (basematerialflags & MATERIALFLAG_SKY)
-		mod->DrawSky = R_Mod_DrawSky;
-	if (basematerialflags & (MATERIALFLAG_WATERSHADER | MATERIALFLAG_REFRACTION | MATERIALFLAG_REFLECTION | MATERIALFLAG_CAMERA))
-		mod->DrawAddWaterPlanes = R_Mod_DrawAddWaterPlanes;
-}
-
-typedef struct Mod_MakeSortedSurfaces_qsortsurface_s
-{
-	int surfaceindex;
-	q3deffect_t* effect;
-	texture_t* texture;
-	rtexture_t* lightmaptexture;
-}
-Mod_MakeSortedSurfaces_qsortsurface_t;
-
-static int Mod_MakeSortedSurfaces_qsortfunc(const void *a, const void *b)
-{
-	const Mod_MakeSortedSurfaces_qsortsurface_t* l = (Mod_MakeSortedSurfaces_qsortsurface_t*)a;
-	const Mod_MakeSortedSurfaces_qsortsurface_t* r = (Mod_MakeSortedSurfaces_qsortsurface_t*)b;
-	if (l->effect < r->effect)
-		return -1;
-	if (l->effect > r->effect)
-		return 1;
-	if (l->texture < r->texture)
-		return -1;
-	if (l->texture > r->texture)
-		return 1;
-	if (l->lightmaptexture < r->lightmaptexture)
-		return -1;
-	if (l->lightmaptexture > r->lightmaptexture)
-		return 1;
-	if (l->surfaceindex < r->surfaceindex)
-		return -1;
-	if (l->surfaceindex > r->surfaceindex)
-		return 1;
-	return 0;
-}
-
-void Mod_MakeSortedSurfaces(model_t *mod)
+void Mod_MakeSortedSurfaces(dp_model_t *mod)
 {
 	// make an optimal set of texture-sorted batches to draw...
-	int j, k;
-	Mod_MakeSortedSurfaces_qsortsurface_t *info;
-
-	if(cls.state == ca_dedicated)
-		return;
-
-	info = (Mod_MakeSortedSurfaces_qsortsurface_t*)Mem_Alloc(loadmodel->mempool, mod->num_surfaces * sizeof(*info));
-	if (!mod->modelsurfaces_sorted)
-		mod->modelsurfaces_sorted = (int *) Mem_Alloc(loadmodel->mempool, mod->num_surfaces * sizeof(*mod->modelsurfaces_sorted));
-	// the goal is to sort by submodel (can't change which submodel a surface belongs to), and then by effects and textures
-	for (j = 0; j < mod->num_surfaces; j++)
+	int j, t;
+	int *firstsurfacefortexture;
+	int *numsurfacesfortexture;
+	if (!mod->sortedmodelsurfaces)
+		mod->sortedmodelsurfaces = (int *) Mem_Alloc(loadmodel->mempool, mod->nummodelsurfaces * sizeof(*mod->sortedmodelsurfaces));
+	firstsurfacefortexture = (int *) Mem_Alloc(tempmempool, mod->num_textures * sizeof(*firstsurfacefortexture));
+	numsurfacesfortexture = (int *) Mem_Alloc(tempmempool, mod->num_textures * sizeof(*numsurfacesfortexture));
+	memset(numsurfacesfortexture, 0, mod->num_textures * sizeof(*numsurfacesfortexture));
+	for (j = 0;j < mod->nummodelsurfaces;j++)
 	{
-		info[j].surfaceindex = j;
-		info[j].effect = mod->data_surfaces[j].effect;
-		info[j].texture = mod->data_surfaces[j].texture;
-		info[j].lightmaptexture = mod->data_surfaces[j].lightmaptexture;
+		const msurface_t *surface = mod->data_surfaces + j + mod->firstmodelsurface;
+		t = (int)(surface->texture - mod->data_textures);
+		numsurfacesfortexture[t]++;
 	}
-	for (k = 0; k < mod->brush.numsubmodels; k++)
-		if (mod->brush.submodels[k]->submodelsurfaces_end > mod->brush.submodels[k]->submodelsurfaces_start + 1)
-			qsort(info + mod->brush.submodels[k]->submodelsurfaces_start, (size_t)mod->brush.submodels[k]->submodelsurfaces_end - mod->brush.submodels[k]->submodelsurfaces_start, sizeof(*info), Mod_MakeSortedSurfaces_qsortfunc);
-	for (j = 0; j < mod->num_surfaces; j++)
-		mod->modelsurfaces_sorted[j] = info[j].surfaceindex;
-	Mem_Free(info);
+	j = 0;
+	for (t = 0;t < mod->num_textures;t++)
+	{
+		firstsurfacefortexture[t] = j;
+		j += numsurfacesfortexture[t];
+	}
+	for (j = 0;j < mod->nummodelsurfaces;j++)
+	{
+		const msurface_t *surface = mod->data_surfaces + j + mod->firstmodelsurface;
+		t = (int)(surface->texture - mod->data_textures);
+		mod->sortedmodelsurfaces[firstsurfacefortexture[t]++] = j + mod->firstmodelsurface;
+	}
+	Mem_Free(firstsurfacefortexture);
+	Mem_Free(numsurfacesfortexture);
 }
 
 void Mod_BuildVBOs(void)
 {
-	if(cls.state == ca_dedicated)
-		return;
-
 	if (!loadmodel->surfmesh.num_vertices)
 		return;
 
@@ -3017,9 +3138,35 @@ void Mod_BuildVBOs(void)
 		{
 			if (loadmodel->surfmesh.data_element3s[i] != loadmodel->surfmesh.data_element3i[i])
 			{
-				Con_Printf(CON_WARN "Mod_BuildVBOs: element %u is incorrect (%u should be %u)\n", i, loadmodel->surfmesh.data_element3s[i], loadmodel->surfmesh.data_element3i[i]);
+				Con_Printf("Mod_BuildVBOs: element %u is incorrect (%u should be %u)\n", i, loadmodel->surfmesh.data_element3s[i], loadmodel->surfmesh.data_element3i[i]);
 				loadmodel->surfmesh.data_element3s[i] = loadmodel->surfmesh.data_element3i[i];
 			}
+		}
+	}
+
+	// build r_vertexmesh_t array
+	// (compressed interleaved array for D3D)
+	if (!loadmodel->surfmesh.data_vertexmesh && vid.useinterleavedarrays)
+	{
+		int vertexindex;
+		int numvertices = loadmodel->surfmesh.num_vertices;
+		r_vertexmesh_t *vertexmesh;
+		loadmodel->surfmesh.data_vertexmesh = vertexmesh = (r_vertexmesh_t*)Mem_Alloc(loadmodel->mempool, numvertices * sizeof(r_vertexmesh_t));
+		for (vertexindex = 0;vertexindex < numvertices;vertexindex++, vertexmesh++)
+		{
+			VectorCopy(loadmodel->surfmesh.data_vertex3f + 3*vertexindex, vertexmesh->vertex3f);
+			VectorScale(loadmodel->surfmesh.data_svector3f + 3*vertexindex, 1.0f, vertexmesh->svector3f);
+			VectorScale(loadmodel->surfmesh.data_tvector3f + 3*vertexindex, 1.0f, vertexmesh->tvector3f);
+			VectorScale(loadmodel->surfmesh.data_normal3f + 3*vertexindex, 1.0f, vertexmesh->normal3f);
+			if (loadmodel->surfmesh.data_lightmapcolor4f)
+				Vector4Copy(loadmodel->surfmesh.data_lightmapcolor4f + 4*vertexindex, vertexmesh->color4f);
+			Vector2Copy(loadmodel->surfmesh.data_texcoordtexture2f + 2*vertexindex, vertexmesh->texcoordtexture2f);
+			if (loadmodel->surfmesh.data_texcoordlightmap2f)
+				Vector2Scale(loadmodel->surfmesh.data_texcoordlightmap2f + 2*vertexindex, 1.0f, vertexmesh->texcoordlightmap2f);
+			if (loadmodel->surfmesh.data_skeletalindex4ub)
+				Vector4Copy(loadmodel->surfmesh.data_skeletalindex4ub + 4*vertexindex, vertexmesh->skeletalindex4ub);
+			if (loadmodel->surfmesh.data_skeletalweight4ub)
+				Vector4Copy(loadmodel->surfmesh.data_skeletalweight4ub + 4*vertexindex, vertexmesh->skeletalweight4ub);
 		}
 	}
 
@@ -3032,46 +3179,44 @@ void Mod_BuildVBOs(void)
 		loadmodel->surfmesh.data_element3i_indexbuffer = R_Mesh_CreateMeshBuffer(loadmodel->surfmesh.data_element3i, loadmodel->surfmesh.num_triangles * sizeof(int[3]), loadmodel->name, true, false, false, false);
 
 	// only build a vbo if one has not already been created (this is important for brush models which load specially)
-	// we put several vertex data streams in the same buffer
-	if (!loadmodel->surfmesh.data_vertex3f_vertexbuffer)
+	// vertex buffer is several arrays and we put them in the same buffer
+	//
+	// is this wise?  the texcoordtexture2f array is used with dynamic
+	// vertex/svector/tvector/normal when rendering animated models, on the
+	// other hand animated models don't use a lot of vertices anyway...
+	if (!loadmodel->surfmesh.vbo_vertexbuffer && !vid.useinterleavedarrays)
 	{
 		int size;
 		unsigned char *mem;
 		size = 0;
-		loadmodel->surfmesh.data_vertex3f_bufferoffset           = size;if (loadmodel->surfmesh.data_vertex3f          ) size += loadmodel->surfmesh.num_vertices * sizeof(float[3]);
-		loadmodel->surfmesh.data_svector3f_bufferoffset          = size;if (loadmodel->surfmesh.data_svector3f         ) size += loadmodel->surfmesh.num_vertices * sizeof(float[3]);
-		loadmodel->surfmesh.data_tvector3f_bufferoffset          = size;if (loadmodel->surfmesh.data_tvector3f         ) size += loadmodel->surfmesh.num_vertices * sizeof(float[3]);
-		loadmodel->surfmesh.data_normal3f_bufferoffset           = size;if (loadmodel->surfmesh.data_normal3f          ) size += loadmodel->surfmesh.num_vertices * sizeof(float[3]);
-		loadmodel->surfmesh.data_texcoordtexture2f_bufferoffset  = size;if (loadmodel->surfmesh.data_texcoordtexture2f ) size += loadmodel->surfmesh.num_vertices * sizeof(float[2]);
-		loadmodel->surfmesh.data_texcoordlightmap2f_bufferoffset = size;if (loadmodel->surfmesh.data_texcoordlightmap2f) size += loadmodel->surfmesh.num_vertices * sizeof(float[2]);
-		loadmodel->surfmesh.data_lightmapcolor4f_bufferoffset    = size;if (loadmodel->surfmesh.data_lightmapcolor4f   ) size += loadmodel->surfmesh.num_vertices * sizeof(float[4]);
-		loadmodel->surfmesh.data_skeletalindex4ub_bufferoffset   = size;if (loadmodel->surfmesh.data_skeletalindex4ub  ) size += loadmodel->surfmesh.num_vertices * sizeof(unsigned char[4]);
-		loadmodel->surfmesh.data_skeletalweight4ub_bufferoffset  = size;if (loadmodel->surfmesh.data_skeletalweight4ub ) size += loadmodel->surfmesh.num_vertices * sizeof(unsigned char[4]);
+		loadmodel->surfmesh.vbooffset_vertexmesh         = size;if (loadmodel->surfmesh.data_vertexmesh        ) size += loadmodel->surfmesh.num_vertices * sizeof(r_vertexmesh_t);
+		loadmodel->surfmesh.vbooffset_vertex3f           = size;if (loadmodel->surfmesh.data_vertex3f          ) size += loadmodel->surfmesh.num_vertices * sizeof(float[3]);
+		loadmodel->surfmesh.vbooffset_svector3f          = size;if (loadmodel->surfmesh.data_svector3f         ) size += loadmodel->surfmesh.num_vertices * sizeof(float[3]);
+		loadmodel->surfmesh.vbooffset_tvector3f          = size;if (loadmodel->surfmesh.data_tvector3f         ) size += loadmodel->surfmesh.num_vertices * sizeof(float[3]);
+		loadmodel->surfmesh.vbooffset_normal3f           = size;if (loadmodel->surfmesh.data_normal3f          ) size += loadmodel->surfmesh.num_vertices * sizeof(float[3]);
+		loadmodel->surfmesh.vbooffset_texcoordtexture2f  = size;if (loadmodel->surfmesh.data_texcoordtexture2f ) size += loadmodel->surfmesh.num_vertices * sizeof(float[2]);
+		loadmodel->surfmesh.vbooffset_texcoordlightmap2f = size;if (loadmodel->surfmesh.data_texcoordlightmap2f) size += loadmodel->surfmesh.num_vertices * sizeof(float[2]);
+		loadmodel->surfmesh.vbooffset_lightmapcolor4f    = size;if (loadmodel->surfmesh.data_lightmapcolor4f   ) size += loadmodel->surfmesh.num_vertices * sizeof(float[4]);
+		loadmodel->surfmesh.vbooffset_skeletalindex4ub   = size;if (loadmodel->surfmesh.data_skeletalindex4ub  ) size += loadmodel->surfmesh.num_vertices * sizeof(unsigned char[4]);
+		loadmodel->surfmesh.vbooffset_skeletalweight4ub  = size;if (loadmodel->surfmesh.data_skeletalweight4ub ) size += loadmodel->surfmesh.num_vertices * sizeof(unsigned char[4]);
 		mem = (unsigned char *)Mem_Alloc(tempmempool, size);
-		if (loadmodel->surfmesh.data_vertex3f          ) memcpy(mem + loadmodel->surfmesh.data_vertex3f_bufferoffset          , loadmodel->surfmesh.data_vertex3f          , loadmodel->surfmesh.num_vertices * sizeof(float[3]));
-		if (loadmodel->surfmesh.data_svector3f         ) memcpy(mem + loadmodel->surfmesh.data_svector3f_bufferoffset         , loadmodel->surfmesh.data_svector3f         , loadmodel->surfmesh.num_vertices * sizeof(float[3]));
-		if (loadmodel->surfmesh.data_tvector3f         ) memcpy(mem + loadmodel->surfmesh.data_tvector3f_bufferoffset         , loadmodel->surfmesh.data_tvector3f         , loadmodel->surfmesh.num_vertices * sizeof(float[3]));
-		if (loadmodel->surfmesh.data_normal3f          ) memcpy(mem + loadmodel->surfmesh.data_normal3f_bufferoffset          , loadmodel->surfmesh.data_normal3f          , loadmodel->surfmesh.num_vertices * sizeof(float[3]));
-		if (loadmodel->surfmesh.data_texcoordtexture2f ) memcpy(mem + loadmodel->surfmesh.data_texcoordtexture2f_bufferoffset , loadmodel->surfmesh.data_texcoordtexture2f , loadmodel->surfmesh.num_vertices * sizeof(float[2]));
-		if (loadmodel->surfmesh.data_texcoordlightmap2f) memcpy(mem + loadmodel->surfmesh.data_texcoordlightmap2f_bufferoffset, loadmodel->surfmesh.data_texcoordlightmap2f, loadmodel->surfmesh.num_vertices * sizeof(float[2]));
-		if (loadmodel->surfmesh.data_lightmapcolor4f   ) memcpy(mem + loadmodel->surfmesh.data_lightmapcolor4f_bufferoffset   , loadmodel->surfmesh.data_lightmapcolor4f   , loadmodel->surfmesh.num_vertices * sizeof(float[4]));
-		if (loadmodel->surfmesh.data_skeletalindex4ub  ) memcpy(mem + loadmodel->surfmesh.data_skeletalindex4ub_bufferoffset  , loadmodel->surfmesh.data_skeletalindex4ub  , loadmodel->surfmesh.num_vertices * sizeof(unsigned char[4]));
-		if (loadmodel->surfmesh.data_skeletalweight4ub ) memcpy(mem + loadmodel->surfmesh.data_skeletalweight4ub_bufferoffset , loadmodel->surfmesh.data_skeletalweight4ub , loadmodel->surfmesh.num_vertices * sizeof(unsigned char[4]));
-		loadmodel->surfmesh.data_vertex3f_vertexbuffer = R_Mesh_CreateMeshBuffer(mem, size, loadmodel->name, false, false, false, false);
-		loadmodel->surfmesh.data_svector3f_vertexbuffer = loadmodel->surfmesh.data_svector3f ? loadmodel->surfmesh.data_vertex3f_vertexbuffer : NULL;
-		loadmodel->surfmesh.data_tvector3f_vertexbuffer = loadmodel->surfmesh.data_tvector3f ? loadmodel->surfmesh.data_vertex3f_vertexbuffer : NULL;
-		loadmodel->surfmesh.data_normal3f_vertexbuffer = loadmodel->surfmesh.data_normal3f ? loadmodel->surfmesh.data_vertex3f_vertexbuffer : NULL;
-		loadmodel->surfmesh.data_texcoordtexture2f_vertexbuffer = loadmodel->surfmesh.data_texcoordtexture2f ? loadmodel->surfmesh.data_vertex3f_vertexbuffer : NULL;
-		loadmodel->surfmesh.data_texcoordlightmap2f_vertexbuffer = loadmodel->surfmesh.data_texcoordlightmap2f ? loadmodel->surfmesh.data_vertex3f_vertexbuffer : NULL;
-		loadmodel->surfmesh.data_lightmapcolor4f_vertexbuffer = loadmodel->surfmesh.data_lightmapcolor4f ? loadmodel->surfmesh.data_vertex3f_vertexbuffer : NULL;
-		loadmodel->surfmesh.data_skeletalindex4ub_vertexbuffer = loadmodel->surfmesh.data_skeletalindex4ub ? loadmodel->surfmesh.data_vertex3f_vertexbuffer : NULL;
-		loadmodel->surfmesh.data_skeletalweight4ub_vertexbuffer = loadmodel->surfmesh.data_skeletalweight4ub ? loadmodel->surfmesh.data_vertex3f_vertexbuffer : NULL;
+		if (loadmodel->surfmesh.data_vertexmesh        ) memcpy(mem + loadmodel->surfmesh.vbooffset_vertexmesh        , loadmodel->surfmesh.data_vertexmesh        , loadmodel->surfmesh.num_vertices * sizeof(r_vertexmesh_t));
+		if (loadmodel->surfmesh.data_vertex3f          ) memcpy(mem + loadmodel->surfmesh.vbooffset_vertex3f          , loadmodel->surfmesh.data_vertex3f          , loadmodel->surfmesh.num_vertices * sizeof(float[3]));
+		if (loadmodel->surfmesh.data_svector3f         ) memcpy(mem + loadmodel->surfmesh.vbooffset_svector3f         , loadmodel->surfmesh.data_svector3f         , loadmodel->surfmesh.num_vertices * sizeof(float[3]));
+		if (loadmodel->surfmesh.data_tvector3f         ) memcpy(mem + loadmodel->surfmesh.vbooffset_tvector3f         , loadmodel->surfmesh.data_tvector3f         , loadmodel->surfmesh.num_vertices * sizeof(float[3]));
+		if (loadmodel->surfmesh.data_normal3f          ) memcpy(mem + loadmodel->surfmesh.vbooffset_normal3f          , loadmodel->surfmesh.data_normal3f          , loadmodel->surfmesh.num_vertices * sizeof(float[3]));
+		if (loadmodel->surfmesh.data_texcoordtexture2f ) memcpy(mem + loadmodel->surfmesh.vbooffset_texcoordtexture2f , loadmodel->surfmesh.data_texcoordtexture2f , loadmodel->surfmesh.num_vertices * sizeof(float[2]));
+		if (loadmodel->surfmesh.data_texcoordlightmap2f) memcpy(mem + loadmodel->surfmesh.vbooffset_texcoordlightmap2f, loadmodel->surfmesh.data_texcoordlightmap2f, loadmodel->surfmesh.num_vertices * sizeof(float[2]));
+		if (loadmodel->surfmesh.data_lightmapcolor4f   ) memcpy(mem + loadmodel->surfmesh.vbooffset_lightmapcolor4f   , loadmodel->surfmesh.data_lightmapcolor4f   , loadmodel->surfmesh.num_vertices * sizeof(float[4]));
+		if (loadmodel->surfmesh.data_skeletalindex4ub  ) memcpy(mem + loadmodel->surfmesh.vbooffset_skeletalindex4ub  , loadmodel->surfmesh.data_skeletalindex4ub  , loadmodel->surfmesh.num_vertices * sizeof(unsigned char[4]));
+		if (loadmodel->surfmesh.data_skeletalweight4ub ) memcpy(mem + loadmodel->surfmesh.vbooffset_skeletalweight4ub , loadmodel->surfmesh.data_skeletalweight4ub , loadmodel->surfmesh.num_vertices * sizeof(unsigned char[4]));
+		loadmodel->surfmesh.vbo_vertexbuffer = R_Mesh_CreateMeshBuffer(mem, size, loadmodel->name, false, false, false, false);
 		Mem_Free(mem);
 	}
 }
 
 extern cvar_t mod_obj_orientation;
-static void Mod_Decompile_OBJ(model_t *model, const char *filename, const char *mtlfilename, const char *originalfilename)
+static void Mod_Decompile_OBJ(dp_model_t *model, const char *filename, const char *mtlfilename, const char *originalfilename)
 {
 	int submodelindex, vertexindex, surfaceindex, triangleindex, textureindex, countvertices = 0, countsurfaces = 0, countfaces = 0, counttextures = 0;
 	int a, b, c;
@@ -3085,7 +3230,7 @@ static void Mod_Decompile_OBJ(model_t *model, const char *filename, const char *
 	const msurface_t *surface;
 	const int maxtextures = 256;
 	char *texturenames = (char *) Z_Malloc(maxtextures * MAX_QPATH);
-	model_t *submodel;
+	dp_model_t *submodel;
 
 	// construct the mtllib file
 	l = dpsnprintf(outbuffer + outbufferpos, outbuffermax - outbufferpos, "# mtllib for %s exported by darkplaces engine\n", originalfilename);
@@ -3105,7 +3250,7 @@ static void Mod_Decompile_OBJ(model_t *model, const char *filename, const char *
 		if (textureindex >= maxtextures)
 			continue; // just a precaution
 		textureindex = counttextures++;
-		dp_strlcpy(texturenames + textureindex * MAX_QPATH, texname, MAX_QPATH);
+		strlcpy(texturenames + textureindex * MAX_QPATH, texname, MAX_QPATH);
 		if (outbufferpos >= outbuffermax >> 1)
 		{
 			outbuffermax *= 2;
@@ -3152,9 +3297,9 @@ static void Mod_Decompile_OBJ(model_t *model, const char *filename, const char *
 		if (l > 0)
 			outbufferpos += l;
 		submodel = model->brush.numsubmodels ? model->brush.submodels[submodelindex] : model;
-		for (surfaceindex = submodel->submodelsurfaces_start;surfaceindex < submodel->submodelsurfaces_end;surfaceindex++)
+		for (surfaceindex = 0;surfaceindex < submodel->nummodelsurfaces;surfaceindex++)
 		{
-			surface = model->data_surfaces + surfaceindex;
+			surface = model->data_surfaces + submodel->sortedmodelsurfaces[surfaceindex];
 			l = dpsnprintf(outbuffer + outbufferpos, outbuffermax - outbufferpos, "usemtl %s\n", (surface->texture && surface->texture->name[0]) ? surface->texture->name : "default");
 			if (l > 0)
 				outbufferpos += l;
@@ -3192,7 +3337,7 @@ static void Mod_Decompile_OBJ(model_t *model, const char *filename, const char *
 	Con_Printf("Wrote %s (%i bytes, %i vertices, %i faces, %i surfaces with %i distinct textures)\n", filename, (int)outbufferpos, countvertices, countfaces, countsurfaces, counttextures);
 }
 
-static void Mod_Decompile_SMD(model_t *model, const char *filename, int firstpose, int numposes, qbool writetriangles)
+static void Mod_Decompile_SMD(dp_model_t *model, const char *filename, int firstpose, int numposes, qboolean writetriangles)
 {
 	int countnodes = 0, counttriangles = 0, countframes = 0;
 	int surfaceindex;
@@ -3250,7 +3395,7 @@ static void Mod_Decompile_SMD(model_t *model, const char *filename, int firstpos
 			// strangely the smd angles are for a transposed matrix, so we
 			// have to generate a transposed matrix, then convert that...
 			Matrix4x4_FromBonePose7s(&posematrix, model->num_posescale, model->data_poses7s + 7*(model->num_bones * poseindex + transformindex));
-			Matrix4x4_ToArray12FloatGL(&posematrix, mtest);
+			Matrix4x4_ToArray12FloatGL(&posematrix, mtest[0]);
 			AnglesFromVectors(angles, mtest[0], mtest[2], false);
 			if (angles[0] >= 180) angles[0] -= 360;
 			if (angles[1] >= 180) angles[1] -= 360;
@@ -3356,10 +3501,10 @@ Mod_Decompile_f
 decompiles a model to editable files
 ================
 */
-static void Mod_Decompile_f(cmd_state_t *cmd)
+static void Mod_Decompile_f(void)
 {
 	int i, j, k, l, first, count;
-	model_t *mod;
+	dp_model_t *mod;
 	char inname[MAX_QPATH];
 	char outname[MAX_QPATH];
 	char mtlname[MAX_QPATH];
@@ -3374,13 +3519,13 @@ static void Mod_Decompile_f(cmd_state_t *cmd)
 	int framegroupstextsize = 0;
 	char vabuf[1024];
 
-	if (Cmd_Argc(cmd) != 2)
+	if (Cmd_Argc() != 2)
 	{
 		Con_Print("usage: modeldecompile <filename>\n");
 		return;
 	}
 
-	dp_strlcpy(inname, Cmd_Argv(cmd, 1), sizeof(inname));
+	strlcpy(inname, Cmd_Argv(1), sizeof(inname));
 	FS_StripExtension(inname, basename, sizeof(basename));
 
 	mod = Mod_ForName(inname, false, true, inname[0] == '*' ? cl.model_name[1] : NULL);
@@ -3421,7 +3566,7 @@ static void Mod_Decompile_f(cmd_state_t *cmd)
 		if (l > 0) dpmtextsize += l;
 		for (i = 0;i < mod->numframes;i = j)
 		{
-			dp_strlcpy(animname, mod->animscenes[i].name, sizeof(animname));
+			strlcpy(animname, mod->animscenes[i].name, sizeof(animname));
 			first = mod->animscenes[i].firstframe;
 			if (mod->animscenes[i].framecount > 1)
 			{
@@ -3442,7 +3587,7 @@ static void Mod_Decompile_f(cmd_state_t *cmd)
 				count = mod->num_poses - first;
 				for (j = i + 1;j < mod->numframes;j++)
 				{
-					dp_strlcpy(animname2, mod->animscenes[j].name, sizeof(animname2));
+					strlcpy(animname2, mod->animscenes[j].name, sizeof(animname2));
 					for (l = 0, k = (int)strlen(animname2);animname2[l];l++)
 						if(animname2[l] < '0' || animname2[l] > '9')
 							k = l + 1;
@@ -3457,7 +3602,7 @@ static void Mod_Decompile_f(cmd_state_t *cmd)
 				}
 				// if it's only one frame, use the original frame name
 				if (j == i + 1)
-					dp_strlcpy(animname, mod->animscenes[i].name, sizeof(animname));
+					strlcpy(animname, mod->animscenes[i].name, sizeof(animname));
 				
 			}
 			dpsnprintf(outname, sizeof(outname), "%s_decompiled/%s.smd", basename, animname);
@@ -3520,7 +3665,7 @@ void Mod_AllocLightmap_Free(mod_alloclightmap_state_t *state)
 	memset(state, 0, sizeof(*state));
 }
 
-qbool Mod_AllocLightmap_Block(mod_alloclightmap_state_t *state, int blockwidth, int blockheight, int *outx, int *outy)
+qboolean Mod_AllocLightmap_Block(mod_alloclightmap_state_t *state, int blockwidth, int blockheight, int *outx, int *outy)
 {
 	mod_alloclightmap_row_t *row;
 	int y;
@@ -3620,7 +3765,7 @@ static lightmaplight_t *mod_generatelightmaps_lightinfo;
 extern cvar_t r_shadow_lightattenuationdividebias;
 extern cvar_t r_shadow_lightattenuationlinearscale;
 
-static void Mod_GenerateLightmaps_LightPoint(model_t *model, const vec3_t pos, vec3_t ambient, vec3_t diffuse, vec3_t lightdir)
+static void Mod_GenerateLightmaps_LightPoint(dp_model_t *model, const vec3_t pos, vec3_t ambient, vec3_t diffuse, vec3_t lightdir)
 {
 	int i;
 	int index;
@@ -3689,7 +3834,7 @@ static void Mod_GenerateLightmaps_LightPoint(model_t *model, const vec3_t pos, v
 	VectorCopy(dir, lightdir);
 }
 
-static void Mod_GenerateLightmaps_CreateLights_ComputeSVBSP_InsertSurfaces(const model_t *model, svbsp_t *svbsp, const float *mins, const float *maxs)
+static void Mod_GenerateLightmaps_CreateLights_ComputeSVBSP_InsertSurfaces(const dp_model_t *model, svbsp_t *svbsp, const float *mins, const float *maxs)
 {
 	int surfaceindex;
 	int triangleindex;
@@ -3698,9 +3843,8 @@ static void Mod_GenerateLightmaps_CreateLights_ComputeSVBSP_InsertSurfaces(const
 	const int *element3i = model->surfmesh.data_element3i;
 	const int *e;
 	float v2[3][3];
-	for (surfaceindex = model->submodelsurfaces_start;surfaceindex < model->submodelsurfaces_end;surfaceindex++)
+	for (surfaceindex = 0, surface = model->data_surfaces;surfaceindex < model->nummodelsurfaces;surfaceindex++, surface++)
 	{
-		surface = model->data_surfaces + surfaceindex;
 		if (!BoxesOverlap(surface->mins, surface->maxs, mins, maxs))
 			continue;
 		if (surface->texture->basematerialflags & MATERIALFLAG_NOSHADOW)
@@ -3715,7 +3859,7 @@ static void Mod_GenerateLightmaps_CreateLights_ComputeSVBSP_InsertSurfaces(const
 	}
 }
 
-static void Mod_GenerateLightmaps_CreateLights_ComputeSVBSP(model_t *model, lightmaplight_t *lightinfo)
+static void Mod_GenerateLightmaps_CreateLights_ComputeSVBSP(dp_model_t *model, lightmaplight_t *lightinfo)
 {
 	int maxnodes = 1<<14;
 	svbsp_node_t *nodes;
@@ -3754,7 +3898,7 @@ static void Mod_GenerateLightmaps_CreateLights_ComputeSVBSP(model_t *model, ligh
 	Mem_Free(nodes);
 }
 
-static void Mod_GenerateLightmaps_CreateLights(model_t *model)
+static void Mod_GenerateLightmaps_CreateLights(dp_model_t *model)
 {
 	int index;
 	int result;
@@ -3793,7 +3937,7 @@ static void Mod_GenerateLightmaps_CreateLights(model_t *model)
 	}
 }
 
-static void Mod_GenerateLightmaps_DestroyLights(model_t *model)
+static void Mod_GenerateLightmaps_DestroyLights(dp_model_t *model)
 {
 	int i;
 	if (mod_generatelightmaps_lightinfo)
@@ -3807,7 +3951,7 @@ static void Mod_GenerateLightmaps_DestroyLights(model_t *model)
 	mod_generatelightmaps_numlights = 0;
 }
 
-static qbool Mod_GenerateLightmaps_SamplePoint_SVBSP(const svbsp_t *svbsp, const float *pos)
+static qboolean Mod_GenerateLightmaps_SamplePoint_SVBSP(const svbsp_t *svbsp, const float *pos)
 {
 	const svbsp_node_t *node;
 	const svbsp_node_t *nodes = svbsp->nodes;
@@ -3956,7 +4100,7 @@ static void Mod_GenerateLightmaps_GridSample(const float *pos, q3dlightgrid_t *s
 	else {s->diffusepitch = (unsigned char)(acos(dir[2]) * (127.5f/M_PI));s->diffuseyaw = (unsigned char)(atan2(dir[1], dir[0]) * (127.5f/M_PI));}
 }
 
-static void Mod_GenerateLightmaps_InitSampleOffsets(model_t *model)
+static void Mod_GenerateLightmaps_InitSampleOffsets(dp_model_t *model)
 {
 	float radius[3];
 	float temp[3];
@@ -3978,7 +4122,7 @@ static void Mod_GenerateLightmaps_InitSampleOffsets(model_t *model)
 	}
 }
 
-static void Mod_GenerateLightmaps_DestroyLightmaps(model_t *model)
+static void Mod_GenerateLightmaps_DestroyLightmaps(dp_model_t *model)
 {
 	msurface_t *surface;
 	int surfaceindex;
@@ -4007,7 +4151,7 @@ static void Mod_GenerateLightmaps_DestroyLightmaps(model_t *model)
 	}
 }
 
-static void Mod_GenerateLightmaps_UnweldTriangles(model_t *model)
+static void Mod_GenerateLightmaps_UnweldTriangles(dp_model_t *model)
 {
 	msurface_t *surface;
 	int surfaceindex;
@@ -4040,23 +4184,15 @@ static void Mod_GenerateLightmaps_UnweldTriangles(model_t *model)
 	if (model->surfmesh.num_vertices > 65536)
 		model->surfmesh.data_element3s = NULL;
 
-	if (model->surfmesh.data_element3i_indexbuffer && !model->surfmesh.data_element3i_indexbuffer->isdynamic)
+	if (model->surfmesh.data_element3i_indexbuffer)
 		R_Mesh_DestroyMeshBuffer(model->surfmesh.data_element3i_indexbuffer);
 	model->surfmesh.data_element3i_indexbuffer = NULL;
-	if (model->surfmesh.data_element3s_indexbuffer && !model->surfmesh.data_element3s_indexbuffer->isdynamic)
+	if (model->surfmesh.data_element3s_indexbuffer)
 		R_Mesh_DestroyMeshBuffer(model->surfmesh.data_element3s_indexbuffer);
 	model->surfmesh.data_element3s_indexbuffer = NULL;
-	if (model->surfmesh.data_vertex3f_vertexbuffer && !model->surfmesh.data_vertex3f_vertexbuffer->isdynamic)
-		R_Mesh_DestroyMeshBuffer(model->surfmesh.data_vertex3f_vertexbuffer);
-	model->surfmesh.data_vertex3f_vertexbuffer = NULL;
-	model->surfmesh.data_svector3f_vertexbuffer = NULL;
-	model->surfmesh.data_tvector3f_vertexbuffer = NULL;
-	model->surfmesh.data_normal3f_vertexbuffer = NULL;
-	model->surfmesh.data_texcoordtexture2f_vertexbuffer = NULL;
-	model->surfmesh.data_texcoordlightmap2f_vertexbuffer = NULL;
-	model->surfmesh.data_lightmapcolor4f_vertexbuffer = NULL;
-	model->surfmesh.data_skeletalindex4ub_vertexbuffer = NULL;
-	model->surfmesh.data_skeletalweight4ub_vertexbuffer = NULL;
+	if (model->surfmesh.vbo_vertexbuffer)
+		R_Mesh_DestroyMeshBuffer(model->surfmesh.vbo_vertexbuffer);
+	model->surfmesh.vbo_vertexbuffer = 0;
 
 	// convert all triangles to unique vertex data
 	outvertexindex = 0;
@@ -4110,7 +4246,7 @@ static void Mod_GenerateLightmaps_UnweldTriangles(model_t *model)
 		model->brush.submodels[i]->surfmesh = model->surfmesh;
 }
 
-static void Mod_GenerateLightmaps_CreateTriangleInformation(model_t *model)
+static void Mod_GenerateLightmaps_CreateTriangleInformation(dp_model_t *model)
 {
 	msurface_t *surface;
 	int surfaceindex;
@@ -4152,7 +4288,7 @@ static void Mod_GenerateLightmaps_CreateTriangleInformation(model_t *model)
 	}
 }
 
-static void Mod_GenerateLightmaps_DestroyTriangleInformation(model_t *model)
+static void Mod_GenerateLightmaps_DestroyTriangleInformation(dp_model_t *model)
 {
 	if (mod_generatelightmaps_lightmaptriangles)
 		Mem_Free(mod_generatelightmaps_lightmaptriangles);
@@ -4161,7 +4297,7 @@ static void Mod_GenerateLightmaps_DestroyTriangleInformation(model_t *model)
 
 float lmaxis[3][3] = {{1, 0, 0}, {0, 1, 0}, {0, 0, 1}};
 
-static void Mod_GenerateLightmaps_CreateLightmaps(model_t *model)
+static void Mod_GenerateLightmaps_CreateLightmaps(dp_model_t *model)
 {
 	msurface_t *surface;
 	int surfaceindex;
@@ -4227,7 +4363,7 @@ static void Mod_GenerateLightmaps_CreateLightmaps(model_t *model)
 				// lightmap coordinates here are in pixels
 				// lightmap projections are snapped to pixel grid explicitly, such
 				// that two neighboring triangles sharing an edge and projection
-				// axis will have identical sample spacing along their shared edge
+				// axis will have identical sampl espacing along their shared edge
 				k = 0;
 				for (j = 0;j < 3;j++)
 				{
@@ -4415,14 +4551,14 @@ static void Mod_GenerateLightmaps_CreateLightmaps(model_t *model)
 	}
 }
 
-static void Mod_GenerateLightmaps_UpdateVertexColors(model_t *model)
+static void Mod_GenerateLightmaps_UpdateVertexColors(dp_model_t *model)
 {
 	int i;
 	for (i = 0;i < model->surfmesh.num_vertices;i++)
 		Mod_GenerateLightmaps_VertexSample(model->surfmesh.data_vertex3f + 3*i, model->surfmesh.data_normal3f + 3*i, model->surfmesh.data_lightmapcolor4f + 4*i);
 }
 
-static void Mod_GenerateLightmaps_UpdateLightGrid(model_t *model)
+static void Mod_GenerateLightmaps_UpdateLightGrid(dp_model_t *model)
 {
 	int x;
 	int y;
@@ -4445,10 +4581,10 @@ static void Mod_GenerateLightmaps_UpdateLightGrid(model_t *model)
 }
 
 extern cvar_t mod_q3bsp_nolightmaps;
-static void Mod_GenerateLightmaps(model_t *model)
+static void Mod_GenerateLightmaps(dp_model_t *model)
 {
 	//lightmaptriangle_t *lightmaptriangles = Mem_Alloc(model->mempool, model->surfmesh.num_triangles * sizeof(lightmaptriangle_t));
-	model_t *oldloadmodel = loadmodel;
+	dp_model_t *oldloadmodel = loadmodel;
 	loadmodel = model;
 
 	Mod_GenerateLightmaps_InitSampleOffsets(model);
@@ -4466,9 +4602,9 @@ static void Mod_GenerateLightmaps(model_t *model)
 	loadmodel = oldloadmodel;
 }
 
-static void Mod_GenerateLightmaps_f(cmd_state_t *cmd)
+static void Mod_GenerateLightmaps_f(void)
 {
-	if (Cmd_Argc(cmd) != 1)
+	if (Cmd_Argc() != 1)
 	{
 		Con_Printf("usage: mod_generatelightmaps\n");
 		return;
@@ -4481,47 +4617,46 @@ static void Mod_GenerateLightmaps_f(cmd_state_t *cmd)
 	Mod_GenerateLightmaps(cl.worldmodel);
 }
 
-void Mod_Mesh_Create(model_t *mod, const char *name)
+void Mod_Mesh_Create(dp_model_t *mod, const char *name)
 {
 	memset(mod, 0, sizeof(*mod));
-	dp_strlcpy(mod->name, name, sizeof(mod->name));
+	strlcpy(mod->name, name, sizeof(mod->name));
 	mod->mempool = Mem_AllocPool(name, 0, NULL);
 	mod->texturepool = R_AllocTexturePool();
-	mod->Draw = R_Mod_Draw;
-	mod->DrawDepth = R_Mod_DrawDepth;
-	mod->DrawDebug = R_Mod_DrawDebug;
-	mod->DrawPrepass = R_Mod_DrawPrepass;
-	mod->GetLightInfo = R_Mod_GetLightInfo;
-	mod->DrawShadowMap = R_Mod_DrawShadowMap;
-	mod->DrawLight = R_Mod_DrawLight;
+	mod->Draw = R_Q1BSP_Draw;
+	mod->DrawDepth = R_Q1BSP_DrawDepth;
+	mod->DrawDebug = R_Q1BSP_DrawDebug;
+	mod->DrawPrepass = R_Q1BSP_DrawPrepass;
+	mod->GetLightInfo = R_Q1BSP_GetLightInfo;
+	mod->DrawShadowMap = R_Q1BSP_DrawShadowMap;
+	mod->DrawShadowVolume = R_Q1BSP_DrawShadowVolume;
+	mod->DrawLight = R_Q1BSP_DrawLight;
 }
 
-void Mod_Mesh_Destroy(model_t *mod)
+void Mod_Mesh_Destroy(dp_model_t *mod)
 {
 	Mod_UnloadModel(mod);
 }
 
 // resets the mesh model to have no geometry to render, ready for a new frame -
 // the mesh will be prepared for rendering later using Mod_Mesh_Finalize
-void Mod_Mesh_Reset(model_t *mod)
+void Mod_Mesh_Reset(dp_model_t *mod)
 {
 	mod->num_surfaces = 0;
 	mod->surfmesh.num_vertices = 0;
 	mod->surfmesh.num_triangles = 0;
-	if (mod->surfmesh.data_vertexhash) // UBSan: memset arg 1 isn't allowed to be null, but sometimes this is NULL.
-		memset(mod->surfmesh.data_vertexhash, -1, mod->surfmesh.num_vertexhashsize * sizeof(*mod->surfmesh.data_vertexhash));
+	memset(mod->surfmesh.data_vertexhash, -1, mod->surfmesh.num_vertexhashsize * sizeof(*mod->surfmesh.data_vertexhash));
 	mod->DrawSky = NULL; // will be set if a texture needs it
 	mod->DrawAddWaterPlanes = NULL; // will be set if a texture needs it
 }
 
-texture_t *Mod_Mesh_GetTexture(model_t *mod, const char *name, int defaultdrawflags, int defaulttexflags, int defaultmaterialflags)
+texture_t *Mod_Mesh_GetTexture(dp_model_t *mod, const char *name)
 {
 	int i;
 	texture_t *t;
-	int drawflag = defaultdrawflags & DRAWFLAG_MASK;
-	for (i = 0, t = mod->data_textures; i < mod->num_textures; i++, t++)
-		if (!strcmp(t->name, name) && t->mesh_drawflag == drawflag && t->mesh_defaulttexflags == defaulttexflags && t->mesh_defaultmaterialflags == defaultmaterialflags)
-			return t;
+	for (i = 0; i < mod->num_textures; i++)
+		if (!strcmp(mod->data_textures[i].name, name))
+			return mod->data_textures + i;
 	if (mod->max_textures <= mod->num_textures)
 	{
 		texture_t *oldtextures = mod->data_textures;
@@ -4532,67 +4667,38 @@ texture_t *Mod_Mesh_GetTexture(model_t *mod, const char *name, int defaultdrawfl
 			mod->data_surfaces[i].texture = mod->data_textures + (mod->data_surfaces[i].texture - oldtextures);
 	}
 	t = &mod->data_textures[mod->num_textures++];
-	Mod_LoadTextureFromQ3Shader(mod->mempool, mod->name, t, name, true, true, defaulttexflags, defaultmaterialflags);
-	t->mesh_drawflag = drawflag;
-	t->mesh_defaulttexflags = defaulttexflags;
-	t->mesh_defaultmaterialflags = defaultmaterialflags;
-	switch (defaultdrawflags & DRAWFLAG_MASK)
-	{
-	case DRAWFLAG_ADDITIVE:
-		t->basematerialflags |= MATERIALFLAG_ADD | MATERIALFLAG_BLENDED;
-		t->currentmaterialflags = t->basematerialflags;
-		break;
-	case DRAWFLAG_MODULATE:
-		t->basematerialflags |= MATERIALFLAG_CUSTOMBLEND | MATERIALFLAG_BLENDED;
-		t->currentmaterialflags = t->basematerialflags;
-		t->customblendfunc[0] = GL_DST_COLOR;
-		t->customblendfunc[1] = GL_ZERO;
-		break;
-	case DRAWFLAG_2XMODULATE:
-		t->basematerialflags |= MATERIALFLAG_CUSTOMBLEND | MATERIALFLAG_BLENDED;
-		t->currentmaterialflags = t->basematerialflags;
-		t->customblendfunc[0] = GL_DST_COLOR;
-		t->customblendfunc[1] = GL_SRC_COLOR;
-		break;
-	case DRAWFLAG_SCREEN:
-		t->basematerialflags |= MATERIALFLAG_CUSTOMBLEND | MATERIALFLAG_BLENDED;
-		t->currentmaterialflags = t->basematerialflags;
-		t->customblendfunc[0] = GL_ONE_MINUS_DST_COLOR;
-		t->customblendfunc[1] = GL_ONE;
-		break;
-	default:
-		break;
-	}
+	Mod_LoadTextureFromQ3Shader(t, name, false, true, 0);
 	return t;
 }
 
-msurface_t *Mod_Mesh_AddSurface(model_t *mod, texture_t *tex, qbool batchwithprevioussurface)
+msurface_t *Mod_Mesh_AddSurface(dp_model_t *mod, texture_t *tex)
 {
 	msurface_t *surf;
-	// batch if possible; primarily useful for UI rendering where bounding boxes don't matter
-	if (batchwithprevioussurface && mod->num_surfaces > 0 && mod->data_surfaces[mod->num_surfaces - 1].texture == tex)
-		return mod->data_surfaces + mod->num_surfaces - 1;
-	// create new surface
-	if (mod->max_surfaces == mod->num_surfaces)
+	// check if the proposed surface matches the last one we created
+	if (mod->num_surfaces == 0 || mod->data_surfaces[mod->num_surfaces - 1].texture != tex)
 	{
-		mod->max_surfaces = 2 * max(mod->num_surfaces, 64);
-		mod->data_surfaces = (msurface_t *)Mem_Realloc(mod->mempool, mod->data_surfaces, mod->max_surfaces * sizeof(*mod->data_surfaces));
-		mod->modelsurfaces_sorted = (int *)Mem_Realloc(mod->mempool, mod->modelsurfaces_sorted, mod->max_surfaces * sizeof(*mod->modelsurfaces_sorted));
+		if (mod->max_surfaces == mod->num_surfaces)
+		{
+			mod->max_surfaces = 2 * max(mod->num_surfaces, 64);
+			mod->data_surfaces = (msurface_t *)Mem_Realloc(mod->mempool, mod->data_surfaces, mod->max_surfaces * sizeof(*mod->data_surfaces));
+			mod->sortedmodelsurfaces = (int *)Mem_Realloc(mod->mempool, mod->sortedmodelsurfaces, mod->max_surfaces * sizeof(*mod->sortedmodelsurfaces));
+		}
+		surf = mod->data_surfaces + mod->num_surfaces;
+		mod->num_surfaces++;
+		memset(surf, 0, sizeof(*surf));
+		surf->texture = tex;
+		surf->num_firsttriangle = mod->surfmesh.num_triangles;
+		surf->num_firstvertex = mod->surfmesh.num_vertices;
+		if (tex->basematerialflags & (MATERIALFLAG_SKY))
+			mod->DrawSky = R_Q1BSP_DrawSky;
+		if (tex->basematerialflags & (MATERIALFLAG_WATERSHADER | MATERIALFLAG_REFRACTION | MATERIALFLAG_REFLECTION | MATERIALFLAG_CAMERA))
+			mod->DrawAddWaterPlanes = R_Q1BSP_DrawAddWaterPlanes;
+		return surf;
 	}
-	surf = mod->data_surfaces + mod->num_surfaces;
-	mod->num_surfaces++;
-	memset(surf, 0, sizeof(*surf));
-	surf->texture = tex;
-	surf->num_firsttriangle = mod->surfmesh.num_triangles;
-	surf->num_firstvertex = mod->surfmesh.num_vertices;
-	if (tex->basematerialflags & (MATERIALFLAG_SKY))
-		mod->DrawSky = R_Mod_DrawSky;
-	if (tex->basematerialflags & (MATERIALFLAG_WATERSHADER | MATERIALFLAG_REFRACTION | MATERIALFLAG_REFLECTION | MATERIALFLAG_CAMERA))
-		mod->DrawAddWaterPlanes = R_Mod_DrawAddWaterPlanes;
-	return surf;
+	return mod->data_surfaces + mod->num_surfaces - 1;
 }
 
-int Mod_Mesh_IndexForVertex(model_t *mod, msurface_t *surf, float x, float y, float z, float nx, float ny, float nz, float s, float t, float u, float v, float r, float g, float b, float a)
+int Mod_Mesh_IndexForVertex(dp_model_t *mod, msurface_t *surf, float x, float y, float z, float nx, float ny, float nz, float s, float t, float u, float v, float r, float g, float b, float a)
 {
 	int hashindex, h, vnum, mask;
 	surfmesh_t *mesh = &mod->surfmesh;
@@ -4671,7 +4777,7 @@ int Mod_Mesh_IndexForVertex(model_t *mod, msurface_t *surf, float x, float y, fl
 	return vnum;
 }
 
-void Mod_Mesh_AddTriangle(model_t *mod, msurface_t *surf, int e0, int e1, int e2)
+void Mod_Mesh_AddTriangle(dp_model_t *mod, msurface_t *surf, int e0, int e1, int e2)
 {
 	surfmesh_t *mesh = &mod->surfmesh;
 	if (mesh->max_triangles == mesh->num_triangles)
@@ -4690,35 +4796,39 @@ void Mod_Mesh_AddTriangle(model_t *mod, msurface_t *surf, int e0, int e1, int e2
 	surf->num_triangles++;
 }
 
-static void Mod_Mesh_MakeSortedSurfaces(model_t *mod)
+static void Mod_Mesh_MakeSortedSurfaces(dp_model_t *mod)
 {
 	int i, j;
 	texture_t *tex;
+	msurface_t *surf, *surf2;
 
 	// build the sorted surfaces list properly to reduce material setup
 	// this is easy because we're just sorting on texture and don't care about the order of textures
-	mod->submodelsurfaces_start = 0;
-	mod->submodelsurfaces_end = 0;
+	mod->nummodelsurfaces = 0;
 	for (i = 0; i < mod->num_surfaces; i++)
 		mod->data_surfaces[i].included = false;
 	for (i = 0; i < mod->num_surfaces; i++)
 	{
-		if (mod->data_surfaces[i].included)
+		surf = mod->data_surfaces + i;
+		if (surf->included)
 			continue;
-		tex = mod->data_surfaces[i].texture;
+		tex = surf->texture;
 		// j = i is intentional
 		for (j = i; j < mod->num_surfaces; j++)
 		{
-			if (!mod->data_surfaces[j].included && mod->data_surfaces[j].texture == tex)
+			surf2 = mod->data_surfaces + j;
+			if (surf2->included)
+				continue;
+			if (surf2->texture == tex)
 			{
-				mod->data_surfaces[j].included = 1;
-				mod->modelsurfaces_sorted[mod->submodelsurfaces_end++] = j;
+				surf2->included = true;
+				mod->sortedmodelsurfaces[mod->nummodelsurfaces++] = j;
 			}
 		}
 	}
 }
 
-static void Mod_Mesh_ComputeBounds(model_t *mod)
+void Mod_Mesh_ComputeBounds(dp_model_t *mod)
 {
 	int i;
 	vec_t x2a, x2b, y2a, y2b, z2a, z2b, x2, y2, z2, yawradius, rotatedradius;
@@ -4774,52 +4884,9 @@ static void Mod_Mesh_ComputeBounds(model_t *mod)
 	}
 }
 
-void Mod_Mesh_Validate(model_t *mod)
+void Mod_Mesh_Finalize(dp_model_t *mod)
 {
-	int i;
-	qbool warned = false;
-	for (i = 0; i < mod->num_surfaces; i++)
-	{
-		msurface_t *surf = mod->data_surfaces + i;
-		int *e = mod->surfmesh.data_element3i + surf->num_firsttriangle * 3;
-		int first = surf->num_firstvertex;
-		int end = surf->num_firstvertex + surf->num_vertices;
-		int j;
-		for (j = 0;j < surf->num_triangles * 3;j++)
-		{
-			if (e[j] < first || e[j] >= end)
-			{
-				if (!warned)
-					Con_DPrintf(CON_WARN "Mod_Mesh_Validate: detected corrupt surface - debug me!\n");
-				warned = true;
-				e[j] = first;
-			}
-		}
-	}
-}
-
-static void Mod_Mesh_UploadDynamicBuffers(model_t *mod)
-{
-	mod->surfmesh.data_element3s_indexbuffer = mod->surfmesh.data_element3s ? R_BufferData_Store(mod->surfmesh.num_triangles * sizeof(short[3]), mod->surfmesh.data_element3s, R_BUFFERDATA_INDEX16, &mod->surfmesh.data_element3s_bufferoffset) : NULL;
-	mod->surfmesh.data_element3i_indexbuffer = mod->surfmesh.data_element3i ? R_BufferData_Store(mod->surfmesh.num_triangles * sizeof(int[3]), mod->surfmesh.data_element3i, R_BUFFERDATA_INDEX32, &mod->surfmesh.data_element3i_bufferoffset) : NULL;
-	mod->surfmesh.data_vertex3f_vertexbuffer = mod->surfmesh.data_vertex3f ? R_BufferData_Store(mod->surfmesh.num_vertices * sizeof(float[3]), mod->surfmesh.data_vertex3f, R_BUFFERDATA_VERTEX, &mod->surfmesh.data_vertex3f_bufferoffset) : NULL;
-	mod->surfmesh.data_svector3f_vertexbuffer = mod->surfmesh.data_svector3f ? R_BufferData_Store(mod->surfmesh.num_vertices * sizeof(float[3]), mod->surfmesh.data_svector3f, R_BUFFERDATA_VERTEX, &mod->surfmesh.data_svector3f_bufferoffset) : NULL;
-	mod->surfmesh.data_tvector3f_vertexbuffer = mod->surfmesh.data_tvector3f ? R_BufferData_Store(mod->surfmesh.num_vertices * sizeof(float[3]), mod->surfmesh.data_tvector3f, R_BUFFERDATA_VERTEX, &mod->surfmesh.data_tvector3f_bufferoffset) : NULL;
-	mod->surfmesh.data_normal3f_vertexbuffer = mod->surfmesh.data_normal3f ? R_BufferData_Store(mod->surfmesh.num_vertices * sizeof(float[3]), mod->surfmesh.data_normal3f, R_BUFFERDATA_VERTEX, &mod->surfmesh.data_normal3f_bufferoffset) : NULL;
-	mod->surfmesh.data_texcoordtexture2f_vertexbuffer = mod->surfmesh.data_texcoordtexture2f ? R_BufferData_Store(mod->surfmesh.num_vertices * sizeof(float[2]), mod->surfmesh.data_texcoordtexture2f, R_BUFFERDATA_VERTEX, &mod->surfmesh.data_texcoordtexture2f_bufferoffset) : NULL;
-	mod->surfmesh.data_texcoordlightmap2f_vertexbuffer = mod->surfmesh.data_texcoordlightmap2f ? R_BufferData_Store(mod->surfmesh.num_vertices * sizeof(float[2]), mod->surfmesh.data_texcoordlightmap2f, R_BUFFERDATA_VERTEX, &mod->surfmesh.data_texcoordlightmap2f_bufferoffset) : NULL;
-	mod->surfmesh.data_lightmapcolor4f_vertexbuffer = mod->surfmesh.data_lightmapcolor4f ? R_BufferData_Store(mod->surfmesh.num_vertices * sizeof(float[4]), mod->surfmesh.data_lightmapcolor4f, R_BUFFERDATA_VERTEX, &mod->surfmesh.data_lightmapcolor4f_bufferoffset) : NULL;
-	mod->surfmesh.data_skeletalindex4ub_vertexbuffer = mod->surfmesh.data_skeletalindex4ub ? R_BufferData_Store(mod->surfmesh.num_vertices * sizeof(unsigned char[4]), mod->surfmesh.data_skeletalindex4ub, R_BUFFERDATA_VERTEX, &mod->surfmesh.data_skeletalindex4ub_bufferoffset) : NULL;
-	mod->surfmesh.data_skeletalweight4ub_vertexbuffer = mod->surfmesh.data_skeletalweight4ub ? R_BufferData_Store(mod->surfmesh.num_vertices * sizeof(unsigned char[4]), mod->surfmesh.data_skeletalweight4ub, R_BUFFERDATA_VERTEX, &mod->surfmesh.data_skeletalweight4ub_bufferoffset) : NULL;
-}
-
-void Mod_Mesh_Finalize(model_t *mod)
-{
-	if (gl_paranoid.integer)
-		Mod_Mesh_Validate(mod);
 	Mod_Mesh_ComputeBounds(mod);
 	Mod_Mesh_MakeSortedSurfaces(mod);
-	if(!r_refdef.draw2dstage)
-		Mod_BuildTextureVectorsFromNormals(0, mod->surfmesh.num_vertices, mod->surfmesh.num_triangles, mod->surfmesh.data_vertex3f, mod->surfmesh.data_texcoordtexture2f, mod->surfmesh.data_normal3f, mod->surfmesh.data_element3i, mod->surfmesh.data_svector3f, mod->surfmesh.data_tvector3f, true);
-	Mod_Mesh_UploadDynamicBuffers(mod);
+	Mod_BuildTextureVectorsFromNormals(0, mod->surfmesh.num_vertices, mod->surfmesh.num_triangles, mod->surfmesh.data_vertex3f, mod->surfmesh.data_texcoordtexture2f, mod->surfmesh.data_normal3f, mod->surfmesh.data_element3i, mod->surfmesh.data_svector3f, mod->surfmesh.data_tvector3f, true);
 }
