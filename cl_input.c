@@ -25,6 +25,8 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "quakedef.h"
 #include "cl_lua.h"
 #include "csprogs.h"
+#include "touch_aim.h" // Touch assists (touch_*.c)
+#include "touch_hook.h"
 #include "thread.h"
 
 /*
@@ -742,6 +744,10 @@ void CL_Input (void)
 		cl.viewangles[YAW] = -cl.viewangles[YAW];
 		cl.cmd.sidemove = -cl.cmd.sidemove;
 	}
+
+	// Touch: auto-shoot and aim helpers, after this frame's look input and
+	// before the move is built (they run only where sv_allow_assist allows)
+	TouchAim_Frame();
 
 	// clamp after the move to prevent rendering with bad angles
 	CL_AdjustAngles ();
@@ -1828,9 +1834,11 @@ void CL_SendMove(void)
 	// set button bits
 	// LordHavoc: added 6 new buttons and use and chat buttons, and prydon cursor active button
 	bits = 0;
-	if (in_attack.state   & 3) bits |=   1;
+	// Touch auto-shoot adds the attack bit on top of the +attack key state
+	if ((in_attack.state & 3) || TouchAim_AutoFiring()) bits |= 1;
 	if (in_jump.state     & 3) bits |=   2;
 	if (in_button3.state  & 3) bits |=   4;
+	if (TouchAim_AutoFire2()) bits |= 4; // Touch: auto-shoot's secondary fire
 	if (in_button4.state  & 3) bits |=   8;
 	if (in_button5.state  & 3) bits |=  16;
 	if (in_button6.state  & 3) bits |=  32;
@@ -2334,5 +2342,7 @@ void CL_InitInput (void)
 	Cvar_RegisterVariable(&cl_nodelta);
 
 	Cvar_RegisterVariable(&cl_csqc_generatemousemoveevents);
+
+	TouchAim_Init(); // Touch assists
 }
 
