@@ -32,6 +32,16 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include <IOKit/hidsystem/IOHIDLib.h>
 #include <IOKit/hidsystem/IOHIDParameter.h>
 #include <IOKit/hidsystem/event_status_driver.h>
+#ifdef __ANDROID__
+#include <dlfcn.h>
+// Insanotic: render through ANGLE (GLES on Vulkan) instead of the phone's own
+// GLES driver. 0 = native driver (default), 1 = ANGLE when the app bundles it
+// (falls back to native if the libraries are missing). -angle / -noangle on
+// the command line override it. Read before the window is created, so a
+// change needs an app restart (the GL library is chosen once per process).
+static cvar_t vid_android_angle = {CVAR_SAVE, "vid_android_angle", "0", "Android: use the bundled ANGLE (GLES over Vulkan) instead of the native GLES driver; takes effect on the next app start"};
+static const char *vid_angle_state = "native";
+#endif
 static cvar_t apple_mouse_noaccel = {CVAR_SAVE, "apple_mouse_noaccel", "1", "disables mouse acceleration while DarkPlaces is active"};
 static qboolean vid_usingnoaccel;
 static double originalMouseSpeed = -1.0;
@@ -2086,6 +2096,9 @@ void GLES_Init(void)
 	
 	Con_Printf("GL_VENDOR: %s\n", gl_vendor);
 	Con_Printf("GL_RENDERER: %s\n", gl_renderer);
+#ifdef __ANDROID__
+	Con_Printf("GL backend: %s (renderer %s)\n", vid_angle_state, gl_renderer);
+#endif
 	Con_Printf("GL_VERSION: %s\n", gl_version);
 	Con_DPrintf("GL_EXTENSIONS: %s\n", gl_extensions);
 	Con_DPrintf("%s_EXTENSIONS: %s\n", gl_platform, gl_platformextensions);
@@ -2255,8 +2268,41 @@ void *GL_GetProcAddress(const char *name)
 
 static qboolean vid_sdl_initjoysticksystem = false;
 
+#ifdef __ANDROID__
+static void VID_Android_SetupANGLE(void)
+{
+	qboolean want = vid_android_angle.integer != 0;
+	void *egl, *gles;
+	if (COM_CheckParm("-angle"))
+		want = true;
+	if (COM_CheckParm("-noangle"))
+		want = false;
+	vid_angle_state = "native";
+	if (!want)
+		return;
+	// only switch when both libraries really load, otherwise SDL would fail to
+	// create the window and the app would not start at all
+	egl = dlopen("libEGL_angle.so", RTLD_NOW | RTLD_LOCAL);
+	gles = dlopen("libGLESv2_angle.so", RTLD_NOW | RTLD_LOCAL);
+	if (!egl || !gles)
+	{
+		Con_Printf("ANGLE requested but not available (%s), using the native GLES driver\n", dlerror());
+		if (egl) dlclose(egl);
+		if (gles) dlclose(gles);
+		return;
+	}
+	SDL_SetHint(SDL_HINT_EGL_LIBRARY, "libEGL_angle.so");
+	SDL_SetHint(SDL_HINT_OPENGL_LIBRARY, "libGLESv2_angle.so");
+	vid_angle_state = "ANGLE";
+	Con_Printf("GL backend: ANGLE (libEGL_angle.so / libGLESv2_angle.so)\n");
+}
+#endif
+
 void VID_Init (void)
 {
+#ifdef __ANDROID__
+	Cvar_RegisterVariable(&vid_android_angle);
+#endif
 #ifndef __IPHONEOS__
 #ifdef MACOSX
 	Cvar_RegisterVariable(&apple_mouse_noaccel);
@@ -2820,6 +2866,9 @@ static qboolean VID_InitModeGL(viddef_mode_t *mode)
 #endif
 	//flags |= SDL_HWSURFACE;
 
+#ifdef __ANDROID__
+	VID_Android_SetupANGLE();
+#endif
 	SDL_GL_SetAttribute (SDL_GL_DOUBLEBUFFER, 1);
 	if (mode->bitsperpixel >= 32)
 	{
