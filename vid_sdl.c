@@ -492,6 +492,34 @@ void VID_SetMouse(qboolean fullscreengrab, qboolean relative, qboolean hidecurso
 // X and Y coordinates are 0-1.
 #define MAXFINGERS 11
 float multitouch[MAXFINGERS][3];
+// A finger that went down and up between two frames would never be seen by
+// anyone polling once per frame (a quick tap on a button): its release is
+// held back until it has been reported once. multitouch_seen: reported at
+// least once; multitouch_release: lifted, waiting to be reported.
+static qboolean multitouch_seen[MAXFINGERS];
+static qboolean multitouch_release[MAXFINGERS];
+
+static void VID_FlushTouchReleases(void)
+{
+	int i;
+	for (i = 0;i < MAXFINGERS-1;i++)
+		if (multitouch_release[i])
+		{
+			multitouch[i][0] = 0;
+			multitouch_release[i] = false;
+		}
+}
+
+// every finger up at once: focus lost, so no lift event will come
+static void VID_ReleaseAllTouches(void)
+{
+	int i;
+	for (i = 0;i < MAXFINGERS-1;i++)
+	{
+		multitouch[i][0] = 0;
+		multitouch_seen[i] = multitouch_release[i] = false;
+	}
+}
 // last input came from a finger (true) or from keyboard / mouse (false)
 static qboolean vid_input_touch;
 
@@ -999,6 +1027,10 @@ void IN_Move( void )
 
 	scr_numtouchscreenareas = 0;
 
+	// nobody polls the fingers when no Lua mod drives them: drop lifted ones
+	if (!cl_lua_touch_captured)
+		VID_FlushTouchReleases();
+
 	// Insanotic: back in the game (console and chat closed, menu gone) the
 	// on-screen keyboard always closes, and the menu's "a text field wants
 	// it" flag is reset: closing a dialog or the menu does not always tell
@@ -1439,6 +1471,7 @@ void Sys_SendKeyEvents( void )
 						break;
 					case SDL_WINDOWEVENT_FOCUS_LOST:
 						vid_hasfocus = false;
+						VID_ReleaseAllTouches();
 						break;
 					case SDL_WINDOWEVENT_CLOSE:
 						Sys_Quit(0);
@@ -1475,6 +1508,7 @@ void Sys_SendKeyEvents( void )
 					if (!multitouch[i][0])
 					{
 						multitouch[i][0] = event.tfinger.fingerId + 1;
+						multitouch_seen[i] = multitouch_release[i] = false;
 						multitouch[i][1] = event.tfinger.x;
 						multitouch[i][2] = event.tfinger.y;
 						// TODO: use event.tfinger.pressure?
@@ -1502,9 +1536,12 @@ void Sys_SendKeyEvents( void )
 #endif
 				for (i = 0;i < MAXFINGERS-1;i++)
 				{
-					if (multitouch[i][0] == event.tfinger.fingerId + 1)
+					if (multitouch[i][0] == event.tfinger.fingerId + 1 && !multitouch_release[i])
 					{
-						multitouch[i][0] = 0;
+						if (multitouch_seen[i])
+							multitouch[i][0] = 0;
+						else
+							multitouch_release[i] = true; // report it once first
 						break;
 					}
 				}
@@ -1517,7 +1554,7 @@ void Sys_SendKeyEvents( void )
 #endif
 				for (i = 0;i < MAXFINGERS-1;i++)
 				{
-					if (multitouch[i][0] == event.tfinger.fingerId + 1)
+					if (multitouch[i][0] == event.tfinger.fingerId + 1 && !multitouch_release[i])
 					{
 						multitouch[i][1] = event.tfinger.x;
 						multitouch[i][2] = event.tfinger.y;
@@ -3159,8 +3196,11 @@ int VID_GetTouches(vid_touch_t *out, int max)
 		out[n].id = (int)multitouch[i][0];
 		out[n].x = multitouch[i][1];
 		out[n].y = multitouch[i][2];
+		multitouch_seen[i] = true;
 		n++;
 	}
+	// lifted fingers have been reported once now: let them go
+	VID_FlushTouchReleases();
 	if (cl_lua_touch_mouse.integer && n < max && vid.width > 0 && vid.height > 0)
 	{
 		int x, y;
