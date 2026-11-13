@@ -20,3 +20,7 @@ What was changed for Insanotic:
   see-through, full-360 and instant-turn "practice" helpers are switched off.
 - `touch_wepquery.c` holds only the part of their `touch_hud.c` the assists need
   (the CSQC weapon registry). Their engine-side HUD is not part of Insanotic.
+- `touch_autowalk.c` is the navigation half of their offline autopilot
+  (`touch_tactics.c`): pickup choice, safe-ground checks, 16-direction steering
+  and the bot waypoint route. It never reads another player, never fights, and
+  runs only with `cl_touch_autowalk 1` (default 0) and `sv_allow_assist 1`.
