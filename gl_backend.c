@@ -77,6 +77,7 @@ void GL_PrintError(GLenum errornumber, const char *filename, unsigned int linenu
 }
 #endif // DEBUGGL
 
+#ifndef USE_GLES2 // GL_KHR_debug on GLES has other names; the ARB path is desktop only
 static void GLAPIENTRY GL_DebugOutputCallback(GLenum source, GLenum type, GLuint id, GLenum severity, GLsizei length, const GLchar* message, const GLvoid* userParam)
 {
 	const char *sev = "ENUM?", *typ = "ENUM?", *src = "ENUM?", *col = "";
@@ -106,6 +107,7 @@ static void GLAPIENTRY GL_DebugOutputCallback(GLenum source, GLenum type, GLuint
 	}
 	Con_Printf("gl_debug: %s%s %s %s: %u: %s\n", col, sev, typ, src, (unsigned int)id, message);
 }
+#endif
 
 #define BACKENDACTIVECHECK if (!gl_state.active) Sys_Error("GL backend function called when backend is not active");
 
@@ -1096,6 +1098,7 @@ static void GL_Backend_ResetState(void)
 	{
 	case RENDERPATH_GL32:
 	case RENDERPATH_GLES2:
+#ifndef USE_GLES2
 		// set up debug output early
 		if (gl_debug.integer > 0 && vid.support.arb_debug_output)
 		{
@@ -1116,6 +1119,7 @@ static void GL_Backend_ResetState(void)
 				qglDebugMessageControlARB(GL_DONT_CARE, GL_DONT_CARE, GL_DONT_CARE, 0, &unused, GL_FALSE);
 			qglDebugMessageCallbackARB(GL_DebugOutputCallback, NULL);
 		}
+#endif
 		CHECKGLERROR
 		qglColorMask(1, 1, 1, 1);CHECKGLERROR
 		qglBlendFunc(gl_state.blendfunc1, gl_state.blendfunc2);CHECKGLERROR

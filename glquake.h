@@ -5,6 +5,9 @@
 
 #ifdef USE_GLES2
 #include <SDL_opengles2.h>
+#ifndef GL_BGRA
+#define GL_BGRA 0x80E1 // GL_EXT_texture_format_BGRA8888; only named in code the GL32 path runs
+#endif
 #else
 //#include <SDL_opengl.h>
 //#include <SDL_opengl_glext.h>
