@@ -118,14 +118,15 @@ qboolean SndSys_Init (const snd_format_t* requested, snd_format_t* suggested)
 		return false;
 	}
 
-#ifdef __ANDROID__
-	// Insanotic: phones mix every frame at a steady 60 fps, so a 512 sample
-	// device buffer (about 11 ms at 48 kHz) is safe and keeps shots and the
-	// sound coming back after the app returns to the front immediate
-	buffersize = (unsigned int)ceil((double)requested->speed / 100.0);
-#else
-	buffersize = (unsigned int)ceil((double)requested->speed / 25.0); // 2048 bytes on 24kHz to 48kHz
-#endif
+	// Insanotic: the audio callback mixes AND decodes streamed music, so a tiny
+	// device buffer (512 frames, ~11 ms) underruns whenever the callback thread
+	// gets descheduled for a moment, which on phone CPUs is constantly.
+	// 2048 frames (~43 ms at 48 kHz) is the same on every platform; set
+	// snd_buffersize to override it (then snd_restart).
+	if (snd_buffersize.integer > 0)
+		buffersize = (unsigned int)bound(256, snd_buffersize.integer, 16384);
+	else
+		buffersize = (unsigned int)ceil((double)requested->speed / 25.0); // 2048 bytes on 24kHz to 48kHz
 
 	// Init the SDL Audio subsystem
 	wantspec.callback = Buffer_Callback;
@@ -148,6 +149,7 @@ qboolean SndSys_Init (const snd_format_t* requested, snd_format_t* suggested)
 		return false;
 	}
 
+	Con_Printf("Audio driver: %s\n", SDL_GetCurrentAudioDriver() ? SDL_GetCurrentAudioDriver() : "?");
 	Con_Printf("Obtained audio specification:\n"
 				"\tChannels  : %i\n"
 				"\tFormat    : 0x%X\n"
