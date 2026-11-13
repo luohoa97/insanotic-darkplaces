@@ -1836,6 +1836,7 @@ void wrapglGetVertexAttribPointerv(GLuint index, GLenum pname, GLvoid **pointer)
 #define SDL_GL_ExtensionSupported(x) (strstr(gl_extensions, x) || strstr(gl_platformextensions, x))
 #endif
 
+extern cvar_t gl_info_extensions;
 void GLES_Init(void)
 {
 #ifndef qglClear
@@ -2126,6 +2127,38 @@ void GLES_Init(void)
 	vid.support.arb_texture_float = SDL_GL_ExtensionSupported("GL_OES_texture_float") != 0;
 	vid.support.arb_half_float_pixel = SDL_GL_ExtensionSupported("GL_OES_texture_half_float") != 0;
 	vid.support.arb_half_float_vertex = SDL_GL_ExtensionSupported("GL_OES_vertex_half_float") != 0;
+
+	// Insanotic: gl_info_extensions is what the menu QuakeC asks (GL_CheckExtension
+	// in util.qc) to tell whether the GPU takes S3TC or ASTC textures. On
+	// desktop GL it is filled by GL_CheckExtension; this GLES path sets the
+	// flags above directly, so the list stayed empty: the menu then saw no
+	// texture compression, turned r_texture_dds_load off and restarted the
+	// renderer, and no DDS or ASTC texture ever loaded. List what the engine
+	// actually uses (so -noastc and -nos3tc are honoured too).
+	{
+		static const struct {const char *name; qboolean *flag;} gles_exts[] =
+		{
+			{"GL_EXT_texture_compression_s3tc", &vid.support.ext_texture_compression_s3tc},
+			{"GL_KHR_texture_compression_astc_ldr", &vid.support.khr_texture_compression_astc_ldr},
+			{"GL_ARB_texture_compression", &vid.support.arb_texture_compression},
+			{"GL_ARB_texture_non_power_of_two", &vid.support.arb_texture_non_power_of_two},
+			{"GL_ARB_texture_cube_map", &vid.support.arb_texture_cube_map},
+			{"GL_EXT_texture3D", &vid.support.ext_texture_3d},
+			{"GL_ARB_depth_texture", &vid.support.arb_depth_texture},
+			{"GL_ARB_texture_float", &vid.support.arb_texture_float},
+			{"GL_ARB_half_float_pixel", &vid.support.arb_half_float_pixel},
+			{"GL_ARB_half_float_vertex", &vid.support.arb_half_float_vertex},
+		};
+		char extstr[16384];
+		size_t i;
+		extstr[0] = 0;
+		for (i = 0; i < sizeof(gles_exts) / sizeof(gles_exts[0]); i++)
+			if (*gles_exts[i].flag)
+				dpsnprintf(extstr + strlen(extstr), sizeof(extstr) - strlen(extstr), "%s ", gles_exts[i].name);
+		Cvar_SetQuick(&gl_info_extensions, extstr);
+		Con_DPrintf("GLES texture compression: S3TC %s, ASTC %s\n",
+			vid.support.ext_texture_compression_s3tc ? "yes" : "no", vid.support.khr_texture_compression_astc_ldr ? "yes" : "no");
+	}
 
 	// NOTE: On some devices, a value of 512 gives better FPS than the maximum.
 	qglGetIntegerv(GL_MAX_TEXTURE_SIZE, (GLint*)&vid.maxtexturesize_2d);
