@@ -20,6 +20,9 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // host.c -- coordinates spawning and killing of local servers
 
 #include "quakedef.h"
+#ifdef __EMSCRIPTEN__
+#include <emscripten.h>
+#endif
 #include "loadtimes.h"
 #include "cl_lua.h"
 
@@ -732,23 +735,23 @@ Runs all active servers
 ==================
 */
 static void Host_Init(void);
-void Host_Main(void)
+// The frame loop keeps this state between frames. One frame is a function of
+// its own so that a platform that cannot block in the engine (a browser) can
+// have its main loop call it once per animation frame.
+static double time1 = 0;
+static double time2 = 0;
+static double time3 = 0;
+static double cl_timer = 0, sv_timer = 0;
+
+static void Host_OneFrame(void)
 {
-	double time1 = 0;
-	double time2 = 0;
-	double time3 = 0;
-	double cl_timer = 0, sv_timer = 0;
 	double clframetime, deltacleantime, olddirtytime, dirtytime;
 	double wait;
 	int pass1, pass2, pass3, i;
 	char vabuf[1024];
 	qboolean playing;
 
-	Host_Init();
-
-	realtime = 0;
-	host_dirtytime = Sys_DirtyTime();
-	for (;;)
+	do // once: "continue" below leaves the frame
 	{
 		if (setjmp(host_abortframe))
 		{
@@ -1163,7 +1166,22 @@ void Host_Main(void)
 		}
 
 		host_framecount++;
-	}
+	} while (0);
+}
+
+void Host_Main(void)
+{
+	Host_Init();
+
+	realtime = 0;
+	host_dirtytime = Sys_DirtyTime();
+#ifdef __EMSCRIPTEN__
+	// the browser owns the loop: one engine frame per animation frame
+	emscripten_set_main_loop(Host_OneFrame, 0, 1);
+#else
+	for (;;)
+		Host_OneFrame();
+#endif
 }
 
 //============================================================================

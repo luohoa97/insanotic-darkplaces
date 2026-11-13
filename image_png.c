@@ -140,6 +140,35 @@ PNG_OpenLibrary
 Try to load the PNG DLL
 ====================
 */
+#ifdef LINK_TO_LIBPNG
+// libpng is linked in (the browser build has no dlopen): the same function
+// pointers, filled from the table in image_png_link.c, which takes the
+// addresses with libpng's own prototypes (a wasm indirect call must match the
+// callee's signature exactly).
+extern const struct { const char *name; void *func; } png_link_table[];
+
+qboolean PNG_OpenLibrary (void)
+{
+	int i, j;
+	if (png_dll)
+		return true;
+	for (i = 0; png_link_table[i].name; i++)
+	{
+		for (j = 0; pngfuncs[j].name; j++)
+			if (!strcmp(pngfuncs[j].name, png_link_table[i].name))
+				*pngfuncs[j].funcvariable = png_link_table[i].func;
+		if (!strcmp(png_link_table[i].name, "png_set_longjmp_fn"))
+			*(void **)&qpng_set_longjmp_fn = png_link_table[i].func;
+	}
+	png_dll = (dllhandle_t)1; // "loaded"
+	return true;
+}
+
+void PNG_CloseLibrary (void)
+{
+	png_dll = NULL;
+}
+#else
 qboolean PNG_OpenLibrary (void)
 {
 	const char* dllnames [] =
@@ -196,6 +225,7 @@ void PNG_CloseLibrary (void)
 	Sys_UnloadLibrary (&png14_dll);
 	Sys_UnloadLibrary (&png_dll);
 }
+#endif
 
 /*
 =================================================================
