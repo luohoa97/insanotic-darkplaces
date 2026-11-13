@@ -184,6 +184,8 @@ struct ServerRow {
 	int slots = 0;
 	int free_slots = 0;
 	bool favorite = false;
+	// A row the list keeps but does not show (see ServersRebuild)
+	bool gone = false;
 };
 
 struct ServersModel {
@@ -196,6 +198,13 @@ struct ServersModel {
 	Rml::DataModelHandle handle;
 	std::vector<ServerRow> rows;
 	std::vector<ServerRow> all; // what the network code found, before the filter
+	// The list never gets shorter, only its tail is hidden: RmlUi logs a
+	// warning for every binding of every row a shorter array drops, which
+	// was thousands of console lines (and a stalled frame) each time the
+	// list was reset, refreshed or filtered. Hidden rows are display: none.
+	size_t pool = 0;
+	std::vector<UIE_Server> raw; // reused, the list is read every update
+	int lookups_left = 0; // file system searches for map pictures this tick
 	std::string filter, selected, address, status;
 	std::string sort = "ping";
 	bool descending = false;
@@ -228,6 +237,11 @@ std::string MapPicture(const std::string& map)
 	// a map that was asked for may have arrived: look again now and then
 	if (it != servers->pictures.end() && (!it->second.empty() || !servers->asked.count(map) || now < servers->next_recheck[map]))
 		return it->second;
+	// searching the game files is not free (the mappreviews search walks
+	// every pack): a few per tick, the other rows get theirs a moment later
+	if (servers->lookups_left <= 0)
+		return it != servers->pictures.end() ? it->second : "";
+	servers->lookups_left--;
 	std::string found;
 	for (const char* ext : {".jpg", ".png", ".tga"})
 		if (UIE_FileExists(("maps/" + map + ext).c_str())) {
@@ -241,7 +255,7 @@ std::string MapPicture(const std::string& map)
 			found = std::string("/") + files[0];
 	}
 	servers->pictures[map] = found;
-	servers->next_recheck[map] = now + 1.5;
+	servers->next_recheck[map] = now + 3.0;
 	return found;
 }
 
@@ -251,6 +265,7 @@ std::string MapPicture(const std::string& map)
 void UpdateRowImages()
 {
 	ServersModel& m = *servers;
+	m.lookups_left = 2;
 	if (!m.context || m.rows.empty())
 		return;
 	Rml::Element* list = nullptr;
@@ -265,7 +280,7 @@ void UpdateRowImages()
 	int last = (int)((list->GetScrollTop() + list->GetClientHeight()) / rh) + 2;
 	bool changed = false;
 	for (int i = 0; i < (int)m.rows.size(); i++) {
-		bool visible = i >= first && i <= last;
+		bool visible = i >= first && i <= last && !m.rows[i].gone;
 		std::string want = visible ? MapPicture(m.rows[i].map) : "";
 		// a map the client has no picture of: ask a server that has one (a few at
 		// a time, once per map; the answer is a file that the lookup finds)
@@ -289,8 +304,10 @@ bool CvarBool(const char* name, bool fallback)
 void ServersRebuild(bool force)
 {
 	ServersModel& m = *servers;
-	std::vector<UIE_Server> raw(1024);
-	int n = UIE_ServerList(raw.data(), (int)raw.size());
+	if (m.raw.empty())
+		m.raw.resize(1024);
+	const std::vector<UIE_Server>& raw = m.raw;
+	int n = UIE_ServerList(m.raw.data(), (int)m.raw.size());
 	int max_ping = atoi(UIE_CvarString("menu_slist_maxping"));
 	if (max_ping <= 0)
 		max_ping = 200;
@@ -353,6 +370,12 @@ void ServersRebuild(bool force)
 	if (!force && sig == m.signature && status == m.status)
 		return;
 	m.signature = sig;
+	// pad to the longest the list has been, the extra rows are not shown
+	const size_t shown = rows.size();
+	m.pool = std::max(m.pool, shown);
+	rows.resize(m.pool);
+	for (size_t i = shown; i < rows.size(); i++)
+		rows[i].gone = true;
 	m.rows.swap(rows);
 	UpdateRowImages(); // so the pictures do not blink when the list changes
 	m.status = status;
@@ -379,7 +402,7 @@ void InfoRefresh()
 	m.info_mod = d.mod;
 	m.info_favorite = IsFavorite(m.info_address);
 	for (const ServerRow& r : m.rows)
-		if (r.address == m.info_address) {
+		if (!r.gone && r.address == m.info_address) {
 			m.info_ping = r.ping;
 			m.info_name = r.name;
 			m.info_map = r.map;
@@ -412,7 +435,10 @@ void ServersCvars(bool write)
 void ServersAsk(double now, bool reset)
 {
 	UIE_ServerRefresh(reset ? 1 : 0);
-	servers->pictures.clear();
+	// a map that has a picture keeps it; the ones without get another look
+	// (the player may have downloaded it since)
+	for (auto it = servers->pictures.begin(); it != servers->pictures.end();)
+		it = it->second.empty() ? servers->pictures.erase(it) : std::next(it);
 	servers->next_recheck.clear();
 	servers->refreshing = true;
 	servers->refresh_until = now + 6; // long enough for the first answers
@@ -440,7 +466,9 @@ void ServersUpdate(double now, bool shown)
 	}
 	if (now < servers->next_update)
 		return;
-	servers->next_update = now + 0.4;
+	// the rows are laid out again each time they change: a refresh brings a
+	// change every few frames, so it is done at a slower pace
+	servers->next_update = now + (servers->refreshing ? 1.0 : 0.5);
 	ServersCvars(true);
 	ServersRebuild(false);
 	InfoRefresh();
@@ -463,6 +491,7 @@ void CreateServers(Rml::Context* context)
 		s.RegisterMember("players", &ServerRow::players);
 		s.RegisterMember("ping", &ServerRow::ping);
 		s.RegisterMember("favorite", &ServerRow::favorite);
+		s.RegisterMember("gone", &ServerRow::gone);
 	}
 	if (auto p = c.RegisterStruct<PlayerRow>()) {
 		p.RegisterMember("name", &PlayerRow::name);

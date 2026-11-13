@@ -121,9 +121,29 @@ public:
 			level = 2;
 			break;
 		}
+		// A burst of the same complaint (a data binding that no longer
+		// matches, one line for every row of a list) must not fill the
+		// console and stall the frame that prints it: ten lines a second.
+		if (level == 1) {
+			double now = UIE_Time();
+			if (now - log_window_ >= 1.0) {
+				if (log_dropped_ > 0)
+					UIE_Log(1, (std::to_string(log_dropped_) + " more RmlUi messages left out").c_str());
+				log_window_ = now;
+				log_count_ = 0;
+				log_dropped_ = 0;
+			}
+			if (++log_count_ > 10) {
+				log_dropped_++;
+				return true;
+			}
+		}
 		UIE_Log(level, message.c_str());
 		return true;
 	}
+	double log_window_ = 0;
+	int log_count_ = 0;
+	int log_dropped_ = 0;
 	// copy and paste go through the system clipboard
 	void SetClipboardText(const Rml::String& text) override { UIE_ClipboardSet(text.c_str()); }
 	void GetClipboardText(Rml::String& text) override
