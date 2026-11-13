@@ -1538,7 +1538,11 @@ void Sys_SendKeyEvents( void )
 				{
 					if (multitouch[i][0] == event.tfinger.fingerId + 1 && !multitouch_release[i])
 					{
-						if (multitouch_seen[i])
+						// only a Lua mod that polls the fingers needs the
+						// release held back; otherwise nobody would ever
+						// report it, and it would show up late as a press
+						// on the touch HUD once a mod starts polling
+						if (multitouch_seen[i] || !cl_lua_touch_captured)
 							multitouch[i][0] = 0;
 						else
 							multitouch_release[i] = true; // report it once first
