@@ -1825,7 +1825,7 @@ Key_Event (int key, int ascii, qboolean down)
 #endif
 		}
 		else
-			Con_ToggleConsole_f(cmd_local);
+			Con_ToggleConsole_f();
 		return;
 	}
 
