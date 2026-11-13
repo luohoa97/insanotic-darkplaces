@@ -288,6 +288,7 @@ struct Document {
 	bool shown = false;
 	bool server = false; // a page a server sent: it is not trusted, see UIRml_ShowServer
 	double shown_at = 0;
+	double closing_until = 0; // fading out (body class "closing"), hidden when this time comes
 	std::string path;    // server pages: where it was loaded from
 	std::map<std::string, bool> classes;
 };
@@ -483,6 +484,10 @@ void ActionListener::ProcessEvent(Rml::Event& event)
 		bool reply = e->HasAttribute("data-reply");
 		bool cmd = e->HasAttribute("data-cmd");
 		if (!close && !reply && !cmd)
+			continue;
+		// a veil that closes its dialog only when the click is on the veil
+		// itself, not on the dialog above it
+		if (e->HasAttribute("data-backdrop") && event.GetTargetElement() != e)
 			continue;
 		Document* d = DocumentOf(e);
 		if (!d)
@@ -699,8 +704,14 @@ void CloseDocument(const std::string& name)
 	Document& d = it->second;
 	if (!d.doc || !d.server) {
 		if (d.doc && d.shown) {
-			d.doc->Hide();
-			d.shown = false;
+			if (name == "mainmenu") {
+				d.doc->Hide();
+				d.shown = false;
+			} else if (!d.closing_until) {
+				// fade out first (the stylesheet animates body.closing)
+				d.doc->SetClass("closing", true);
+				d.closing_until = UIE_Time() + 0.16;
+			}
 		}
 	} else {
 		if (g->scroll_target && g->scroll_target->GetOwnerDocument() == d.doc)
@@ -809,6 +820,10 @@ int UIRml_Show(const char* name)
 			return 0;
 		}
 		PrepareDocument(d);
+	}
+	if (d.closing_until) {
+		d.closing_until = 0;
+		d.doc->SetClass("closing", false);
 	}
 	if (!d.shown) {
 		d.doc->Show();
@@ -989,6 +1004,7 @@ void UIRml_Reload(void)
 		Document& d = kv.second;
 		if (d.doc)
 			g->context->UnloadDocument(d.doc);
+		d.closing_until = 0;
 		d.doc = g->context->LoadDocument(DocumentPath(kv.first));
 		if (!d.doc) {
 			d.shown = false;
@@ -1044,7 +1060,7 @@ void UIRml_EachShown(void (*each)(const char* name))
 	if (!g)
 		return;
 	for (auto& kv : g->documents)
-		if (kv.second.shown)
+		if (kv.second.shown && !kv.second.closing_until)
 			each(kv.first.c_str());
 }
 
@@ -1147,6 +1163,25 @@ int UIRml_MouseButton(int button, int down, int modifiers, int touch)
 			g->left_target = false;
 			// a touch on a list that is still flying or springing back stops
 			// it, and is not a click on what is under the finger
+			if (g->touch && g->scroll_target) {
+				// A press somewhere else (a tab, a button) while a list is
+				// still flying is a press like any other: the list settles
+				// and the press goes through. Only a touch on the list
+				// itself stops it.
+				bool on_list = false;
+				for (Rml::Element* e = g->context->GetHoverElement(); e; e = e->GetParentNode())
+					if (e == g->scroll_target) {
+						on_list = true;
+						break;
+					}
+				if (!on_list) {
+					Rml::Vector2f max = ScrollMax(g->scroll_target);
+					g->pos.x = std::min(std::max(g->pos.x, 0.0f), max.x);
+					g->pos.y = std::min(std::max(g->pos.y, 0.0f), max.y);
+					ApplyScroll(g->scroll_target);
+					EndScroll();
+				}
+			}
 			Rml::Vector2f v = g->velocity;
 			g->swallow = g->touch && g->scroll_target && (std::fabs(v.x) > 20.0f || std::fabs(v.y) > 20.0f || g->shown_offset.x != 0 || g->shown_offset.y != 0);
 			if (!g->swallow)
@@ -1296,6 +1331,15 @@ void UIRml_Frame(void)
 	closing.swap(g->pending_close);
 	for (const std::string& n : closing)
 		CloseDocument(n);
+	for (auto& kv : g->documents) {
+		Document& d = kv.second;
+		if (d.closing_until && now >= d.closing_until) {
+			d.closing_until = 0;
+			d.doc->Hide();
+			d.doc->SetClass("closing", false);
+			d.shown = false;
+		}
+	}
 	// a page from a server does not stay up for ever
 	double limit = atof(UIE_CvarString("cl_server_page_timeout"));
 	if (limit > 0)
