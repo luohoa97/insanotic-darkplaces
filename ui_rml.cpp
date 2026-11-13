@@ -492,6 +492,10 @@ void ActionListener::ProcessEvent(Rml::Event& event)
 		Document* d = DocumentOf(e);
 		if (!d)
 			return;
+		// a dialog that is fading out is already closed: a second tap on its
+		// button must not run the command again
+		if (d->closing_until)
+			return;
 		if (d->server) {
 			// A page from a server can only talk to that server: its answer,
 			// or a "cmd ..." line for the server's own game code. Nothing it
