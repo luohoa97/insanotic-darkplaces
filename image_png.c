@@ -140,6 +140,92 @@ PNG_OpenLibrary
 Try to load the PNG DLL
 ====================
 */
+#ifdef LINK_TO_LIBPNG
+// libpng is linked in (the browser build has no dlopen): the same function
+// pointers, filled from the library's own symbols. These are only addresses,
+// the signatures are the ones declared for the pointers above.
+extern void png_set_sig_bytes(void);
+extern void png_sig_cmp(void);
+extern void png_create_read_struct(void);
+extern void png_create_write_struct(void);
+extern void png_create_info_struct(void);
+extern void png_read_info(void);
+extern void png_set_compression_level(void);
+extern void png_set_filter(void);
+extern void png_set_expand(void);
+extern void png_set_palette_to_rgb(void);
+extern void png_set_tRNS_to_alpha(void);
+extern void png_set_gray_to_rgb(void);
+extern void png_set_filler(void);
+extern void png_set_IHDR(void);
+extern void png_set_packing(void);
+extern void png_set_bgr(void);
+extern void png_set_interlace_handling(void);
+extern void png_read_update_info(void);
+extern void png_read_image(void);
+extern void png_read_end(void);
+extern void png_destroy_read_struct(void);
+extern void png_destroy_write_struct(void);
+extern void png_set_read_fn(void);
+extern void png_set_write_fn(void);
+extern void png_get_valid(void);
+extern void png_get_rowbytes(void);
+extern void png_get_channels(void);
+extern void png_get_bit_depth(void);
+extern void png_get_IHDR(void);
+extern void png_access_version_number(void);
+extern void png_write_info(void);
+extern void png_write_row(void);
+extern void png_write_end(void);
+extern void png_set_longjmp_fn(void);
+
+qboolean PNG_OpenLibrary (void)
+{
+	if (png_dll)
+		return true;
+	*(void **)&qpng_set_sig_bytes = (void *)png_set_sig_bytes;
+	*(void **)&qpng_sig_cmp = (void *)png_sig_cmp;
+	*(void **)&qpng_create_read_struct = (void *)png_create_read_struct;
+	*(void **)&qpng_create_write_struct = (void *)png_create_write_struct;
+	*(void **)&qpng_create_info_struct = (void *)png_create_info_struct;
+	*(void **)&qpng_read_info = (void *)png_read_info;
+	*(void **)&qpng_set_compression_level = (void *)png_set_compression_level;
+	*(void **)&qpng_set_filter = (void *)png_set_filter;
+	*(void **)&qpng_set_expand = (void *)png_set_expand;
+	*(void **)&qpng_set_palette_to_rgb = (void *)png_set_palette_to_rgb;
+	*(void **)&qpng_set_tRNS_to_alpha = (void *)png_set_tRNS_to_alpha;
+	*(void **)&qpng_set_gray_to_rgb = (void *)png_set_gray_to_rgb;
+	*(void **)&qpng_set_filler = (void *)png_set_filler;
+	*(void **)&qpng_set_IHDR = (void *)png_set_IHDR;
+	*(void **)&qpng_set_packing = (void *)png_set_packing;
+	*(void **)&qpng_set_bgr = (void *)png_set_bgr;
+	*(void **)&qpng_set_interlace_handling = (void *)png_set_interlace_handling;
+	*(void **)&qpng_read_update_info = (void *)png_read_update_info;
+	*(void **)&qpng_read_image = (void *)png_read_image;
+	*(void **)&qpng_read_end = (void *)png_read_end;
+	*(void **)&qpng_destroy_read_struct = (void *)png_destroy_read_struct;
+	*(void **)&qpng_destroy_write_struct = (void *)png_destroy_write_struct;
+	*(void **)&qpng_set_read_fn = (void *)png_set_read_fn;
+	*(void **)&qpng_set_write_fn = (void *)png_set_write_fn;
+	*(void **)&qpng_get_valid = (void *)png_get_valid;
+	*(void **)&qpng_get_rowbytes = (void *)png_get_rowbytes;
+	*(void **)&qpng_get_channels = (void *)png_get_channels;
+	*(void **)&qpng_get_bit_depth = (void *)png_get_bit_depth;
+	*(void **)&qpng_get_IHDR = (void *)png_get_IHDR;
+	*(void **)&qpng_access_version_number = (void *)png_access_version_number;
+	*(void **)&qpng_write_info = (void *)png_write_info;
+	*(void **)&qpng_write_row = (void *)png_write_row;
+	*(void **)&qpng_write_end = (void *)png_write_end;
+	*(void **)&qpng_set_longjmp_fn = (void *)png_set_longjmp_fn;
+	png_dll = (dllhandle_t)1; // "loaded"
+	return true;
+}
+
+void PNG_CloseLibrary (void)
+{
+	png_dll = NULL;
+}
+#else
 qboolean PNG_OpenLibrary (void)
 {
 	const char* dllnames [] =
@@ -196,6 +282,7 @@ void PNG_CloseLibrary (void)
 	Sys_UnloadLibrary (&png14_dll);
 	Sys_UnloadLibrary (&png_dll);
 }
+#endif
 
 /*
 =================================================================

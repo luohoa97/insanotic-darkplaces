@@ -2840,7 +2840,10 @@ static qboolean VID_InitModeGL(viddef_mode_t *mode)
 #ifdef USE_GLES2
 	SDL_GL_SetAttribute (SDL_GL_CONTEXT_MAJOR_VERSION, 2);
 	SDL_GL_SetAttribute (SDL_GL_CONTEXT_MINOR_VERSION, 0);
+#ifndef __EMSCRIPTEN__
+	// (in a browser this would keep the drawing buffer after every swap, which costs speed)
 	SDL_GL_SetAttribute (SDL_GL_RETAINED_BACKING, 1);
+#endif
 #endif
 #endif
 

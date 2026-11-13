@@ -398,6 +398,12 @@ double Sys_DirtyTime(void)
 void Sys_Sleep(int microseconds)
 {
 	double t = 0;
+#ifdef __EMSCRIPTEN__
+	// never block the browser's thread; requestAnimationFrame paces the frames
+	(void)t;
+	(void)microseconds;
+	return;
+#endif
 	if(sys_usenoclockbutbenchmark.integer)
 	{
 		if(microseconds)
