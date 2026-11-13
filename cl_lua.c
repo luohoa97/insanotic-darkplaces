@@ -28,6 +28,7 @@ is the team, and the CSQC's own "teamplay" global says whether it is one.
 #include "cl_screen.h"
 #include "lua_sandbox.h"
 #include "cl_lua.h"
+#include "ui_rml.h"
 
 cvar_t cl_lua = {CVAR_SAVE, "cl_lua", "1", "load client Lua mods from mods/<name>/init.lua"};
 cvar_t cl_lua_instruction_limit = {0, "cl_lua_instruction_limit", "500000", "Lua VM instructions one client mod may execute per entry (loading, or one hook call) before it is killed and disabled"};
@@ -101,7 +102,8 @@ static qboolean CL_Lua_Dispatch(const char *hook, cl_lua_evfunc_t push, cl_lua_e
 
 static qboolean CL_Lua_InGame(void)
 {
-	return cls.state == ca_connected && cls.signon == SIGNONS && key_dest == key_game && !key_consoleactive;
+	return cls.state == ca_connected && cls.signon == SIGNONS && key_dest == key_game && !key_consoleactive
+		&& !UI_RML_Modal(); // a page over the game (campaign intro, game menu) takes the touches, not the HUD
 }
 
 //============================================================================
