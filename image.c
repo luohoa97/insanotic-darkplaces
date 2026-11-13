@@ -4,12 +4,9 @@
 #include "jpeg.h"
 #include "image_png.h"
 #include "r_shadow.h"
-#include "wad.h"
 
 int		image_width;
 int		image_height;
-
-static unsigned char *Image_GetEmbeddedPicBGRA(const char *name);
 
 static void Image_CopyAlphaFromBlueBGRA(unsigned char *outpixels, const unsigned char *inpixels, int w, int h)
 {
@@ -20,8 +17,8 @@ static void Image_CopyAlphaFromBlueBGRA(unsigned char *outpixels, const unsigned
 }
 
 #if 1
-// written by LadyHavoc in a readable way, optimized by Vic, further optimized by LadyHavoc (the non-special index case), readable version preserved below this
-void Image_CopyMux(unsigned char *outpixels, const unsigned char *inpixels, int inputwidth, int inputheight, qbool inputflipx, qbool inputflipy, qbool inputflipdiagonal, int numoutputcomponents, int numinputcomponents, int *outputinputcomponentindices)
+// written by LordHavoc in a readable way, optimized by Vic, further optimized by LordHavoc (the non-special index case), readable version preserved below this
+void Image_CopyMux(unsigned char *outpixels, const unsigned char *inpixels, int inputwidth, int inputheight, qboolean inputflipx, qboolean inputflipy, qboolean inputflipdiagonal, int numoutputcomponents, int numinputcomponents, int *outputinputcomponentindices)
 {
 	int index, c, x, y;
 	const unsigned char *in, *line;
@@ -70,7 +67,7 @@ void Image_CopyMux(unsigned char *outpixels, const unsigned char *inpixels, int 
 }
 #else
 // intentionally readable version
-void Image_CopyMux(unsigned char *outpixels, const unsigned char *inpixels, int inputwidth, int inputheight, qbool inputflipx, qbool inputflipy, qbool inputflipdiagonal, int numoutputcomponents, int numinputcomponents, int *outputinputcomponentindices)
+void Image_CopyMux(unsigned char *outpixels, const unsigned char *inpixels, int inputwidth, int inputheight, qboolean inputflipx, qboolean inputflipy, qboolean inputflipdiagonal, int numoutputcomponents, int numinputcomponents, int *outputinputcomponentindices)
 {
 	int index, c, x, y;
 	const unsigned char *in, *inrow, *incolumn;
@@ -210,7 +207,7 @@ static unsigned char* LoadPCX_BGRA (const unsigned char *f, int filesize, int *m
 	memcpy(&pcx, fin, sizeof(pcx));
 	fin += sizeof(pcx);
 
-	// LadyHavoc: big-endian support ported from QF newtree
+	// LordHavoc: big-endian support ported from QF newtree
 	pcx.xmax = LittleShort (pcx.xmax);
 	pcx.xmin = LittleShort (pcx.xmin);
 	pcx.ymax = LittleShort (pcx.ymax);
@@ -283,7 +280,7 @@ static unsigned char* LoadPCX_BGRA (const unsigned char *f, int filesize, int *m
 LoadPCX
 ============
 */
-qbool LoadPCX_QWSkin(const unsigned char *f, int filesize, unsigned char *pixels, int outwidth, int outheight)
+qboolean LoadPCX_QWSkin(const unsigned char *f, int filesize, unsigned char *pixels, int outwidth, int outheight)
 {
 	pcx_t pcx;
 	unsigned char *a;
@@ -300,7 +297,7 @@ qbool LoadPCX_QWSkin(const unsigned char *f, int filesize, unsigned char *pixels
 	memcpy(&pcx, fin, sizeof(pcx));
 	fin += sizeof(pcx);
 
-	// LadyHavoc: big-endian support ported from QF newtree
+	// LordHavoc: big-endian support ported from QF newtree
 	pcx.xmax = LittleShort (pcx.xmax);
 	pcx.xmin = LittleShort (pcx.xmin);
 	pcx.ymax = LittleShort (pcx.ymax);
@@ -362,7 +359,7 @@ qbool LoadPCX_QWSkin(const unsigned char *f, int filesize, unsigned char *pixels
 LoadPCX
 ============
 */
-qbool LoadPCX_PaletteOnly(const unsigned char *f, int filesize, unsigned char *palette768b)
+qboolean LoadPCX_PaletteOnly(const unsigned char *f, int filesize, unsigned char *palette768b)
 {
 	if (filesize < 768)
 		return false;
@@ -797,7 +794,7 @@ static unsigned char *LoadWAL_BGRA (const unsigned char *f, int filesize, int *m
 	return image_buffer;
 }
 
-qbool LoadWAL_GetMetadata(const unsigned char *f, int filesize, int *retwidth, int *retheight, int *retflags, int *retvalue, int *retcontents, char *retanimname32c)
+qboolean LoadWAL_GetMetadata(const unsigned char *f, int filesize, int *retwidth, int *retheight, int *retflags, int *retvalue, int *retcontents, char *retanimname32c)
 {
 	const q2wal_t *inwal = (const q2wal_t *)f;
 
@@ -837,78 +834,6 @@ qbool LoadWAL_GetMetadata(const unsigned char *f, int filesize, int *retwidth, i
 	return true;
 }
 
-// gfx/* wad lumps and gfx/*.lmp files are simply width and height and paletted pixels, with color 255 as transparent
-static unsigned char* LoadLMP_BGRA(const unsigned char *f, int filesize, int *miplevel)
-{
-	unsigned char *image_buffer;
-	int i;
-
-	if (filesize < 9)
-	{
-		Con_Print("Bad lmp file\n");
-		return NULL;
-	}
-
-	image_width = f[0] + f[1] * 0x100 + f[2] * 0x10000 + f[3] * 0x1000000;
-	image_height = f[4] + f[5] * 0x100 + f[6] * 0x10000 + f[7] * 0x1000000;
-
-	if (image_width > 32768 || image_height > 32768 || image_width <= 0 || image_height <= 0 || image_width * image_height > filesize - 8)
-	{
-		Con_Print("Bad lmp file\n");
-		return NULL;
-	}
-
-	image_buffer = (unsigned char *)Mem_Alloc(tempmempool, image_width*image_height * 4);
-	if (!image_buffer)
-	{
-		Con_Printf("LoadLMP: not enough memory for %i by %i image\n", image_width, image_height);
-		return NULL;
-	}
-
-	for (i = 0; i < image_width * image_height; i++)
-	{
-		const unsigned char *p = (const unsigned char *)palette_bgra_transparent + 4 * f[8 + i];
-		image_buffer[i * 4 + 0] = p[0];
-		image_buffer[i * 4 + 1] = p[1];
-		image_buffer[i * 4 + 2] = p[2];
-		image_buffer[i * 4 + 3] = p[3];
-	}
-
-	return image_buffer;
-}
-
-// gfx/conchars is a raw 128x128 image with 0 as transparent color rather than 255
-static unsigned char *LoadConChars_BGRA(const unsigned char *f, int filesize, int *miplevel)
-{
-	unsigned char *image_buffer;
-	int i;
-
-	image_width = 128;
-	image_height = 128;
-	if (image_width * image_height > filesize)
-	{
-		Con_Print("Bad lmp file\n");
-		return NULL;
-	}
-
-	image_buffer = (unsigned char *)Mem_Alloc(tempmempool, image_width*image_height * 4);
-	if (!image_buffer)
-	{
-		Con_Printf("LoadConChars: not enough memory for %i by %i image\n", image_width, image_height);
-		return NULL;
-	}
-
-	for (i = 0; i < image_width * image_height; i++)
-	{
-		const unsigned char *p = (const unsigned char *)palette_bgra_font + 4 * f[i];
-		image_buffer[i * 4 + 0] = p[0];
-		image_buffer[i * 4 + 1] = p[1];
-		image_buffer[i * 4 + 2] = p[2];
-		image_buffer[i * 4 + 3] = p[3];
-	}
-
-	return image_buffer;
-}
 
 void Image_StripImageExtension (const char *in, char *out, size_t size_out)
 {
@@ -921,7 +846,7 @@ void Image_StripImageExtension (const char *in, char *out, size_t size_out)
 	if (ext && (!strcmp(ext, "tga") || !strcmp(ext, "pcx") || !strcmp(ext, "lmp") || !strcmp(ext, "png") || !strcmp(ext, "jpg") || !strcmp(ext, "wal")))
 		FS_StripExtension(in, out, size_out);
 	else
-		dp_strlcpy(out, in, size_out);
+		strlcpy(out, in, size_out);
 }
 
 static unsigned char image_linearfromsrgb[256];
@@ -980,6 +905,21 @@ imageformat_t imageformats_tenebrae[] =
 	{NULL, NULL}
 };
 
+imageformat_t imageformats_nopath[] =
+{
+	{"override/%s.tga", LoadTGA_BGRA},
+	{"override/%s.png", PNG_LoadImage_BGRA},
+	{"override/%s.jpg", JPEG_LoadImage_BGRA},
+	{"textures/%s.tga", LoadTGA_BGRA},
+	{"textures/%s.png", PNG_LoadImage_BGRA},
+	{"textures/%s.jpg", JPEG_LoadImage_BGRA},
+	{"%s.tga", LoadTGA_BGRA},
+	{"%s.png", PNG_LoadImage_BGRA},
+	{"%s.jpg", JPEG_LoadImage_BGRA},
+	{"%s.pcx", LoadPCX_BGRA},
+	{NULL, NULL}
+};
+
 // GAME_DELUXEQUAKE only
 // VorteX: the point why i use such messy texture paths is
 // that GtkRadiant can't detect normal/gloss textures
@@ -1010,34 +950,25 @@ imageformat_t imageformats_gfx[] =
 	{"%s.png", PNG_LoadImage_BGRA},
 	{"%s.jpg", JPEG_LoadImage_BGRA},
 	{"%s.pcx", LoadPCX_BGRA},
-	{"%s.lmp", LoadLMP_BGRA},
 	{NULL, NULL}
 };
 
 imageformat_t imageformats_other[] =
 {
-	{"override/%s.tga", LoadTGA_BGRA},
-	{"override/%s.png", PNG_LoadImage_BGRA},
-	{"override/%s.jpg", JPEG_LoadImage_BGRA},
-	{"textures/%s.tga", LoadTGA_BGRA},
-	{"textures/%s.png", PNG_LoadImage_BGRA},
-	{"textures/%s.jpg", JPEG_LoadImage_BGRA},
 	{"%s.tga", LoadTGA_BGRA},
 	{"%s.png", PNG_LoadImage_BGRA},
 	{"%s.jpg", JPEG_LoadImage_BGRA},
 	{"%s.pcx", LoadPCX_BGRA},
-	{"%s.lmp", LoadLMP_BGRA},
 	{NULL, NULL}
 };
 
 int fixtransparentpixels(unsigned char *data, int w, int h);
-unsigned char *loadimagepixelsbgra (const char *filename, qbool complain, qbool allowFixtrans, qbool convertsRGB, int *miplevel)
+unsigned char *loadimagepixelsbgra (const char *filename, qboolean complain, qboolean allowFixtrans, qboolean convertsRGB, int *miplevel)
 {
 	fs_offset_t filesize;
 	imageformat_t *firstformat, *format;
-	int mymiplevel;
 	unsigned char *f, *data = NULL, *data2 = NULL;
-	char basename[MAX_QPATH], name[MAX_QPATH], name2[MAX_QPATH], path[MAX_QPATH], afterpath[MAX_QPATH], *c;
+	char basename[MAX_QPATH], name[MAX_QPATH], name2[MAX_QPATH], *c;
 	char vabuf[1024];
 	//if (developer_memorydebug.integer)
 	//	Mem_CheckSentinelsGlobal();
@@ -1048,37 +979,34 @@ unsigned char *loadimagepixelsbgra (const char *filename, qbool complain, qbool 
 	for (c = basename;*c;c++)
 		if (*c == '*')
 			*c = '#';
-	path[0] = 0;
 	name[0] = 0;
-	dp_strlcpy(afterpath, basename, sizeof(afterpath));
 	if (strchr(basename, '/'))
 	{
 		int i;
-		for (i = 0;i < (int)sizeof(path)-1 && basename[i] != '/' && basename[i];i++)
-			path[i] = basename[i];
-		path[i] = 0;
-		dp_strlcpy(afterpath, basename + i + 1, sizeof(afterpath));
+		for (i = 0;i < (int)sizeof(name)-1 && basename[i] != '/';i++)
+			name[i] = basename[i];
+		name[i] = 0;
 	}
 	if (gamemode == GAME_TENEBRAE)
 		firstformat = imageformats_tenebrae;
 	else if (gamemode == GAME_DELUXEQUAKE)
 		firstformat = imageformats_dq;
-	else if (!strcasecmp(path, "textures"))
+	else if (!strcasecmp(name, "textures"))
 		firstformat = imageformats_textures;
-	else if (!strcasecmp(path, "gfx") || !strcasecmp(path, "locale")) // locale/ is used in GAME_BLOODOMNICIDE
+	else if (!strcasecmp(name, "gfx"))
 		firstformat = imageformats_gfx;
+	else if (!strchr(basename, '/'))
+		firstformat = imageformats_nopath;
 	else
 		firstformat = imageformats_other;
 	// now try all the formats in the selected list
 	for (format = firstformat;format->formatstring;format++)
 	{
 		dpsnprintf (name, sizeof(name), format->formatstring, basename);
-
-		FS_SanitizePath(name);
-
-		if(FS_FileExists(name) && (f = FS_LoadFile(name, tempmempool, true, &filesize)) != NULL)
+		f = FS_LoadFile(name, tempmempool, true, &filesize);
+		if (f)
 		{
-			mymiplevel = miplevel ? *miplevel : 0;
+			int mymiplevel = miplevel ? *miplevel : 0;
 			image_width = 0;
 			image_height = 0;
 			data = format->loadfunc(f, (int)filesize, &mymiplevel);
@@ -1136,36 +1064,9 @@ unsigned char *loadimagepixelsbgra (const char *filename, qbool complain, qbool 
 				Con_DPrintf("Error loading image %s (file loaded but decode failed)\n", name);
 		}
 	}
-	if (!strcasecmp(path, "gfx"))
-	{
-		unsigned char *lmpdata;
-		if ((lmpdata = W_GetLumpName(afterpath, &filesize)))
-		{
-			if (developer_loading.integer)
-				Con_Printf("loading gfx.wad lump \"%s\"\n", afterpath);
-
-			mymiplevel = miplevel ? *miplevel : 0;
-			if (!strcmp(afterpath, "conchars"))
-			{
-				// conchars is a raw image and with color 0 as transparent instead of 255
-				data = LoadConChars_BGRA(lmpdata, filesize, &mymiplevel);
-			}
-			else
-				data = LoadLMP_BGRA(lmpdata, filesize, &mymiplevel);
-			// no cleanup after looking up a wad lump - the whole gfx.wad is loaded at once
-			if (data)
-				return data;
-			Con_DPrintf("Error loading image %s (file loaded but decode failed)\n", name);
-		}
-	}
-
-	// check if the image name exists as an embedded pic
-	if ((data = Image_GetEmbeddedPicBGRA(basename)))
-		return data;
-
 	if (complain)
 	{
-		Con_Printf(CON_ERROR "Couldn't load %s using ", filename);
+		Con_Printf("Couldn't load %s using ", filename);
 		for (format = firstformat;format->formatstring;format++)
 		{
 			dpsnprintf (name, sizeof(name), format->formatstring, basename);
@@ -1178,60 +1079,11 @@ unsigned char *loadimagepixelsbgra (const char *filename, qbool complain, qbool 
 
 	//if (developer_memorydebug.integer)
 	//	Mem_CheckSentinelsGlobal();
-
 	return NULL;
 }
 
-qbool Image_GetStockPicSize(const char *filename, int *returnwidth, int *returnheight)
-{
-	unsigned char *data;
-	fs_offset_t filesize;
-	char lmppath[MAX_QPATH];
-	if (!strcasecmp(filename, "gfx/conchars"))
-	{
-		*returnwidth = 128;
-		*returnheight = 128;
-		return true;
-	}
-
-	dpsnprintf(lmppath, sizeof(lmppath), "%s.lmp", filename);
-	data = FS_LoadFile(lmppath, tempmempool, true, &filesize);
-	if (data)
-	{
-		if (filesize > 8)
-		{
-			int w = data[0] + data[1] * 0x100 + data[2] * 0x10000 + data[3] * 0x1000000;
-			int h = data[4] + data[5] * 0x100 + data[6] * 0x10000 + data[7] * 0x1000000;
-			if (w >= 1 && w <= 32768 && h >= 1 && h <= 32768)
-			{
-				*returnwidth = w;
-				*returnheight = h;
-				Mem_Free(data);
-				return true;
-			}
-		}
-		Mem_Free(data);
-	}
-	if (!strncasecmp(filename, "gfx/", 4))
-	{
-		data = W_GetLumpName(filename + 4, &filesize);
-		if (data && filesize > 8)
-		{
-			int w = data[0] + data[1] * 0x100 + data[2] * 0x10000 + data[3] * 0x1000000;
-			int h = data[4] + data[5] * 0x100 + data[6] * 0x10000 + data[7] * 0x1000000;
-			if (w >= 1 && w <= 32768 && h >= 1 && h <= 32768)
-			{
-				*returnwidth = w;
-				*returnheight = h;
-				return true;
-			}
-		}
-	}
-	return false;
-}
-
 extern cvar_t gl_picmip;
-rtexture_t *loadtextureimage (rtexturepool_t *pool, const char *filename, qbool complain, int flags, qbool allowFixtrans, qbool sRGB)
+rtexture_t *loadtextureimage (rtexturepool_t *pool, const char *filename, qboolean complain, int flags, qboolean allowFixtrans, qboolean sRGB)
 {
 	unsigned char *data;
 	rtexture_t *rt;
@@ -1362,20 +1214,20 @@ int fixtransparentpixels(unsigned char *data, int w, int h)
 	return changedPixels;
 }
 
-void Image_FixTransparentPixels_f(cmd_state_t *cmd)
+void Image_FixTransparentPixels_f(void)
 {
 	const char *filename, *filename_pattern;
 	fssearch_t *search;
 	int i, n;
 	char outfilename[MAX_QPATH], buf[MAX_QPATH];
 	unsigned char *data;
-	if(Cmd_Argc(cmd) != 2)
+	if(Cmd_Argc() != 2)
 	{
-		Con_Printf("Usage: %s imagefile\n", Cmd_Argv(cmd, 0));
+		Con_Printf("Usage: %s imagefile\n", Cmd_Argv(0));
 		return;
 	}
-	filename_pattern = Cmd_Argv(cmd, 1);
-	search = FS_Search(filename_pattern, true, true, NULL);
+	filename_pattern = Cmd_Argv(1);
+	search = FS_Search(filename_pattern, true, true);
 	if(!search)
 		return;
 	for(i = 0; i < search->numfilenames; ++i)
@@ -1398,9 +1250,9 @@ void Image_FixTransparentPixels_f(cmd_state_t *cmd)
 	FS_FreeSearch(search);
 }
 
-qbool Image_WriteTGABGR_preflipped (const char *filename, int width, int height, const unsigned char *data)
+qboolean Image_WriteTGABGR_preflipped (const char *filename, int width, int height, const unsigned char *data)
 {
-	qbool ret;
+	qboolean ret;
 	unsigned char buffer[18];
 	const void *buffers[2];
 	fs_offset_t sizes[2];
@@ -1422,12 +1274,12 @@ qbool Image_WriteTGABGR_preflipped (const char *filename, int width, int height,
 	return ret;
 }
 
-qbool Image_WriteTGABGRA (const char *filename, int width, int height, const unsigned char *data)
+qboolean Image_WriteTGABGRA (const char *filename, int width, int height, const unsigned char *data)
 {
 	int y;
 	unsigned char *buffer, *out;
 	const unsigned char *in, *end;
-	qbool ret;
+	qboolean ret;
 
 	buffer = (unsigned char *)Mem_Alloc(tempmempool, width*height*4 + 18);
 
@@ -1794,301 +1646,4 @@ void Image_HeightmapToNormalmap_BGRA(const unsigned char *inpixels, unsigned cha
 			out += 4;
 		}
 	}
-}
-
-
-#include "lhfont.h"
-
-static unsigned char *Image_GenerateConChars(void)
-{
-	int i;
-	unsigned char *data;
-	double random;
-
-	image_width = 256;
-	image_height = 256;
-
-	data = LoadTGA_BGRA(concharimage, sizeof(concharimage), NULL);
-	// Gold numbers
-	for (i = 0; i < 8192; i++)
-	{
-		random = lhrandom(0.0, 1.0);
-		data[i * 4 + 3] = data[i * 4 + 0];
-		data[i * 4 + 2] = 83 + (unsigned char)(random * 64);
-		data[i * 4 + 1] = 71 + (unsigned char)(random * 32);
-		data[i * 4 + 0] = 23 + (unsigned char)(random * 16);
-	}
-	// White chars
-	for (i = 8192; i < 32768; i++)
-	{
-		random = lhrandom(0.0, 1.0);
-		data[i * 4 + 3] = data[i * 4 + 0];
-		data[i * 4 + 2] = 95 + (unsigned char)(random * 64);
-		data[i * 4 + 1] = 95 + (unsigned char)(random * 64);
-		data[i * 4 + 0] = 95 + (unsigned char)(random * 64);
-	}
-	// Gold numbers
-	for (i = 32768; i < 40960; i++)
-	{
-		random = lhrandom(0.0, 1.0);
-		data[i * 4 + 3] = data[i * 4 + 0];
-		data[i * 4 + 2] = 83 + (unsigned char)(random * 64);
-		data[i * 4 + 1] = 71 + (unsigned char)(random * 32);
-		data[i * 4 + 0] = 23 + (unsigned char)(random * 16);
-	}
-	// Red chars
-	for (i = 40960; i < 65536; i++)
-	{
-		random = lhrandom(0.0, 1.0);
-		data[i * 4 + 3] = data[i * 4 + 0];
-		data[i * 4 + 2] = 96 + (unsigned char)(random * 64);
-		data[i * 4 + 1] = 43 + (unsigned char)(random * 32);
-		data[i * 4 + 0] = 27 + (unsigned char)(random * 32);
-	}
-
-#if 0
-	Image_WriteTGABGRA("gfx/generated_conchars.tga", 256, 256, data);
-#endif
-
-	return data;
-}
-
-static unsigned char *Image_GenerateDitherPattern(void)
-{
-	int x, y;
-	unsigned char *data = (unsigned char *)Mem_Alloc(tempmempool, 8 * 8 * 4);
-	image_width = 8;
-	image_height = 8;
-	for (y = 0; y < 8; y++)
-	{
-		for (x = 0; x < 8; x++)
-		{
-			data[(y * 8 + x) * 4 + 0] = ((x^y) & 4) ? 255 : 0;
-			data[(y * 8 + x) * 4 + 1] = ((x^y) & 4) ? 255 : 0;
-			data[(y * 8 + x) * 4 + 2] = ((x^y) & 4) ? 255 : 0;
-			data[(y * 8 + x) * 4 + 3] = 255;
-		}
-	}
-	return data;
-}
-
-// also used in R_SkinFrame code
-unsigned char *Image_GenerateNoTexture(void)
-{
-	int x, y;
-	unsigned char *data = (unsigned char *)Mem_Alloc(tempmempool, 16 * 16 * 4);
-	image_width = 16;
-	image_height = 16;
-	// this makes a light grey/dark grey checkerboard texture
-	for (y = 0; y < 16; y++)
-	{
-		for (x = 0; x < 16; x++)
-		{
-			data[(y * 16 + x) * 4 + 0] =
-			data[(y * 16 + x) * 4 + 1] =
-			data[(y * 16 + x) * 4 + 2] = (y < 8) ^ (x < 8) ? 128 : 64;
-			data[(y * 16 + x) * 4 + 3] = 255;
-		}
-	}
-	return data;
-}
-
-static unsigned char *Image_GenerateWhite(void)
-{
-	unsigned char *data = (unsigned char *)Mem_Alloc(tempmempool, 1 * 1 * 4);
-	image_width = 1;
-	image_height = 1;
-	data[0] = data[1] = data[2] = data[3] = 255;
-	return data;
-}
-
-typedef struct embeddedpic_s
-{
-const char *name;
-int width;
-int height;
-const char *pixels;
-}
-embeddedpic_t;
-
-static const embeddedpic_t embeddedpics[] =
-{
-	{
-		"gfx/prydoncursor001", 16, 16,
-		"477777774......."
-		"77.....6........"
-		"7.....6........."
-		"7....6.........."
-		"7.....6........."
-		"7..6...6........"
-		"7.6.6...6......."
-		"76...6...6......"
-		"4.....6.6......."
-		".......6........"
-		"................"
-		"................"
-		"................"
-		"................"
-		"................"
-		"................"
-	},
-	{
-		"ui/mousepointer", 16, 16,
-		"477777774......."
-		"77.....6........"
-		"7.....6........."
-		"7....6.........."
-		"7.....6........."
-		"7..6...6........"
-		"7.6.6...6......."
-		"76...6...6......"
-		"4.....6.6......."
-		".......6........"
-		"................"
-		"................"
-		"................"
-		"................"
-		"................"
-		"................"
-	},
-	{
-		"gfx/crosshair1", 16, 16,
-		"................"
-		"................"
-		"................"
-		"...33......33..."
-		"...355....553..."
-		"....577..775...."
-		".....77..77....."
-		"................"
-		"................"
-		".....77..77....."
-		"....577..775...."
-		"...355....553..."
-		"...33......33..."
-		"................"
-		"................"
-		"................"
-	},
-	{
-		"gfx/crosshair2", 16, 16,
-		"................"
-		"................"
-		"................"
-		"...3........3..."
-		"....5......5...."
-		".....7....7....."
-		"......7..7......"
-		"................"
-		"................"
-		"......7..7......"
-		".....7....7....."
-		"....5......5...."
-		"...3........3..."
-		"................"
-		"................"
-		"................"
-	},
-	{
-		"gfx/crosshair3", 16, 16,
-		"................"
-		".......77......."
-		".......77......."
-		"................"
-		"................"
-		".......44......."
-		".......44......."
-		".77..44..44..77."
-		".77..44..44..77."
-		".......44......."
-		".......44......."
-		"................"
-		"................"
-		".......77......."
-		".......77......."
-		"................"
-	},
-	{
-		"gfx/crosshair4", 16, 16,
-		"................"
-		"................"
-		"................"
-		"................"
-		"................"
-		"................"
-		"................"
-		"................"
-		"........7777777."
-		"........752....."
-		"........72......"
-		"........7......."
-		"........7......."
-		"........7......."
-		"........7......."
-		"................"
-	},
-	{
-		"gfx/crosshair5", 8, 8,
-		"........"
-		"........"
-		"....7..."
-		"........"
-		"..7.7.7."
-		"........"
-		"....7..."
-		"........"
-	},
-	{
-		"gfx/crosshair6", 2, 2,
-		"77"
-		"77"
-	},
-	{
-		"gfx/crosshair7", 16, 16,
-		"................"
-		".3............3."
-		"..5...2332...5.."
-		"...7.3....3.7..."
-		"....7......7...."
-		"...3.7....7.3..."
-		"..2...7..7...2.."
-		"..3..........3.."
-		"..3..........3.."
-		"..2...7..7...2.."
-		"...3.7....7.3..."
-		"....7......7...."
-		"...7.3....3.7..."
-		"..5...2332...5.."
-		".3............3."
-		"................"
-	},
-	{ NULL, 0, 0, NULL }
-};
-
-unsigned char *Image_GetEmbeddedPicBGRA(const char *name)
-{
-	const embeddedpic_t *p;
-	for (p = embeddedpics; p->name; p++)
-	{
-		if (!strcmp(name, p->name))
-		{
-			int i;
-			unsigned char *data = (unsigned char *)Mem_Alloc(tempmempool, p->width * p->height * 4);
-			image_width = p->width;
-			image_height = p->height;
-			for (i = 0; i < p->width * p->height; i++)
-			{
-				const unsigned char *c = (const unsigned char *)palette_bgra_embeddedpic + 4 * p->pixels[i];
-				Vector4Copy(c, data + 4 * i);
-			}
-			return data;
-		}
-	}
-	if (!strcmp(name, "white") || !strcmp(name, "#white") || !strcmp(name, "*white") || !strcmp(name, "$whiteimage"))
-		return Image_GenerateWhite();
-	if (!strcmp(name, "gfx/conchars"))
-		return Image_GenerateConChars();
-	if (!strcmp(name, "gfx/colorcontrol/ditherpattern"))
-		return Image_GenerateDitherPattern();
-	return NULL;
 }

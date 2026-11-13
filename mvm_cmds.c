@@ -10,56 +10,46 @@
 //============================================================================
 // Menu
 
-const char *vm_m_extensions[] = {
-"BX_WAL_SUPPORT",
-"DP_CINEMATIC_DPV",
-"DP_COVERAGE",
-"DP_CRYPTO",
-"DP_CSQC_BINDMAPS",
-"DP_GFX_FONTS",
-"DP_GFX_FONTS_FREETYPE",
-"DP_UTF8",
-"DP_FONT_VARIABLEWIDTH",
-"DP_MENU_EXTRESPONSEPACKET",
-"DP_QC_ASINACOSATANATAN2TAN",
-"DP_QC_AUTOCVARS",
-"DP_QC_CMD",
-"DP_QC_CRC16",
-"DP_QC_CVAR_TYPE",
-"DP_QC_CVAR_DESCRIPTION",
-"DP_QC_DIGEST",
-"DP_QC_DIGEST_SHA256",
-"DP_QC_FINDCHAIN_TOFIELD",
-"DP_QC_I18N",
-"DP_QC_LOG",
-"DP_QC_RENDER_SCENE",
-"DP_QC_SPRINTF",
-"DP_QC_STRFTIME",
-"DP_QC_STRINGBUFFERS",
-"DP_QC_STRINGBUFFERS_CVARLIST",
-"DP_QC_STRINGBUFFERS_EXT_WIP",
-"DP_QC_STRINGCOLORFUNCTIONS",
-"DP_QC_STRING_CASE_FUNCTIONS",
-"DP_QC_STRREPLACE",
-"DP_QC_TOKENIZEBYSEPARATOR",
-"DP_QC_TOKENIZE_CONSOLE",
-"DP_QC_UNLIMITEDTEMPSTRINGS",
-"DP_QC_URI_ESCAPE",
-"DP_QC_URI_GET",
-"DP_QC_URI_POST",
-"DP_QC_WHICHPACK",
-"FTE_STRINGS",
-"DP_QC_FS_SEARCH_PACKFILE",
-NULL
-};
-
-qbool MP_ConsoleCommand(const char *text, size_t textlen)
-{
-	prvm_prog_t *prog = MVM_prog;
-	if (setjmp(mp_abort))
-		return false;
-	return PRVM_ConsoleCommand(prog, text, textlen, &prog->funcoffsets.GameCommand, false, -1, 0, "QC function GameCommand is missing");
-}
+const char *vm_m_extensions =
+"BX_WAL_SUPPORT "
+"DP_CINEMATIC_DPV "
+"DP_COVERAGE "
+"DP_CRYPTO "
+"DP_CSQC_BINDMAPS "
+"DP_GFX_FONTS "
+"DP_GFX_FONTS_FREETYPE "
+"DP_UTF8 "
+"DP_FONT_VARIABLEWIDTH "
+"DP_MENU_EXTRESPONSEPACKET "
+"DP_QC_ASINACOSATANATAN2TAN "
+"DP_QC_AUTOCVARS "
+"DP_QC_CMD "
+"DP_QC_CRC16 "
+"DP_QC_CVAR_TYPE "
+"DP_QC_CVAR_DESCRIPTION "
+"DP_QC_DIGEST "
+"DP_QC_DIGEST_SHA256 "
+"DP_QC_FINDCHAIN_TOFIELD "
+"DP_QC_I18N "
+"DP_QC_LOG "
+"DP_QC_RENDER_SCENE "
+"DP_QC_SPRINTF "
+"DP_QC_STRFTIME "
+"DP_QC_STRINGBUFFERS "
+"DP_QC_STRINGBUFFERS_CVARLIST "
+"DP_QC_STRINGBUFFERS_EXT_WIP "
+"DP_QC_STRINGCOLORFUNCTIONS "
+"DP_QC_STRING_CASE_FUNCTIONS "
+"DP_QC_STRREPLACE "
+"DP_QC_TOKENIZEBYSEPARATOR "
+"DP_QC_TOKENIZE_CONSOLE "
+"DP_QC_UNLIMITEDTEMPSTRINGS "
+"DP_QC_URI_ESCAPE "
+"DP_QC_URI_GET "
+"DP_QC_URI_POST "
+"DP_QC_WHICHPACK "
+"FTE_STRINGS "
+;
 
 /*
 =========
@@ -181,7 +171,7 @@ vector	getresolution(float number)
 static void VM_M_getresolution(prvm_prog_t *prog)
 {
 	int nr, fs;
-	VM_SAFEPARMCOUNTRANGE(1, 2, VM_M_getresolution);
+	VM_SAFEPARMCOUNTRANGE(1, 2, VM_getresolution);
 
 	nr = (int)PRVM_G_FLOAT(OFS_PARM0);
 
@@ -195,10 +185,19 @@ static void VM_M_getresolution(prvm_prog_t *prog)
 	}
 	else if(nr == -1)
 	{
-		vid_mode_t m = VID_GetDesktopMode();
-		PRVM_G_VECTOR(OFS_RETURN)[0] = m.width;
-		PRVM_G_VECTOR(OFS_RETURN)[1] = m.height;
-		PRVM_G_VECTOR(OFS_RETURN)[2] = m.pixelheight_num / (prvm_vec_t) m.pixelheight_denom;
+		vid_mode_t *m = VID_GetDesktopMode();
+		if (m)
+		{
+			PRVM_G_VECTOR(OFS_RETURN)[0] = m->width;
+			PRVM_G_VECTOR(OFS_RETURN)[1] = m->height;
+			PRVM_G_VECTOR(OFS_RETURN)[2] = m->pixelheight_num / (prvm_vec_t) m->pixelheight_denom;
+		}
+		else
+		{
+			PRVM_G_VECTOR(OFS_RETURN)[0] = 0;
+			PRVM_G_VECTOR(OFS_RETURN)[1] = 0;
+			PRVM_G_VECTOR(OFS_RETURN)[2] = 0;
+		}
 	}
 	else
 	{
@@ -222,9 +221,9 @@ static void VM_M_getgamedirinfo(prvm_prog_t *prog)
 	if(nr >= 0 && nr < fs_all_gamedirs_count)
 	{
 		if(item == 0)
-			PRVM_G_INT(OFS_RETURN) = PRVM_SetTempString(prog, fs_all_gamedirs[nr].name, strlen(fs_all_gamedirs[nr].name));
+			PRVM_G_INT( OFS_RETURN ) = PRVM_SetTempString( prog, fs_all_gamedirs[nr].name );
 		else if(item == 1)
-			PRVM_G_INT(OFS_RETURN) = PRVM_SetTempString(prog, fs_all_gamedirs[nr].description, strlen(fs_all_gamedirs[nr].description));
+			PRVM_G_INT( OFS_RETURN ) = PRVM_SetTempString( prog, fs_all_gamedirs[nr].description );
 	}
 }
 
@@ -281,7 +280,7 @@ static void VM_M_getserverliststat(prvm_prog_t *prog)
 		PRVM_G_FLOAT ( OFS_RETURN ) = serverlist_sortflags;
 		return;
 	default:
-		VM_Warning(prog, "VM_M_getserverliststat: bad type (%i) passed!\n", type);
+		VM_Warning(prog, "VM_M_getserverliststat: bad type %i!\n", type );
 	}
 }
 
@@ -325,37 +324,36 @@ static void VM_M_setserverlistmaskstring(prvm_prog_t *prog)
 		mask = &serverlist_ormasks[masknr - 512 ];
 	else
 	{
-		VM_Warning(prog, "VM_M_setserverlistmaskstring: invalid mask number (%i) passed!\n", masknr);
+		VM_Warning(prog, "VM_M_setserverlistmaskstring: invalid mask number %i\n", masknr );
 		return;
 	}
 
 	field = (int) PRVM_G_FLOAT( OFS_PARM1 );
 
-	switch( field )
-	{
+	switch( field ) {
 		case SLIF_CNAME:
-			mask->info.cname_len = dp_strlcpy(mask->info.cname, str, sizeof(mask->info.cname));
+			strlcpy( mask->info.cname, str, sizeof(mask->info.cname) );
 			break;
 		case SLIF_NAME:
-			mask->info.name_len = dp_strlcpy(mask->info.name, str, sizeof(mask->info.name));
+			strlcpy( mask->info.name, str, sizeof(mask->info.name)  );
 			break;
 		case SLIF_QCSTATUS:
-			mask->info.qcstatus_len = dp_strlcpy(mask->info.qcstatus, str, sizeof(mask->info.qcstatus));
+			strlcpy( mask->info.qcstatus, str, sizeof(mask->info.qcstatus)  );
 			break;
 		case SLIF_PLAYERS:
-			mask->info.players_len = dp_strlcpy(mask->info.players, str, sizeof(mask->info.players));
+			strlcpy( mask->info.players, str, sizeof(mask->info.players)  );
 			break;
 		case SLIF_MAP:
-			mask->info.map_len = dp_strlcpy(mask->info.map, str, sizeof(mask->info.map));
+			strlcpy( mask->info.map, str, sizeof(mask->info.map)  );
 			break;
 		case SLIF_MOD:
-			mask->info.mod_len = dp_strlcpy(mask->info.mod, str, sizeof(mask->info.mod));
+			strlcpy( mask->info.mod, str, sizeof(mask->info.mod)  );
 			break;
 		case SLIF_GAME:
-			mask->info.game_len = dp_strlcpy(mask->info.game, str, sizeof(mask->info.game));
+			strlcpy( mask->info.game, str, sizeof(mask->info.game)  );
 			break;
 		default:
-			VM_Warning(prog, "VM_M_setserverlistmaskstring: Bad field number (%i) passed!\n", field);
+			VM_Warning(prog, "VM_M_setserverlistmaskstring: Bad field number %i passed!\n", field );
 			return;
 	}
 
@@ -388,15 +386,14 @@ static void VM_M_setserverlistmasknumber(prvm_prog_t *prog)
 		mask = &serverlist_ormasks[masknr - 512 ];
 	else
 	{
-		VM_Warning(prog, "VM_M_setserverlistmasknumber: invalid mask number (%i) passed!\n", masknr);
+		VM_Warning(prog, "VM_M_setserverlistmasknumber: invalid mask number %i\n", masknr );
 		return;
 	}
 
 	number = (int)PRVM_G_FLOAT( OFS_PARM2 );
 	field = (int) PRVM_G_FLOAT( OFS_PARM1 );
 
-	switch( field )
-	{
+	switch( field ) {
 		case SLIF_MAXPLAYERS:
 			mask->info.maxplayers = number;
 			break;
@@ -425,7 +422,7 @@ static void VM_M_setserverlistmasknumber(prvm_prog_t *prog)
 			mask->info.isfavorite = number != 0;
 			break;
 		default:
-			VM_Warning(prog, "VM_M_setserverlistmasknumber: Bad field number (%i) passed!\n", field);
+			VM_Warning(prog, "VM_M_setserverlistmasknumber: Bad field number %i passed!\n", field );
 			return;
 	}
 
@@ -444,7 +441,7 @@ resortserverlist
 static void VM_M_resortserverlist(prvm_prog_t *prog)
 {
 	VM_SAFEPARMCOUNT(0, VM_M_resortserverlist);
-	ServerList_RebuildViewList(NULL);
+	ServerList_RebuildViewList();
 }
 
 /*
@@ -471,45 +468,44 @@ static void VM_M_getserverliststring(prvm_prog_t *prog)
 	}
 	else
 	{
-		if(hostnr < 0 || (unsigned)hostnr >= serverlist_viewcount)
+		if(hostnr < 0 || hostnr >= serverlist_viewcount)
 		{
-			VM_Warning(prog, "VM_M_getserverliststring: bad hostnr (%i) passed!\n", hostnr);
+			Con_Print("VM_M_getserverliststring: bad hostnr passed!\n");
 			return;
 		}
 		cache = ServerList_GetViewEntry(hostnr);
 	}
-	switch( (int) PRVM_G_FLOAT(OFS_PARM0) )
-	{
+	switch( (int) PRVM_G_FLOAT(OFS_PARM0) ) {
 		case SLIF_CNAME:
-			PRVM_G_INT(OFS_RETURN) = PRVM_SetTempString(prog, cache->info.cname, cache->info.cname_len);
+			PRVM_G_INT( OFS_RETURN ) = PRVM_SetTempString( prog, cache->info.cname );
 			break;
 		case SLIF_NAME:
-			PRVM_G_INT(OFS_RETURN) = PRVM_SetTempString(prog, cache->info.name, cache->info.name_len);
+			PRVM_G_INT( OFS_RETURN ) = PRVM_SetTempString( prog, cache->info.name );
 			break;
 		case SLIF_QCSTATUS:
-			PRVM_G_INT(OFS_RETURN) = PRVM_SetTempString(prog, cache->info.qcstatus, cache->info.qcstatus_len);
+			PRVM_G_INT (OFS_RETURN ) = PRVM_SetTempString( prog, cache->info.qcstatus );
 			break;
 		case SLIF_PLAYERS:
-			PRVM_G_INT(OFS_RETURN) = PRVM_SetTempString(prog, cache->info.players, cache->info.players_len);
+			PRVM_G_INT (OFS_RETURN ) = PRVM_SetTempString( prog, cache->info.players );
 			break;
 		case SLIF_GAME:
-			PRVM_G_INT(OFS_RETURN) = PRVM_SetTempString(prog, cache->info.game, cache->info.game_len);
+			PRVM_G_INT( OFS_RETURN ) = PRVM_SetTempString( prog, cache->info.game );
 			break;
 		case SLIF_MOD:
-			PRVM_G_INT(OFS_RETURN) = PRVM_SetTempString(prog, cache->info.mod, cache->info.mod_len);
+			PRVM_G_INT( OFS_RETURN ) = PRVM_SetTempString( prog, cache->info.mod );
 			break;
 		case SLIF_MAP:
-			PRVM_G_INT(OFS_RETURN) = PRVM_SetTempString(prog, cache->info.map, cache->info.map_len);
+			PRVM_G_INT( OFS_RETURN ) = PRVM_SetTempString( prog, cache->info.map );
 			break;
 		// TODO remove this again
 		case 1024:
-			PRVM_G_INT(OFS_RETURN) = PRVM_SetTempString(prog, cache->line1, cache->line1_len);
+			PRVM_G_INT( OFS_RETURN ) = PRVM_SetTempString( prog, cache->line1 );
 			break;
 		case 1025:
-			PRVM_G_INT(OFS_RETURN) = PRVM_SetTempString(prog, cache->line2, cache->line2_len);
+			PRVM_G_INT( OFS_RETURN ) = PRVM_SetTempString( prog, cache->line2 );
 			break;
 		default:
-			VM_Warning(prog, "VM_M_getserverliststring: bad field number (%i) passed!\n", (int)PRVM_G_FLOAT(OFS_PARM0));
+			Con_Print("VM_M_getserverliststring: bad field number passed!\n");
 	}
 }
 
@@ -525,7 +521,7 @@ static void VM_M_getserverlistnumber(prvm_prog_t *prog)
 	const serverlist_entry_t *cache;
 	int hostnr;
 
-	VM_SAFEPARMCOUNT(2, VM_M_getserverlistnumber);
+	VM_SAFEPARMCOUNT(2, VM_M_getserverliststring);
 
 	PRVM_G_INT(OFS_RETURN) = OFS_NULL;
 
@@ -537,15 +533,14 @@ static void VM_M_getserverlistnumber(prvm_prog_t *prog)
 	}
 	else
 	{
-		if(hostnr < 0 || (unsigned)hostnr >= serverlist_viewcount)
+		if(hostnr < 0 || hostnr >= serverlist_viewcount)
 		{
-			VM_Warning(prog, "VM_M_getserverliststring: bad hostnr (%i) passed!\n", hostnr);
+			Con_Print("VM_M_getserverliststring: bad hostnr passed!\n");
 			return;
 		}
 		cache = ServerList_GetViewEntry(hostnr);
 	}
-	switch( (int) PRVM_G_FLOAT(OFS_PARM0) )
-	{
+	switch( (int) PRVM_G_FLOAT(OFS_PARM0) ) {
 		case SLIF_MAXPLAYERS:
 			PRVM_G_FLOAT( OFS_RETURN ) = cache->info.maxplayers;
 			break;
@@ -562,8 +557,7 @@ static void VM_M_getserverlistnumber(prvm_prog_t *prog)
 			PRVM_G_FLOAT( OFS_RETURN ) = cache->info.freeslots;
 			break;
 		case SLIF_PING:
-			// display inf when a listed server times out and net_slist_pause blocks its removal
-			PRVM_G_FLOAT( OFS_RETURN ) = cache->info.ping ? cache->info.ping : INFINITY;
+			PRVM_G_FLOAT( OFS_RETURN ) = cache->info.ping;
 			break;
 		case SLIF_PROTOCOL:
 			PRVM_G_FLOAT( OFS_RETURN ) = cache->info.protocol;
@@ -575,7 +569,7 @@ static void VM_M_getserverlistnumber(prvm_prog_t *prog)
 			PRVM_G_FLOAT( OFS_RETURN ) = cache->info.isfavorite;
 			break;
 		default:
-			VM_Warning(prog, "VM_M_getserverlistnumber: bad field number (%i) passed!\n", (int)PRVM_G_FLOAT(OFS_PARM0));
+			Con_Print("VM_M_getserverlistnumber: bad field number passed!\n");
 	}
 }
 
@@ -603,7 +597,7 @@ refreshserverlist()
 */
 static void VM_M_refreshserverlist(prvm_prog_t *prog)
 {
-	qbool do_reset = false;
+	qboolean do_reset = false;
 	VM_SAFEPARMCOUNTRANGE( 0, 1, VM_M_refreshserverlist );
 	if (prog->argc >= 1 && PRVM_G_FLOAT(OFS_PARM0))
 		do_reset = true;
@@ -799,9 +793,9 @@ static void VM_M_getmousepos(prvm_prog_t *prog)
 	if (key_consoleactive || (key_dest != key_menu && key_dest != key_menu_grabbed))
 		VectorSet(PRVM_G_VECTOR(OFS_RETURN), 0, 0, 0);
 	else if (in_client_mouse)
-		VectorSet(PRVM_G_VECTOR(OFS_RETURN), in_windowmouse_x * vid_conwidth.integer / vid.mode.width, in_windowmouse_y * vid_conheight.integer / vid.mode.height, 0);
+		VectorSet(PRVM_G_VECTOR(OFS_RETURN), in_windowmouse_x * vid_conwidth.integer / vid.width, in_windowmouse_y * vid_conheight.integer / vid.height, 0);
 	else
-		VectorSet(PRVM_G_VECTOR(OFS_RETURN), in_mouse_x * vid_conwidth.integer / vid.mode.width, in_mouse_y * vid_conheight.integer / vid.mode.height, 0);
+		VectorSet(PRVM_G_VECTOR(OFS_RETURN), in_mouse_x * vid_conwidth.integer / vid.width, in_mouse_y * vid_conheight.integer / vid.height, 0);
 }
 
 static void VM_M_crypto_getkeyfp(prvm_prog_t *prog)
@@ -816,7 +810,7 @@ static void VM_M_crypto_getkeyfp(prvm_prog_t *prog)
 	VM_CheckEmptyString( prog, s );
 
 	if(LHNETADDRESS_FromString(&addr, s, 26000) && Crypto_RetrieveHostKey(&addr, NULL, keyfp, sizeof(keyfp), NULL, 0, NULL, NULL))
-		PRVM_G_INT(OFS_RETURN) = PRVM_SetTempString(prog, keyfp, strlen(keyfp));
+		PRVM_G_INT( OFS_RETURN ) = PRVM_SetTempString( prog, keyfp );
 	else
 		PRVM_G_INT( OFS_RETURN ) = OFS_NULL;
 }
@@ -832,7 +826,7 @@ static void VM_M_crypto_getidfp(prvm_prog_t *prog)
 	VM_CheckEmptyString( prog, s );
 
 	if(LHNETADDRESS_FromString(&addr, s, 26000) && Crypto_RetrieveHostKey(&addr, NULL, NULL, 0, idfp, sizeof(idfp), NULL, NULL))
-		PRVM_G_INT( OFS_RETURN ) = PRVM_SetTempString( prog, idfp, strlen(idfp));
+		PRVM_G_INT( OFS_RETURN ) = PRVM_SetTempString( prog, idfp );
 	else
 		PRVM_G_INT( OFS_RETURN ) = OFS_NULL;
 }
@@ -840,7 +834,7 @@ static void VM_M_crypto_getidstatus(prvm_prog_t *prog)
 {
 	lhnetaddress_t addr;
 	const char *s;
-	qbool issigned;
+	qboolean issigned;
 
 	VM_SAFEPARMCOUNT(1,VM_M_crypto_getidstatus);
 
@@ -865,15 +859,7 @@ static void VM_M_crypto_getencryptlevel(prvm_prog_t *prog)
 	VM_CheckEmptyString( prog, s );
 
 	if(LHNETADDRESS_FromString(&addr, s, 26000) && Crypto_RetrieveHostKey(&addr, NULL, NULL, 0, NULL, 0, &aeslevel, NULL))
-	{
-		if (aeslevel)
-		{
-			size_t vabuf_len = dpsnprintf(vabuf, sizeof(vabuf), "%d AES128", aeslevel);
-			PRVM_G_INT(OFS_RETURN) = PRVM_SetTempString(prog, vabuf, vabuf_len);
-		}
-		else
-			PRVM_G_INT(OFS_RETURN) = PRVM_SetTempString(prog, "0", 1);
-	}
+		PRVM_G_INT( OFS_RETURN ) = PRVM_SetTempString(prog, aeslevel ? va(vabuf, sizeof(vabuf), "%d AES128", aeslevel) : "0");
 	else
 		PRVM_G_INT( OFS_RETURN ) = OFS_NULL;
 }
@@ -882,20 +868,20 @@ static void VM_M_crypto_getmykeyfp(prvm_prog_t *prog)
 	int i;
 	char keyfp[FP64_SIZE + 1];
 
-	VM_SAFEPARMCOUNT(1, VM_M_crypto_getmykeyfp);
+	VM_SAFEPARMCOUNT(1,VM_M_crypto_getmykey);
 
 	i = PRVM_G_FLOAT( OFS_PARM0 );
 	switch(Crypto_RetrieveLocalKey(i, keyfp, sizeof(keyfp), NULL, 0, NULL))
 	{
 		case -1:
-			PRVM_G_INT( OFS_RETURN ) = PRVM_SetTempString(prog, "", 0);
+			PRVM_G_INT( OFS_RETURN ) = PRVM_SetTempString(prog, "");
 			break;
 		case 0:
 			PRVM_G_INT( OFS_RETURN ) = OFS_NULL;
 			break;
 		default:
 		case 1:
-			PRVM_G_INT( OFS_RETURN ) = PRVM_SetTempString(prog, keyfp, strlen(keyfp));
+			PRVM_G_INT( OFS_RETURN ) = PRVM_SetTempString(prog, keyfp);
 			break;
 	}
 }
@@ -904,29 +890,29 @@ static void VM_M_crypto_getmyidfp(prvm_prog_t *prog)
 	int i;
 	char idfp[FP64_SIZE + 1];
 
-	VM_SAFEPARMCOUNT(1, VM_M_crypto_getmyidfp);
+	VM_SAFEPARMCOUNT(1,VM_M_crypto_getmykey);
 
 	i = PRVM_G_FLOAT( OFS_PARM0 );
 	switch(Crypto_RetrieveLocalKey(i, NULL, 0, idfp, sizeof(idfp), NULL))
 	{
 		case -1:
-			PRVM_G_INT( OFS_RETURN ) = PRVM_SetTempString(prog, "", 0);
+			PRVM_G_INT( OFS_RETURN ) = PRVM_SetTempString(prog, "");
 			break;
 		case 0:
 			PRVM_G_INT( OFS_RETURN ) = OFS_NULL;
 			break;
 		default:
 		case 1:
-			PRVM_G_INT( OFS_RETURN ) = PRVM_SetTempString(prog, idfp, strlen(idfp));
+			PRVM_G_INT( OFS_RETURN ) = PRVM_SetTempString(prog, idfp);
 			break;
 	}
 }
 static void VM_M_crypto_getmyidstatus(prvm_prog_t *prog)
 {
 	int i;
-	qbool issigned;
+	qboolean issigned;
 
-	VM_SAFEPARMCOUNT(1, VM_M_crypto_getmyidstatus);
+	VM_SAFEPARMCOUNT(1,VM_M_crypto_getmykey);
 
 	i = PRVM_G_FLOAT( OFS_PARM0 );
 	switch(Crypto_RetrieveLocalKey(i, NULL, 0, NULL, 0, &issigned))
@@ -942,129 +928,6 @@ static void VM_M_crypto_getmyidstatus(prvm_prog_t *prog)
 			PRVM_G_FLOAT( OFS_RETURN ) = issigned ? 2 : 1;
 			break;
 	}
-}
-
-// CL_Video interface functions
-
-/*
-========================
-VM_cin_open
-
-float cin_open(string file, string name)
-========================
-*/
-void VM_cin_open(prvm_prog_t *prog)
-{
-	const char *file;
-	const char *name;
-
-	VM_SAFEPARMCOUNT( 2, VM_cin_open );
-
-	file = PRVM_G_STRING( OFS_PARM0 );
-	name = PRVM_G_STRING( OFS_PARM1 );
-
-	VM_CheckEmptyString(prog,  file );
-    VM_CheckEmptyString(prog,  name );
-
-	if( CL_OpenVideo( file, name, MENUOWNER, "" ) )
-		PRVM_G_FLOAT( OFS_RETURN ) = 1;
-	else
-		PRVM_G_FLOAT( OFS_RETURN ) = 0;
-}
-
-/*
-========================
-VM_cin_close
-
-void cin_close(string name)
-========================
-*/
-void VM_cin_close(prvm_prog_t *prog)
-{
-	const char *name;
-
-	VM_SAFEPARMCOUNT( 1, VM_cin_close );
-
-	name = PRVM_G_STRING( OFS_PARM0 );
-	VM_CheckEmptyString(prog,  name );
-
-	CL_CloseVideo( CL_GetVideoByName( name ) );
-}
-
-/*
-========================
-VM_cin_setstate
-void cin_setstate(string name, float type)
-========================
-*/
-void VM_cin_setstate(prvm_prog_t *prog)
-{
-	const char *name;
-	clvideostate_t 	state;
-	clvideo_t		*video;
-
-	VM_SAFEPARMCOUNT( 2, VM_cin_setstate );
-
-	name = PRVM_G_STRING( OFS_PARM0 );
-	VM_CheckEmptyString(prog,  name );
-
-	state = (clvideostate_t)((int)PRVM_G_FLOAT( OFS_PARM1 ));
-
-	video = CL_GetVideoByName( name );
-	if( video && state > CLVIDEO_UNUSED && state < CLVIDEO_STATECOUNT )
-		CL_SetVideoState( video, state );
-}
-
-/*
-========================
-VM_cin_getstate
-
-float cin_getstate(string name)
-========================
-*/
-void VM_cin_getstate(prvm_prog_t *prog)
-{
-	const char *name;
-	clvideo_t		*video;
-
-	VM_SAFEPARMCOUNT( 1, VM_cin_getstate );
-
-	name = PRVM_G_STRING( OFS_PARM0 );
-	VM_CheckEmptyString(prog,  name );
-
-	video = CL_GetVideoByName( name );
-	if( video )
-		PRVM_G_FLOAT( OFS_RETURN ) = (int)video->state;
-	else
-		PRVM_G_FLOAT( OFS_RETURN ) = 0;
-}
-
-/*
-========================
-VM_cin_restart
-
-void cin_restart(string name)
-========================
-*/
-void VM_cin_restart(prvm_prog_t *prog)
-{
-	const char *name;
-	clvideo_t		*video;
-
-	VM_SAFEPARMCOUNT( 1, VM_cin_restart );
-
-	name = PRVM_G_STRING( OFS_PARM0 );
-	VM_CheckEmptyString(prog,  name );
-
-	video = CL_GetVideoByName( name );
-	if( video )
-		CL_RestartVideo( video );
-}
-
-static void VM_M_registercommand(prvm_prog_t *prog)
-{
-	VM_SAFEPARMCOUNT(1, VM_M_registercommand);
-	Cmd_AddCommand(CF_CLIENT, PRVM_G_STRING(OFS_PARM0), NULL, "console command created by QuakeC");
 }
 
 prvm_builtin_t vm_m_builtins[] = {
@@ -1131,7 +994,7 @@ VM_argv,								//  #59
 VM_isserver,						//  #60
 VM_clientcount,					//  #61
 VM_clientstate,					//  #62
-NULL,						//  #63 FIXME
+VM_clcommand,						//  #63
 VM_changelevel,					//  #64
 VM_localsound,						//  #65
 VM_M_getmousepos,					//  #66
@@ -1447,7 +1310,7 @@ NULL,									// #348
 VM_CL_isdemo,							// #349
 NULL,									// #350
 NULL,									// #351
-VM_M_registercommand,					// #352 void(string cmdname)
+NULL,									// #352
 VM_wasfreed,							// #353 float(entity ent) wasfreed
 NULL,									// #354
 VM_CL_videoplaying,						// #355
@@ -1749,8 +1612,7 @@ void MVM_init_cmd(prvm_prog_t *prog)
 	r_refdef_scene_t *scene;
 
 	VM_Cmd_Init(prog);
-	prog->polygonbegin_model = NULL;
-	prog->polygonbegin_guess2d = 0;
+	VM_Polygons_Reset(prog);
 
 	scene = R_GetScenePointer( RST_MENU );
 
@@ -1772,6 +1634,5 @@ void MVM_reset_cmd(prvm_prog_t *prog)
 
 	//VM_Cmd_Init();
 	VM_Cmd_Reset(prog);
-	prog->polygonbegin_model = NULL;
-	prog->polygonbegin_guess2d = 0;
+	VM_Polygons_Reset(prog);
 }

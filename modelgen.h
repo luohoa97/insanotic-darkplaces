@@ -30,8 +30,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #ifndef MODELGEN_H
 #define MODELGEN_H
 
-#include "qtypes.h"
-
 #define ALIAS_VERSION	6
 
 #define ALIAS_ONSEAM				0x0020
@@ -54,7 +52,7 @@ typedef struct mdl_s
 	int			numverts;
 	int			numtris;
 	int			numframes;
-	int			synctype;
+	synctype_t	synctype;
 	int			flags;
 	float		size;
 }

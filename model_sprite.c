@@ -25,17 +25,17 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "quakedef.h"
 #include "image.h"
 
-cvar_t r_mipsprites = {CF_CLIENT | CF_ARCHIVE, "r_mipsprites", "1", "mipmaps sprites so they render faster in the distance and do not display noise artifacts"};
-cvar_t r_labelsprites_scale = {CF_CLIENT | CF_ARCHIVE, "r_labelsprites_scale", "1", "global scale to apply to label sprites before conversion to HUD coordinates"};
-cvar_t r_labelsprites_roundtopixels = {CF_CLIENT | CF_ARCHIVE, "r_labelsprites_roundtopixels", "1", "try to make label sprites sharper by rounding their size to 0.5x or 1x and by rounding their position to whole pixels if possible"};
-cvar_t r_overheadsprites_perspective = {CF_CLIENT | CF_ARCHIVE, "r_overheadsprites_perspective", "5", "fake perspective effect for SPR_OVERHEAD sprites"};
-cvar_t r_overheadsprites_pushback = {CF_CLIENT | CF_ARCHIVE, "r_overheadsprites_pushback", "15", "how far to pull the SPR_OVERHEAD sprites toward the eye (used to avoid intersections with 3D models)"};
-cvar_t r_overheadsprites_scalex = {CF_CLIENT | CF_ARCHIVE, "r_overheadsprites_scalex", "1", "additional scale for overhead sprites for x axis"};
-cvar_t r_overheadsprites_scaley = {CF_CLIENT | CF_ARCHIVE, "r_overheadsprites_scaley", "1", "additional scale for overhead sprites for y axis"};
-cvar_t r_track_sprites = {CF_CLIENT | CF_ARCHIVE, "r_track_sprites", "1", "track SPR_LABEL* sprites by putting them as indicator at the screen border to rotate to"};
-cvar_t r_track_sprites_flags = {CF_CLIENT | CF_ARCHIVE, "r_track_sprites_flags", "1", "1: Rotate sprites accordingly, 2: Make it a continuous rotation"};
-cvar_t r_track_sprites_scalew = {CF_CLIENT | CF_ARCHIVE, "r_track_sprites_scalew", "1", "width scaling of tracked sprites"};
-cvar_t r_track_sprites_scaleh = {CF_CLIENT | CF_ARCHIVE, "r_track_sprites_scaleh", "1", "height scaling of tracked sprites"};
+cvar_t r_mipsprites = {CVAR_SAVE, "r_mipsprites", "1", "mipmaps sprites so they render faster in the distance and do not display noise artifacts"};
+cvar_t r_labelsprites_scale = {CVAR_SAVE, "r_labelsprites_scale", "1", "global scale to apply to label sprites before conversion to HUD coordinates"};
+cvar_t r_labelsprites_roundtopixels = {CVAR_SAVE, "r_labelsprites_roundtopixels", "1", "try to make label sprites sharper by rounding their size to 0.5x or 1x and by rounding their position to whole pixels if possible"};
+cvar_t r_overheadsprites_perspective = {CVAR_SAVE, "r_overheadsprites_perspective", "5", "fake perspective effect for SPR_OVERHEAD sprites"};
+cvar_t r_overheadsprites_pushback = {CVAR_SAVE, "r_overheadsprites_pushback", "15", "how far to pull the SPR_OVERHEAD sprites toward the eye (used to avoid intersections with 3D models)"};
+cvar_t r_overheadsprites_scalex = {CVAR_SAVE, "r_overheadsprites_scalex", "1", "additional scale for overhead sprites for x axis"};
+cvar_t r_overheadsprites_scaley = {CVAR_SAVE, "r_overheadsprites_scaley", "1", "additional scale for overhead sprites for y axis"};
+cvar_t r_track_sprites = {CVAR_SAVE, "r_track_sprites", "1", "track SPR_LABEL* sprites by putting them as indicator at the screen border to rotate to"};
+cvar_t r_track_sprites_flags = {CVAR_SAVE, "r_track_sprites_flags", "1", "1: Rotate sprites accordingly, 2: Make it a continuous rotation"};
+cvar_t r_track_sprites_scalew = {CVAR_SAVE, "r_track_sprites_scalew", "1", "width scaling of tracked sprites"};
+cvar_t r_track_sprites_scaleh = {CVAR_SAVE, "r_track_sprites_scaleh", "1", "height scaling of tracked sprites"};
 
 /*
 ===============
@@ -57,7 +57,7 @@ void Mod_SpriteInit (void)
 	Cvar_RegisterVariable(&r_track_sprites_scaleh);
 }
 
-static void Mod_SpriteSetupTexture(texture_t *texture, skinframe_t *skinframe, qbool fullbright, qbool additive)
+static void Mod_SpriteSetupTexture(texture_t *texture, skinframe_t *skinframe, qboolean fullbright, qboolean additive)
 {
 	if (!skinframe)
 		skinframe = R_SkinFrame_LoadMissing();
@@ -75,7 +75,7 @@ static void Mod_SpriteSetupTexture(texture_t *texture, skinframe_t *skinframe, q
 	else if (skinframe->hasalpha)
 		texture->basematerialflags |= MATERIALFLAG_ALPHA | MATERIALFLAG_BLENDED | MATERIALFLAG_NOSHADOW;
 	texture->currentmaterialflags = texture->basematerialflags;
-	texture->materialshaderpass = texture->shaderpasses[0] = Mod_CreateShaderPass(loadmodel->mempool, skinframe);
+	texture->materialshaderpass = texture->shaderpasses[0] = Mod_CreateShaderPass(skinframe);
 	texture->currentskinframe = skinframe;
 	texture->surfaceflags = 0;
 	texture->supercontents = SUPERCONTENTS_SOLID;
@@ -88,25 +88,25 @@ static void Mod_SpriteSetupTexture(texture_t *texture, skinframe_t *skinframe, q
 
 extern cvar_t gl_texturecompression_sprites;
 
-static void Mod_Sprite_SharedSetup(const unsigned char *datapointer, int version, const unsigned int *palette, qbool additive)
+static void Mod_Sprite_SharedSetup(const unsigned char *datapointer, int version, const unsigned int *palette, qboolean additive)
 {
-	int                 i, j, groupframes, realframes, x, y, origin[2], width, height;
-	qbool               fullbright;
-	dspriteframetype_t  pinframetype;
-	dspriteframe_t      pinframe;
-	dspritegroup_t      pingroup;
-	dspriteinterval_t   pinintervals;
-	skinframe_t         *skinframe;
-	float               modelradius, interval;
-	char                name[MAX_QPATH], fogname[MAX_QPATH];
-	const void          *startframes;
+	int					i, j, groupframes, realframes, x, y, origin[2], width, height;
+	qboolean			fullbright;
+	dspriteframetype_t	*pinframetype;
+	dspriteframe_t		*pinframe;
+	dspritegroup_t		*pingroup;
+	dspriteinterval_t	*pinintervals;
+	skinframe_t			*skinframe;
+	float				modelradius, interval;
+	char				name[MAX_QPATH], fogname[MAX_QPATH];
+	const void			*startframes;
 	int                 texflags = (r_mipsprites.integer ? TEXF_MIPMAP : 0) | ((gl_texturecompression.integer && gl_texturecompression_sprites.integer) ? TEXF_COMPRESS : 0) | TEXF_ISSPRITE | TEXF_PICMIP | TEXF_ALPHA | TEXF_CLAMP;
 	modelradius = 0;
 
 	if (loadmodel->numframes < 1)
 		Host_Error ("Mod_Sprite_SharedSetup: Invalid # of frames: %d", loadmodel->numframes);
 
-	// LadyHavoc: hack to allow sprites to be non-fullbright
+	// LordHavoc: hack to allow sprites to be non-fullbright
 	fullbright = true;
 	for (i = 0;i < MAX_QPATH && loadmodel->name[i];i++)
 		if (loadmodel->name[i] == '!')
@@ -114,34 +114,33 @@ static void Mod_Sprite_SharedSetup(const unsigned char *datapointer, int version
 
 //
 // load the frames
-// bones_was_here: memcpy() used here to prevent misaligned access with struct-based parsing
 //
 	startframes = datapointer;
 	realframes = 0;
 	for (i = 0;i < loadmodel->numframes;i++)
 	{
-		memcpy(&pinframetype, datapointer, sizeof(dspriteframetype_t));
+		pinframetype = (dspriteframetype_t *)datapointer;
 		datapointer += sizeof(dspriteframetype_t);
 
-		if (LittleLong (pinframetype.type) == SPR_SINGLE)
+		if (LittleLong (pinframetype->type) == SPR_SINGLE)
 			groupframes = 1;
 		else
 		{
-			memcpy(&pingroup, datapointer, sizeof(dspritegroup_t));
+			pingroup = (dspritegroup_t *)datapointer;
 			datapointer += sizeof(dspritegroup_t);
 
-			groupframes = LittleLong(pingroup.numframes);
+			groupframes = LittleLong(pingroup->numframes);
 
 			datapointer += sizeof(dspriteinterval_t) * groupframes;
 		}
 
 		for (j = 0;j < groupframes;j++)
 		{
-			memcpy(&pinframe, datapointer, sizeof(dspriteframe_t));
+			pinframe = (dspriteframe_t *)datapointer;
 			if (version == SPRITE32_VERSION)
-				datapointer += sizeof(dspriteframe_t) + LittleLong(pinframe.width) * LittleLong(pinframe.height) * 4;
+				datapointer += sizeof(dspriteframe_t) + LittleLong(pinframe->width) * LittleLong(pinframe->height) * 4;
 			else //if (version == SPRITE_VERSION || version == SPRITEHL_VERSION)
-				datapointer += sizeof(dspriteframe_t) + LittleLong(pinframe.width) * LittleLong(pinframe.height);
+				datapointer += sizeof(dspriteframe_t) + LittleLong(pinframe->width) * LittleLong(pinframe->height);
 		}
 		realframes += groupframes;
 	}
@@ -156,25 +155,25 @@ static void Mod_Sprite_SharedSetup(const unsigned char *datapointer, int version
 	realframes = 0;
 	for (i = 0;i < loadmodel->numframes;i++)
 	{
-		memcpy(&pinframetype, datapointer, sizeof(dspriteframetype_t));
+		pinframetype = (dspriteframetype_t *)datapointer;
 		datapointer += sizeof(dspriteframetype_t);
 
-		if (LittleLong (pinframetype.type) == SPR_SINGLE)
+		if (LittleLong (pinframetype->type) == SPR_SINGLE)
 		{
 			groupframes = 1;
 			interval = 0.1f;
 		}
 		else
 		{
-			memcpy(&pingroup, datapointer, sizeof(dspritegroup_t));
+			pingroup = (dspritegroup_t *)datapointer;
 			datapointer += sizeof(dspritegroup_t);
 
-			groupframes = LittleLong(pingroup.numframes);
+			groupframes = LittleLong(pingroup->numframes);
 
-			memcpy(&pinintervals, datapointer, sizeof(dspriteinterval_t));
+			pinintervals = (dspriteinterval_t *)datapointer;
 			datapointer += sizeof(dspriteinterval_t) * groupframes;
 
-			interval = LittleFloat(pinintervals.interval);
+			interval = LittleFloat(pinintervals[0].interval);
 			if (interval < 0.01f)
 				Host_Error("Mod_Sprite_SharedSetup: invalid interval");
 		}
@@ -187,13 +186,13 @@ static void Mod_Sprite_SharedSetup(const unsigned char *datapointer, int version
 
 		for (j = 0;j < groupframes;j++)
 		{
-			memcpy(&pinframe, datapointer, sizeof(dspriteframe_t));
+			pinframe = (dspriteframe_t *)datapointer;
 			datapointer += sizeof(dspriteframe_t);
 
-			origin[0] = LittleLong (pinframe.origin[0]);
-			origin[1] = LittleLong (pinframe.origin[1]);
-			width = LittleLong (pinframe.width);
-			height = LittleLong (pinframe.height);
+			origin[0] = LittleLong (pinframe->origin[0]);
+			origin[1] = LittleLong (pinframe->origin[1]);
+			width = LittleLong (pinframe->width);
+			height = LittleLong (pinframe->height);
 
 			loadmodel->sprite.sprdata_frames[realframes].left = origin[0];
 			loadmodel->sprite.sprdata_frames[realframes].right = origin[0] + width;
@@ -221,7 +220,7 @@ static void Mod_Sprite_SharedSetup(const unsigned char *datapointer, int version
 						dpsnprintf (name, sizeof(name), "%s_%i", loadmodel->name, i);
 						dpsnprintf (fogname, sizeof(fogname), "%s_%ifog", loadmodel->name, i);
 					}
-					if (!(skinframe = R_SkinFrame_LoadExternal(name, texflags | TEXF_COMPRESS, false, false)))
+					if (!(skinframe = R_SkinFrame_LoadExternal(name, texflags | TEXF_COMPRESS, false)))
 					{
 						unsigned char *pixels = (unsigned char *) Mem_Alloc(loadmodel->mempool, width*height*4);
 						if (version == SPRITE32_VERSION)
@@ -236,7 +235,7 @@ static void Mod_Sprite_SharedSetup(const unsigned char *datapointer, int version
 						}
 						else //if (version == SPRITEHL_VERSION || version == SPRITE_VERSION)
 							Image_Copy8bitBGRA(datapointer, pixels, width*height, palette ? palette : palette_bgra_transparent);
-						skinframe = R_SkinFrame_LoadInternalBGRA(name, texflags, pixels, width, height, 0, 0, 0, false);
+						skinframe = R_SkinFrame_LoadInternalBGRA(name, texflags, pixels, width, height, false);
 						// texflags |= TEXF_COMPRESS;
 						Mem_Free(pixels);
 					}
@@ -264,7 +263,7 @@ static void Mod_Sprite_SharedSetup(const unsigned char *datapointer, int version
 	loadmodel->radius2 = modelradius * modelradius;
 }
 
-void Mod_IDSP_Load(model_t *mod, void *buffer, void *bufferend)
+void Mod_IDSP_Load(dp_model_t *mod, void *buffer, void *bufferend)
 {
 	int version;
 	const unsigned char *datapointer;
@@ -275,9 +274,13 @@ void Mod_IDSP_Load(model_t *mod, void *buffer, void *bufferend)
 
 	loadmodel->type = mod_sprite;
 
+	loadmodel->DrawSky = NULL;
 	loadmodel->Draw = R_Model_Sprite_Draw;
 	loadmodel->DrawDepth = NULL;
+	loadmodel->CompileShadowVolume = NULL;
+	loadmodel->DrawShadowVolume = NULL;
 	loadmodel->DrawLight = NULL;
+	loadmodel->DrawAddWaterPlanes = NULL;
 
 	version = LittleLong(((dsprite_t *)buffer)->version);
 	if (version == SPRITE_VERSION || version == SPRITE32_VERSION)
@@ -375,10 +378,10 @@ void Mod_IDSP_Load(model_t *mod, void *buffer, void *bufferend)
 }
 
 
-void Mod_IDS2_Load(model_t *mod, void *buffer, void *bufferend)
+void Mod_IDS2_Load(dp_model_t *mod, void *buffer, void *bufferend)
 {
 	int i, version;
-	qbool fullbright;
+	qboolean fullbright;
 	const dsprite2_t *pinqsprite;
 	skinframe_t *skinframe;
 	float modelradius;
@@ -388,9 +391,13 @@ void Mod_IDS2_Load(model_t *mod, void *buffer, void *bufferend)
 
 	loadmodel->type = mod_sprite;
 
+	loadmodel->DrawSky = NULL;
 	loadmodel->Draw = R_Model_Sprite_Draw;
 	loadmodel->DrawDepth = NULL;
+	loadmodel->CompileShadowVolume = NULL;
+	loadmodel->DrawShadowVolume = NULL;
 	loadmodel->DrawLight = NULL;
+	loadmodel->DrawAddWaterPlanes = NULL;
 
 	pinqsprite = (dsprite2_t *)buffer;
 
@@ -404,7 +411,7 @@ void Mod_IDS2_Load(model_t *mod, void *buffer, void *bufferend)
 	loadmodel->sprite.sprnum_type = SPR_VP_PARALLEL;
 	loadmodel->synctype = ST_SYNC;
 
-	// LadyHavoc: hack to allow sprites to be non-fullbright
+	// LordHavoc: hack to allow sprites to be non-fullbright
 	fullbright = true;
 	for (i = 0;i < MAX_QPATH && loadmodel->name[i];i++)
 		if (loadmodel->name[i] == '!')
@@ -457,9 +464,9 @@ void Mod_IDS2_Load(model_t *mod, void *buffer, void *bufferend)
 		{
 			const dsprite2frame_t *pinframe;
 			pinframe = &pinqsprite->frames[i];
-			if (!(skinframe = R_SkinFrame_LoadExternal(pinframe->name, texflags, false, false)))
+			if (!(skinframe = R_SkinFrame_LoadExternal(pinframe->name, texflags, false)))
 			{
-				Con_Printf(CON_ERROR "Mod_IDS2_Load: failed to load %s", pinframe->name);
+				Con_Printf("Mod_IDS2_Load: failed to load %s", pinframe->name);
 				skinframe = R_SkinFrame_LoadMissing();
 			}
 			Mod_SpriteSetupTexture(&loadmodel->data_textures[i], skinframe, fullbright, false);

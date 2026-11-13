@@ -43,7 +43,7 @@ typedef struct explosion_s
 	vec3_t origin;
 	vec3_t vert[EXPLOSIONVERTS];
 	vec3_t vertvel[EXPLOSIONVERTS];
-	qbool clipping;
+	qboolean clipping;
 }
 explosion_t;
 
@@ -55,11 +55,11 @@ static rtexture_t	*explosiontexture;
 static rtexturepool_t	*explosiontexturepool;
 #endif
 
-cvar_t r_explosionclip = {CF_CLIENT | CF_ARCHIVE, "r_explosionclip", "1", "enables collision detection for explosion shell (so that it flattens against walls and floors)"};
+cvar_t r_explosionclip = {CVAR_SAVE, "r_explosionclip", "1", "enables collision detection for explosion shell (so that it flattens against walls and floors)"};
 #ifdef MAX_EXPLOSIONS
-static cvar_t r_drawexplosions = {CF_CLIENT, "r_drawexplosions", "1", "enables rendering of explosion shells (see also cl_particles_explosions_shell)"};
+static cvar_t r_drawexplosions = {0, "r_drawexplosions", "1", "enables rendering of explosion shells (see also cl_particles_explosions_shell)"};
 
-//extern qbool r_loadfog;
+//extern qboolean r_loadfog;
 static void r_explosion_start(void)
 {
 	int x, y;
@@ -213,7 +213,7 @@ static void R_DrawExplosion_TransparentCallback(const entity_render_t *ent, cons
 	R_EntityMatrix(&identitymatrix);
 
 //	R_Mesh_ResetTextureState();
-	R_SetupShader_Generic(explosiontexture, false, false, false);
+	R_SetupShader_Generic(explosiontexture, NULL, GL_MODULATE, 1, false, false, false);
 	for (surfacelistindex = 0;surfacelistindex < numsurfaces;surfacelistindex++)
 	{
 		const explosion_t *e = explosion + surfacelist[surfacelistindex];

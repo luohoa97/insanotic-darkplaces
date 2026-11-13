@@ -1,32 +1,8 @@
-/*
-Copyright (C) 2010-2015 Rudolf Polzer (divVerent)
-
-This program is free software; you can redistribute it and/or
-modify it under the terms of the GNU General Public License
-as published by the Free Software Foundation; either version 2
-of the License, or (at your option) any later version.
-
-This program is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
-
-See the GNU General Public License for more details.
-
-You should have received a copy of the GNU General Public License
-along with this program; if not, write to the Free Software
-Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
-
-*/
-
 #ifndef CRYPTO_H
 #define CRYPTO_H
 
-#include <stddef.h>
-#include "qtypes.h"
-struct lhnetaddress_s;
-
-extern struct cvar_s crypto_developer;
-extern struct cvar_s crypto_aeslevel;
+extern cvar_t crypto_developer;
+extern cvar_t crypto_aeslevel;
 #define ENCRYPTION_REQUIRED (crypto_aeslevel.integer >= 3)
 
 extern int crypto_keyfp_recommended_length; // applies to LOCAL IDs, and to ALL keys
@@ -34,6 +10,8 @@ extern int crypto_keyfp_recommended_length; // applies to LOCAL IDs, and to ALL 
 #define CRYPTO_HEADERSIZE 31
 // AES case causes 16 to 31 bytes overhead
 // SHA256 case causes 16 bytes overhead as we truncate to 128bit
+
+#include "lhnet.h"
 
 #define FP64_SIZE 44
 #define DHKEY_SIZE 16
@@ -43,12 +21,12 @@ typedef struct
 	unsigned char dhkey[DHKEY_SIZE]; // shared key, not NUL terminated
 	char client_idfp[FP64_SIZE+1];
 	char client_keyfp[FP64_SIZE+1];
-	qbool client_issigned;
+	qboolean client_issigned;
 	char server_idfp[FP64_SIZE+1];
 	char server_keyfp[FP64_SIZE+1];
-	qbool server_issigned;
-	qbool authenticated;
-	qbool use_aes;
+	qboolean server_issigned;
+	qboolean authenticated;
+	qboolean use_aes;
 	void *data;
 }
 crypto_t;
@@ -57,7 +35,7 @@ void Crypto_Init(void);
 void Crypto_Init_Commands(void);
 void Crypto_LoadKeys(void); // NOTE: when this is called, the SV_LockThreadMutex MUST be active
 void Crypto_Shutdown(void);
-qbool Crypto_Available(void);
+qboolean Crypto_Available(void);
 void sha256(unsigned char *out, const unsigned char *in, int n); // may ONLY be called if Crypto_Available()
 const void *Crypto_EncryptPacket(crypto_t *crypto, const void *data_src, size_t len_src, void *data_dst, size_t *len_dst, size_t len);
 const void *Crypto_DecryptPacket(crypto_t *crypto, const void *data_src, size_t len_src, void *data_dst, size_t *len_dst, size_t len);
@@ -65,20 +43,20 @@ const void *Crypto_DecryptPacket(crypto_t *crypto, const void *data_src, size_t 
 #define CRYPTO_MATCH 1          // process as usual (packet was used)
 #define CRYPTO_DISCARD 2        // discard this packet
 #define CRYPTO_REPLACE 3        // make the buffer the current packet
-int Crypto_ClientParsePacket(const char *data_in, size_t len_in, char *data_out, size_t *len_out, lhnetaddress_t *peeraddress, const char *peeraddressstring);
+int Crypto_ClientParsePacket(const char *data_in, size_t len_in, char *data_out, size_t *len_out, lhnetaddress_t *peeraddress);
 int Crypto_ServerParsePacket(const char *data_in, size_t len_in, char *data_out, size_t *len_out, lhnetaddress_t *peeraddress);
 
 // if len_out is nonzero, the packet is to be sent to the client
 
-qbool Crypto_ServerAppendToChallenge(const char *data_in, size_t len_in, char *data_out, size_t *len_out, size_t maxlen);
-crypto_t *Crypto_ServerGetInstance(struct lhnetaddress_s *peeraddress);
-qbool Crypto_FinishInstance(crypto_t *out, crypto_t *in); // also clears allocated memory, and frees the instance received by ServerGetInstance
+qboolean Crypto_ServerAppendToChallenge(const char *data_in, size_t len_in, char *data_out, size_t *len_out, size_t maxlen);
+crypto_t *Crypto_ServerGetInstance(lhnetaddress_t *peeraddress);
+qboolean Crypto_FinishInstance(crypto_t *out, crypto_t *in); // also clears allocated memory, and frees the instance received by ServerGetInstance
 const char *Crypto_GetInfoResponseDataString(void);
 
 // retrieves a host key for an address (can be exposed to menuqc, or used by the engine to look up stored keys e.g. for server bookmarking)
 // pointers may be NULL
-qbool Crypto_RetrieveHostKey(struct lhnetaddress_s *peeraddress, int *keyid, char *keyfp, size_t keyfplen, char *idfp, size_t idfplen, int *aeslevel, qbool *issigned);
-int Crypto_RetrieveLocalKey(int keyid, char *keyfp, size_t keyfplen, char *idfp, size_t idfplen, qbool *issigned); // return value: -1 if more to come, +1 if valid, 0 if end of list
+qboolean Crypto_RetrieveHostKey(lhnetaddress_t *peeraddress, int *keyid, char *keyfp, size_t keyfplen, char *idfp, size_t idfplen, int *aeslevel, qboolean *issigned);
+int Crypto_RetrieveLocalKey(int keyid, char *keyfp, size_t keyfplen, char *idfp, size_t idfplen, qboolean *issigned); // return value: -1 if more to come, +1 if valid, 0 if end of list
 
 size_t Crypto_SignData(const void *data, size_t datasize, int keyid, void *signed_data, size_t signed_size);
 size_t Crypto_SignDataDetached(const void *data, size_t datasize, int keyid, void *signed_data, size_t signed_size);

@@ -22,7 +22,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #define SOUND_H
 
 #include "matrixlib.h"
-struct cmd_state_s;
 
 
 // ====================================================================
@@ -47,9 +46,12 @@ struct cmd_state_s;
 
 typedef struct sfx_s sfx_t;
 
+extern cvar_t mastervolume;
 extern cvar_t bgmvolume;
 extern cvar_t volume;
 extern cvar_t snd_initialized;
+extern cvar_t snd_staticvolume;
+extern cvar_t snd_mutewhenidle;
 
 
 // ====================================================================
@@ -61,15 +63,16 @@ void S_Terminate (void);
 
 void S_Startup (void);
 void S_Shutdown (void);
-void S_UnloadAllSounds_f(struct cmd_state_s *cmd);
+void S_UnloadAllSounds_f (void);
 
 void S_Update(const matrix4x4_t *listenermatrix);
+void S_ExtraUpdate (void);
 
-sfx_t *S_PrecacheSound (const char *sample, qbool complain, qbool levelsound);
+sfx_t *S_PrecacheSound (const char *sample, qboolean complain, qboolean levelsound);
 float S_SoundLength(const char *name);
 void S_ClearUsed (void);
 void S_PurgeUnused (void);
-qbool S_IsSoundPrecached (const sfx_t *sfx);
+qboolean S_IsSoundPrecached (const sfx_t *sfx);
 void S_LoadPending(double budget_seconds); // Insanotic: lazy sound decoding
 sfx_t *S_FindName(const char *name);
 
@@ -92,20 +95,18 @@ sfx_t *S_FindName(const char *name);
 #define CHAN_ENGINE2USER(c)    (c)
 #define CHAN_ENGINE2CVAR(c)    (abs(c))
 
-/// S_StartSound returns the channel index, or -1 if an error occurred
+// S_StartSound returns the channel index, or -1 if an error occurred
 int S_StartSound (int entnum, int entchannel, sfx_t *sfx, vec3_t origin, float fvol, float attenuation);
 int S_StartSound_StartPosition_Flags (int entnum, int entchannel, sfx_t *sfx, vec3_t origin, float fvol, float attenuation, float startposition, int flags, float fspeed);
-qbool S_LocalSoundEx (const char *s, int chan, float fvol);
-qbool S_LocalSound (const char *s);
+qboolean S_LocalSound (const char *s);
 
 void S_StaticSound (sfx_t *sfx, vec3_t origin, float fvol, float attenuation);
 void S_StopSound (int entnum, int entchannel);
 void S_StopAllSounds (void);
-void S_StopAllSounds_f(struct cmd_state_s *cmd);
-void S_PauseGameSounds (qbool toggle);
+void S_PauseGameSounds (qboolean toggle);
 
-void S_StopChannel (unsigned int channel_ind, qbool lockmutex, qbool freesfx);
-qbool S_SetChannelFlag (unsigned int ch_ind, unsigned int flag, qbool value);
+void S_StopChannel (unsigned int channel_ind, qboolean lockmutex, qboolean freesfx);
+qboolean S_SetChannelFlag (unsigned int ch_ind, unsigned int flag, qboolean value);
 void S_SetChannelVolume (unsigned int ch_ind, float fvol);
 void S_SetChannelSpeed (unsigned int ch_ind, float fspeed);
 float S_GetChannelPosition (unsigned int ch_ind);
@@ -116,6 +117,5 @@ void S_UnblockSound (void);
 
 int S_GetSoundRate (void);
 int S_GetSoundChannels (void);
-int S_GetSoundWidth (void);
 
 #endif

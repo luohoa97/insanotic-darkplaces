@@ -1,6 +1,5 @@
 /*
 Copyright (C) 1996-1997 Id Software, Inc.
-Copyright (C) 2000-2020 DarkPlaces contributors
 
 This program is free software; you can redistribute it and/or
 modify it under the terms of the GNU General Public License
@@ -43,31 +42,33 @@ void *con_mutex = NULL;
 #define CON_LINES_LAST CONBUFFER_LINES_LAST(&con)
 #define CON_LINES_COUNT CONBUFFER_LINES_COUNT(&con)
 
-cvar_t con_notifytime = {CF_CLIENT | CF_ARCHIVE, "con_notifytime","3", "how long notify lines last, in seconds"};
-cvar_t con_notify = {CF_CLIENT | CF_ARCHIVE, "con_notify","4", "how many notify lines to show"};
-cvar_t con_notifyalign = {CF_CLIENT | CF_ARCHIVE, "con_notifyalign", "", "how to align notify lines: 0 = left, 0.5 = center, 1 = right, empty string = game default)"};
+cvar_t con_notifytime = {CVAR_SAVE, "con_notifytime","3", "how long notify lines last, in seconds"};
+cvar_t con_notify = {CVAR_SAVE, "con_notify","4", "how many notify lines to show"};
+cvar_t con_notifyalign = {CVAR_SAVE, "con_notifyalign", "", "how to align notify lines: 0 = left, 0.5 = center, 1 = right, empty string = game default)"};
 
-cvar_t con_chattime = {CF_CLIENT | CF_ARCHIVE, "con_chattime","30", "how long chat lines last, in seconds"};
-cvar_t con_chat = {CF_CLIENT | CF_ARCHIVE, "con_chat","0", "how many chat lines to show in a dedicated chat area"};
-cvar_t con_chatpos = {CF_CLIENT | CF_ARCHIVE, "con_chatpos","0", "where to put chat (negative: lines from bottom of screen, positive: lines below notify, 0: at top)"};
-cvar_t con_chatrect = {CF_CLIENT | CF_ARCHIVE, "con_chatrect","0", "use con_chatrect_x and _y to position con_notify and con_chat freely instead of con_chatpos"};
-cvar_t con_chatrect_x = {CF_CLIENT | CF_ARCHIVE, "con_chatrect_x","", "where to put chat, relative x coordinate of left edge on screen (use con_chatwidth for width)"};
-cvar_t con_chatrect_y = {CF_CLIENT | CF_ARCHIVE, "con_chatrect_y","", "where to put chat, relative y coordinate of top edge on screen (use con_chat for line count)"};
-cvar_t con_chatwidth = {CF_CLIENT | CF_ARCHIVE, "con_chatwidth","1.0", "relative chat window width"};
-cvar_t con_textsize = {CF_CLIENT | CF_ARCHIVE, "con_textsize","8", "console text size in virtual 2D pixels"};
-cvar_t con_notifysize = {CF_CLIENT | CF_ARCHIVE, "con_notifysize","8", "notify text size in virtual 2D pixels"};
-cvar_t con_chatsize = {CF_CLIENT | CF_ARCHIVE, "con_chatsize","8", "chat text size in virtual 2D pixels (if con_chat is enabled)"};
-cvar_t con_chatsound = {CF_CLIENT | CF_ARCHIVE, "con_chatsound","1", "enables chat sound to play on message"};
-cvar_t con_chatsound_file = {CF_CLIENT, "con_chatsound_file","sound/misc/talk.wav", "The sound to play for chat messages"};
-cvar_t con_chatsound_team_file = {CF_CLIENT, "con_chatsound_team_file","sound/misc/talk2.wav", "The sound to play for team chat messages"};
-cvar_t con_chatsound_team_mask = {CF_CLIENT, "con_chatsound_team_mask","40","Magic ASCII code that denotes a team chat message"};
-
-cvar_t sys_specialcharactertranslation = {CF_CLIENT | CF_SERVER, "sys_specialcharactertranslation", "1", "terminal console conchars to ASCII translation (set to 0 if your conchars.tga is for an 8bit character set or if you want raw output)"};
-cvar_t sys_colortranslation = {CF_CLIENT | CF_SERVER, "sys_colortranslation", "1", "terminal console color translation (supported values: -1 = print codes without translation, 0 = strip color codes, 1 = translate to ANSI codes, 2 = translate DP RGB to 24-bit and Quake colors to ANSI, 3 = translate all colors to 24-bit RGB)"};
+cvar_t con_chattime = {CVAR_SAVE, "con_chattime","30", "how long chat lines last, in seconds"};
+cvar_t con_chat = {CVAR_SAVE, "con_chat","0", "how many chat lines to show in a dedicated chat area"};
+cvar_t con_chatpos = {CVAR_SAVE, "con_chatpos","0", "where to put chat (negative: lines from bottom of screen, positive: lines below notify, 0: at top)"};
+cvar_t con_chatrect = {CVAR_SAVE, "con_chatrect","0", "use con_chatrect_x and _y to position con_notify and con_chat freely instead of con_chatpos"};
+cvar_t con_chatrect_x = {CVAR_SAVE, "con_chatrect_x","", "where to put chat, relative x coordinate of left edge on screen (use con_chatwidth for width)"};
+cvar_t con_chatrect_y = {CVAR_SAVE, "con_chatrect_y","", "where to put chat, relative y coordinate of top edge on screen (use con_chat for line count)"};
+cvar_t con_chatwidth = {CVAR_SAVE, "con_chatwidth","1.0", "relative chat window width"};
+cvar_t con_textsize = {CVAR_SAVE, "con_textsize","8", "console text size in virtual 2D pixels"};
+cvar_t con_notifysize = {CVAR_SAVE, "con_notifysize","8", "notify text size in virtual 2D pixels"};
+cvar_t con_chatsize = {CVAR_SAVE, "con_chatsize","8", "chat text size in virtual 2D pixels (if con_chat is enabled)"};
+cvar_t con_chatsound = {CVAR_SAVE, "con_chatsound","1", "enables chat sound to play on message"};
 
 
-cvar_t con_nickcompletion = {CF_CLIENT | CF_ARCHIVE, "con_nickcompletion", "1", "tab-complete nicks in console and message input"};
-cvar_t con_nickcompletion_flags = {CF_CLIENT | CF_ARCHIVE, "con_nickcompletion_flags", "11", "Bitfield: "
+cvar_t sys_specialcharactertranslation = {0, "sys_specialcharactertranslation", "1", "terminal console conchars to ASCII translation (set to 0 if your conchars.tga is for an 8bit character set or if you want raw output)"};
+#ifdef WIN32
+cvar_t sys_colortranslation = {0, "sys_colortranslation", "0", "terminal console color translation (supported values: 0 = strip color codes, 1 = translate to ANSI codes, 2 = no translation)"};
+#else
+cvar_t sys_colortranslation = {0, "sys_colortranslation", "1", "terminal console color translation (supported values: 0 = strip color codes, 1 = translate to ANSI codes, 2 = no translation)"};
+#endif
+
+
+cvar_t con_nickcompletion = {CVAR_SAVE, "con_nickcompletion", "1", "tab-complete nicks in console and message input"};
+cvar_t con_nickcompletion_flags = {CVAR_SAVE, "con_nickcompletion_flags", "11", "Bitfield: "
 				   "0: add nothing after completion. "
 				   "1: add the last color after completion. "
 				   "2: add a quote when starting a quote instead of the color. "
@@ -80,28 +81,23 @@ cvar_t con_nickcompletion_flags = {CF_CLIENT | CF_ARCHIVE, "con_nickcompletion_f
 #define NICKS_ALPHANUMERICS_ONLY 8
 #define NICKS_NO_SPACES 16
 
-cvar_t con_completion_playdemo = {CF_CLIENT | CF_ARCHIVE, "con_completion_playdemo", "*.dem", "completion pattern for the playdemo command"};
-cvar_t con_completion_timedemo = {CF_CLIENT | CF_ARCHIVE, "con_completion_timedemo", "*.dem", "completion pattern for the timedemo command"};
-cvar_t con_completion_exec = {CF_CLIENT | CF_ARCHIVE, "con_completion_exec", "*.cfg", "completion pattern for the exec command"};
+cvar_t con_completion_playdemo = {CVAR_SAVE, "con_completion_playdemo", "*.dem", "completion pattern for the playdemo command"};
+cvar_t con_completion_timedemo = {CVAR_SAVE, "con_completion_timedemo", "*.dem", "completion pattern for the timedemo command"};
+cvar_t con_completion_exec = {CVAR_SAVE, "con_completion_exec", "*.cfg", "completion pattern for the exec command"};
 
-cvar_t condump_stripcolors = {CF_CLIENT | CF_SERVER| CF_ARCHIVE, "condump_stripcolors", "0", "strip color codes from console dumps"};
-
-cvar_t rcon_password = {CF_CLIENT | CF_SERVER | CF_PRIVATE, "rcon_password", "", "password to authenticate rcon commands; NOTE: changing rcon_secure clears rcon_password, so set rcon_secure always before rcon_password; may be set to a string of the form user1:pass1 user2:pass2 user3:pass3 to allow multiple user accounts - the client then has to specify ONE of these combinations"};
-cvar_t rcon_secure = {CF_CLIENT | CF_SERVER, "rcon_secure", "0", "force secure rcon authentication (1 = time based, 2 = challenge based); NOTE: changing rcon_secure clears rcon_password, so set rcon_secure always before rcon_password"};
-cvar_t rcon_secure_challengetimeout = {CF_CLIENT, "rcon_secure_challengetimeout", "5", "challenge-based secure rcon: time out requests if no challenge came within this time interval"};
-cvar_t rcon_address = {CF_CLIENT, "rcon_address", "", "server address to send rcon commands to (when not connected to a server)"};
+cvar_t condump_stripcolors = {CVAR_SAVE, "condump_stripcolors", "0", "strip color codes from console dumps"};
 
 int con_linewidth;
 int con_vislines;
 
-qbool con_initialized;
+qboolean con_initialized;
 
 // used for server replies to rcon command
 lhnetsocket_t *rcon_redirect_sock = NULL;
 lhnetaddress_t *rcon_redirect_dest = NULL;
 int rcon_redirect_bufferpos = 0;
 char rcon_redirect_buffer[1400];
-qbool rcon_redirect_proquakeprotocol = false;
+qboolean rcon_redirect_proquakeprotocol = false;
 
 // generic functions for console buffers
 
@@ -329,7 +325,7 @@ ConBuffer_AddLine
 Appends a given string as a new line to the console.
 ================
 */
-void ConBuffer_AddLine(conbuffer_t *buf, const char *line, int len, unsigned mask)
+void ConBuffer_AddLine(conbuffer_t *buf, const char *line, int len, int mask)
 {
 	char *putpos;
 	con_lineinfo_t *p;
@@ -363,7 +359,7 @@ void ConBuffer_AddLine(conbuffer_t *buf, const char *line, int len, unsigned mas
 	p->height = -1; // calculate when needed
 }
 
-int ConBuffer_FindPrevLine(conbuffer_t *buf, unsigned mask_must, unsigned mask_mustnot, int start)
+int ConBuffer_FindPrevLine(conbuffer_t *buf, int mask_must, int mask_mustnot, int start)
 {
 	int i;
 	if(start == -1)
@@ -387,8 +383,8 @@ const char *ConBuffer_GetLine(conbuffer_t *buf, int i)
 {
 	static char copybuf[MAX_INPUTLINE]; // client only
 	con_lineinfo_t *l = &CONBUFFER_LINES(buf, i);
-
-	dp_ustr2stp(copybuf, sizeof(copybuf), l->start, l->len);
+	size_t sz = l->len+1 > sizeof(copybuf) ? sizeof(copybuf) : l->len+1;
+	strlcpy(copybuf, l->start, sz);
 	return copybuf;
 }
 
@@ -402,9 +398,9 @@ LOGGING
 
 /// \name Logging
 //@{
-cvar_t log_file = {CF_CLIENT | CF_SERVER, "log_file", "", "filename to log messages to"};
-cvar_t log_file_stripcolors = {CF_CLIENT | CF_SERVER, "log_file_stripcolors", "0", "strip color codes from log messages"};
-cvar_t log_dest_udp = {CF_CLIENT | CF_SERVER, "log_dest_udp", "", "UDP address to log messages to (in QW rcon compatible format); multiple destinations can be separated by spaces; DO NOT SPECIFY DNS NAMES HERE"};
+cvar_t log_file = {0, "log_file", "", "filename to log messages to"};
+cvar_t log_file_stripcolors = {0, "log_file_stripcolors", "0", "strip color codes from log messages"};
+cvar_t log_dest_udp = {0, "log_dest_udp", "", "UDP address to log messages to (in QW rcon compatible format); multiple destinations can be separated by spaces; DO NOT SPECIFY DNS NAMES HERE"};
 char log_dest_buffer[1400]; // UDP packet
 size_t log_dest_buffer_pos;
 unsigned int log_dest_buffer_appending;
@@ -428,7 +424,7 @@ static void Log_DestBuffer_Flush_NoLock(void)
 	lhnetaddress_t log_dest_addr;
 	lhnetsocket_t *log_dest_socket;
 	const char *s = log_dest_udp.string;
-	qbool have_opened_temp_sockets = false;
+	qboolean have_opened_temp_sockets = false;
 	if(s) if(log_dest_buffer_pos > 5)
 	{
 		++log_dest_buffer_appending;
@@ -508,7 +504,7 @@ static void Log_Open (void)
 	logfile = FS_OpenRealFile(log_file.string, "a", false);
 	if (logfile != NULL)
 	{
-		dp_strlcpy (crt_log_file, log_file.string, sizeof (crt_log_file));
+		strlcpy (crt_log_file, log_file.string, sizeof (crt_log_file));
 		FS_Print (logfile, Log_Timestamp ("Log started"));
 	}
 }
@@ -520,16 +516,14 @@ Log_Close
 */
 void Log_Close (void)
 {
-	qfile_t* l = logfile;
-
-	if (l == NULL)
+	if (logfile == NULL)
 		return;
 
-	FS_Print (l, Log_Timestamp ("Log stopped"));
-	FS_Print (l, "\n");
-	logfile = NULL;
-	FS_Close (l);
+	FS_Print (logfile, Log_Timestamp ("Log stopped"));
+	FS_Print (logfile, "\n");
+	FS_Close (logfile);
 
+	logfile = NULL;
 	crt_log_file[0] = '\0';
 }
 
@@ -583,7 +577,7 @@ Log_ConPrint
 */
 void Log_ConPrint (const char *msg)
 {
-	static qbool inprogress = false;
+	static qboolean inprogress = false;
 
 	// don't allow feedback loops with memory error reports
 	if (inprogress)
@@ -683,9 +677,9 @@ CONSOLE
 Con_ToggleConsole_f
 ================
 */
-void Con_ToggleConsole_f(cmd_state_t *cmd)
+void Con_ToggleConsole_f (void)
 {
-	if (Sys_CheckParm ("-noconsole"))
+	if (COM_CheckParm ("-noconsole"))
 		if (!(key_consoleactive & KEY_CONSOLEACTIVE_USER))
 			return; // only allow the key bind to turn off console
 
@@ -707,42 +701,38 @@ void Con_ClearNotify (void)
 			CON_LINES(i).mask |= CON_MASK_HIDENOTIFY;
 }
 
-static void Con_MsgCmdMode(cmd_state_t *cmd, signed char mode)
-{
-	if (cls.demoplayback && mode >= 0)
-		return;
-	key_dest = key_message;
-	chat_mode = mode;
-	if(Cmd_Argc(cmd) > 1)
-	{
-		chat_bufferpos = dpsnprintf(chat_buffer, sizeof(chat_buffer), "%s ", Cmd_Args(cmd));
-		if (chat_bufferpos < 0)
-			chat_bufferpos = 0;
-	}
-}
 
 /*
 ================
 Con_MessageMode_f
-
-"say"
 ================
 */
-static void Con_MessageMode_f(cmd_state_t *cmd)
+static void Con_MessageMode_f (void)
 {
-	Con_MsgCmdMode(cmd, 0);
+	key_dest = key_message;
+	chat_mode = 0; // "say"
+	if(Cmd_Argc() > 1)
+	{
+		dpsnprintf(chat_buffer, sizeof(chat_buffer), "%s ", Cmd_Args());
+		chat_bufferlen = (unsigned int)strlen(chat_buffer);
+	}
 }
+
 
 /*
 ================
 Con_MessageMode2_f
-
-"say_team"
 ================
 */
-static void Con_MessageMode2_f(cmd_state_t *cmd)
+static void Con_MessageMode2_f (void)
 {
-	Con_MsgCmdMode(cmd, 1);
+	key_dest = key_message;
+	chat_mode = 1; // "say_team"
+	if(Cmd_Argc() > 1)
+	{
+		dpsnprintf(chat_buffer, sizeof(chat_buffer), "%s ", Cmd_Args());
+		chat_bufferlen = (unsigned int)strlen(chat_buffer);
+	}
 }
 
 /*
@@ -750,9 +740,15 @@ static void Con_MessageMode2_f(cmd_state_t *cmd)
 Con_CommandMode_f
 ================
 */
-static void Con_CommandMode_f(cmd_state_t *cmd)
+static void Con_CommandMode_f (void)
 {
-	Con_MsgCmdMode(cmd, -1);
+	key_dest = key_message;
+	if(Cmd_Argc() > 1)
+	{
+		dpsnprintf(chat_buffer, sizeof(chat_buffer), "%s ", Cmd_Args());
+		chat_bufferlen = (unsigned int)strlen(chat_buffer);
+	}
+	chat_mode = -1; // command
 }
 
 /*
@@ -785,33 +781,33 @@ void Con_CheckResize (void)
 }
 
 //[515]: the simplest command ever
-//LadyHavoc: not so simple after I made it print usage...
-static void Con_Maps_f(cmd_state_t *cmd)
+//LordHavoc: not so simple after I made it print usage...
+static void Con_Maps_f (void)
 {
-	if (Cmd_Argc(cmd) > 2)
+	if (Cmd_Argc() > 2)
 	{
 		Con_Printf("usage: maps [mapnameprefix]\n");
 		return;
 	}
-	else if (Cmd_Argc(cmd) == 2)
-		GetMapList(Cmd_Argv(cmd, 1), NULL, 0);
+	else if (Cmd_Argc() == 2)
+		GetMapList(Cmd_Argv(1), NULL, 0);
 	else
 		GetMapList("", NULL, 0);
 }
 
-static void Con_ConDump_f(cmd_state_t *cmd)
+static void Con_ConDump_f (void)
 {
 	int i;
 	qfile_t *file;
-	if (Cmd_Argc(cmd) != 2)
+	if (Cmd_Argc() != 2)
 	{
 		Con_Printf("usage: condump <filename>\n");
 		return;
 	}
-	file = FS_OpenRealFile(Cmd_Argv(cmd, 1), "w", false);
+	file = FS_OpenRealFile(Cmd_Argv(1), "w", false);
 	if (!file)
 	{
-		Con_Printf(CON_ERROR "condump: unable to write file \"%s\"\n", Cmd_Argv(cmd, 1));
+		Con_Printf("condump: unable to write file \"%s\"\n", Cmd_Argv(1));
 		return;
 	}
 	if (con_mutex) Thread_LockMutex(con_mutex);
@@ -837,20 +833,11 @@ static void Con_ConDump_f(cmd_state_t *cmd)
 	FS_Close(file);
 }
 
-void Con_Clear_f(cmd_state_t *cmd)
+void Con_Clear_f (void)
 {
 	if (con_mutex) Thread_LockMutex(con_mutex);
 	ConBuffer_Clear(&con);
 	if (con_mutex) Thread_UnlockMutex(con_mutex);
-}
-
-static void Con_RCon_ClearPassword_c(cvar_t *var)
-{
-	// whenever rcon_secure is changed to 0, clear rcon_password for
-	// security reasons (prevents a send-rcon-password-as-plaintext
-	// attack based on NQ protocol session takeover and svc_stufftext)
-	if(var->integer <= 0)
-		Cvar_SetQuick(&rcon_password, "");
 }
 
 /*
@@ -872,15 +859,6 @@ void Con_Init (void)
 
 	Cvar_RegisterVariable (&sys_colortranslation);
 	Cvar_RegisterVariable (&sys_specialcharactertranslation);
-#if defined(__linux__)
-	// Linux terminals natively support RGB 8bpc codes or convert them to a palette.
-	Cvar_SetQuick(&sys_colortranslation, "2");
-#elif defined(WIN32)
-	// Windows 10 default PowerShell and cmd.exe have no RGB or ANSI support by default.
-	// TODO: it can be enabled on current versions using a platform-specific call,
-	// issue: https://gitlab.com/xonotic/darkplaces/-/issues/426
-	Cvar_SetQuick(&sys_colortranslation, "0");
-#endif
 
 	Cvar_RegisterVariable (&log_file);
 	Cvar_RegisterVariable (&log_file_stripcolors);
@@ -888,7 +866,7 @@ void Con_Init (void)
 
 	// support for the classic Quake option
 // COMMANDLINEOPTION: Console: -condebug logs console messages to qconsole.log, see also log_file
-	if (Sys_CheckParm ("-condebug") != 0)
+	if (COM_CheckParm ("-condebug") != 0)
 		Cvar_SetQuick (&log_file, "qconsole.log");
 
 	// register our cvars
@@ -906,9 +884,6 @@ void Con_Init (void)
 	Cvar_RegisterVariable (&con_notifytime);
 	Cvar_RegisterVariable (&con_textsize);
 	Cvar_RegisterVariable (&con_chatsound);
-	Cvar_RegisterVariable (&con_chatsound_file);
-	Cvar_RegisterVariable (&con_chatsound_team_file);
-	Cvar_RegisterVariable (&con_chatsound_team_mask);
 
 	// --blub
 	Cvar_RegisterVariable (&con_nickcompletion);
@@ -920,22 +895,17 @@ void Con_Init (void)
 
 	Cvar_RegisterVariable (&condump_stripcolors);
 
-	Cvar_RegisterVariable(&rcon_address);
-	Cvar_RegisterVariable(&rcon_secure);
-	Cvar_RegisterCallback(&rcon_secure, Con_RCon_ClearPassword_c);
-	Cvar_RegisterVariable(&rcon_secure_challengetimeout);
-	Cvar_RegisterVariable(&rcon_password);
-
 	// register our commands
-	Cmd_AddCommand(CF_CLIENT, "toggleconsole", Con_ToggleConsole_f, "opens or closes the console");
-	Cmd_AddCommand(CF_CLIENT, "messagemode", Con_MessageMode_f, "input a chat message to say to everyone");
-	Cmd_AddCommand(CF_CLIENT, "messagemode2", Con_MessageMode2_f, "input a chat message to say to only your team");
-	Cmd_AddCommand(CF_CLIENT, "commandmode", Con_CommandMode_f, "input a console command");
-	Cmd_AddCommand(CF_SHARED, "clear", Con_Clear_f, "clear console history");
-	Cmd_AddCommand(CF_SHARED, "maps", Con_Maps_f, "list information about available maps");
-	Cmd_AddCommand(CF_SHARED, "condump", Con_ConDump_f, "output console history to a file (see also log_file)");
+	Cmd_AddCommand ("toggleconsole", Con_ToggleConsole_f, "opens or closes the console");
+	Cmd_AddCommand ("messagemode", Con_MessageMode_f, "input a chat message to say to everyone");
+	Cmd_AddCommand ("messagemode2", Con_MessageMode2_f, "input a chat message to say to only your team");
+	Cmd_AddCommand ("commandmode", Con_CommandMode_f, "input a console command");
+	Cmd_AddCommand ("clear", Con_Clear_f, "clear console history");
+	Cmd_AddCommand ("maps", Con_Maps_f, "list information about available maps");
+	Cmd_AddCommand ("condump", Con_ConDump_f, "output console history to a file (see also log_file)");
 
 	con_initialized = true;
+	Con_DPrint("Console initialized.\n");
 }
 
 void Con_Shutdown (void)
@@ -943,8 +913,7 @@ void Con_Shutdown (void)
 	if (con_mutex) Thread_LockMutex(con_mutex);
 	ConBuffer_Shutdown(&con);
 	if (con_mutex) Thread_UnlockMutex(con_mutex);
-	if (con_mutex) Thread_DestroyMutex(con_mutex);
-	con_mutex = NULL;
+	if (con_mutex) Thread_DestroyMutex(con_mutex);con_mutex = NULL;
 }
 
 /*
@@ -1001,7 +970,7 @@ static void Con_PrintToHistory(const char *txt, int mask)
 	}
 }
 
-void Con_Rcon_Redirect_Init(lhnetsocket_t *sock, lhnetaddress_t *dest, qbool proquakeprotocol)
+void Con_Rcon_Redirect_Init(lhnetsocket_t *sock, lhnetaddress_t *dest, qboolean proquakeprotocol)
 {
 	rcon_redirect_sock = sock;
 	rcon_redirect_dest = dest;
@@ -1156,12 +1125,11 @@ Con_MaskPrint
 */
 extern cvar_t timestamps;
 extern cvar_t timeformat;
-extern cvar_t r_textcontrast;
-extern cvar_t r_textbrightness;
-void Con_MaskPrint(unsigned additionalmask, const char *msg)
+extern qboolean sys_nostdout;
+void Con_MaskPrint(int additionalmask, const char *msg)
 {
-	static unsigned mask = 0;
-	static unsigned index = 0;
+	static int mask = 0;
+	static int index = 0;
 	static char line[MAX_INPUTLINE];
 
 	if (con_mutex)
@@ -1173,6 +1141,7 @@ void Con_MaskPrint(unsigned additionalmask, const char *msg)
 		// if this is the beginning of a new line, print timestamp
 		if (index == 0)
 		{
+			const char *timestamp = timestamps.integer ? Sys_TimeString(timeformat.string) : "";
 			// reset the color
 			// FIXME: 1. perhaps we should use a terminal system 2. use a constant instead of 7!
 			line[index++] = STRING_COLOR_TAG;
@@ -1187,32 +1156,43 @@ void Con_MaskPrint(unsigned additionalmask, const char *msg)
 				{
 					if (con_chatsound.value)
 					{
-						if(msg[1] == con_chatsound_team_mask.integer && cl.foundteamchatsound)
-							S_LocalSound (con_chatsound_team_file.string);
+						if(IS_NEXUIZ_DERIVED(gamemode))
+						{
+							if(msg[1] == '\r' && cl.foundtalk2wav)
+								S_LocalSound ("sound/misc/talk2.wav");
+							else
+								S_LocalSound ("sound/misc/talk.wav");
+						}
 						else
-							S_LocalSound (con_chatsound_file.string);
+						{
+							if (msg[1] == '(' && cl.foundtalk2wav)
+								S_LocalSound ("sound/misc/talk2.wav");
+							else
+								S_LocalSound ("sound/misc/talk.wav");
+						}
 					}
 				}
+				
 				// Send to chatbox for say/tell (1) and messages (3)
 				// 3 is just so that a message can be sent to the chatbox without a sound.
 				if (*msg == 1 || *msg == 3)
 					mask = CON_MASK_CHAT;
-
+				
 				line[index++] = STRING_COLOR_TAG;
 				line[index++] = '3';
 				msg++;
 				Con_Rcon_AddChar(*msg);
 			}
 			// store timestamp
-			if (timestamps.integer)
-				index += Sys_TimeString(&line[index], sizeof(line) - index, timeformat.string);
+			for (;*timestamp;index++, timestamp++)
+				if (index < (int)sizeof(line) - 2)
+					line[index] = *timestamp;
 			// add the mask
 			mask |= additionalmask;
 		}
 		// append the character
 		line[index++] = *msg;
 		// if this is a newline character, we have a complete line to print
-		// bones_was_here: why do we only use half the line buffer?
 		if (*msg == '\n' || index >= (int)sizeof(line) / 2)
 		{
 			// terminate the line
@@ -1225,7 +1205,7 @@ void Con_MaskPrint(unsigned additionalmask, const char *msg)
 				Con_PrintToHistory(line, mask);
 			}
 			// send to terminal or dedicated server window
-			if (sys.outfd >= 0)
+			if (!sys_nostdout)
 			if (developer.integer || !(mask & CON_MASK_DEVELOPER))
 			{
 				if(sys_specialcharactertranslation.integer)
@@ -1248,20 +1228,15 @@ void Con_MaskPrint(unsigned additionalmask, const char *msg)
 					}
 				}
 
-				if(sys_colortranslation.integer > 0) // ANSI, RGB, or both
+				if(sys_colortranslation.integer == 1) // ANSI
 				{
-					// ANSI translation:
+					static char printline[MAX_INPUTLINE * 4 + 3];
 						// 2 can become 7 bytes, rounding that up to 8, and 3 bytes are added at the end
 						// a newline can transform into four bytes, but then prevents the three extra bytes from appearing
-					// 8bpc RGB brings new worst-cases:
-						// 5 can become 21 bytes, rounding that up to * 5, plenty of space for extra bytes at the end.
-						// sys_colortranslation 3: 2 can become 21 bytes, rounding that up to * 11
-					char printline[sizeof(line) * 11];
 					int lastcolor = 0;
 					const char *in;
 					char *out;
 					int color;
-					u8 rgb[3];
 					for(in = line, out = printline; *in; ++in)
 					{
 						switch(*in)
@@ -1269,66 +1244,23 @@ void Con_MaskPrint(unsigned additionalmask, const char *msg)
 							case STRING_COLOR_TAG:
 								if( in[1] == STRING_COLOR_RGB_TAG_CHAR && isxdigit(in[2]) && isxdigit(in[3]) && isxdigit(in[4]) )
 								{
-									VectorCopy(in + 2, rgb);
+									char r = tolower(in[2]);
+									char g = tolower(in[3]);
+									char b = tolower(in[4]);
 									// it's a hex digit already, so the else part needs no check --blub
-									for (int i = 0; i < 3; ++i)
-									{
-										if (isdigit(rgb[i])) rgb[i] -= '0';
-										else rgb[i] = tolower(rgb[i]) - 87;
-										rgb[i] *= 17;
-									}
-
-									if (sys_colortranslation.integer > 1) // 8bpc RGB
-									{
-										char *p;
-										float B;
-
-										in += 4;
-									rgbout:
-										color = rgb[0]<<16 | rgb[1]<<8 | rgb[2] | /* disambiguates from quake colours */ 0x40000000;
-										if (lastcolor == color)
-											break;
-										else
-											lastcolor = color;
-
-										B = r_textbrightness.value * 255;
-										for (int i = 0; i < 3; ++i)
-											rgb[i] = bound(0, rgb[i] * r_textcontrast.value + B, 255);
-
-										// format must be decimal 0-255, max length is 21 bytes
-										if (sys_colortranslation.integer == 2)
-											memcpy(out, "\x1B[1;38;2", 8);
-										else
-											memcpy(out, "\x1B[0;38;2", 8);
-										out += 8;
-										for (int i = 0; i < 3; ++i)
-										{
-											*out++ = ';';
-											p = out += ((rgb[i] > 99) ? 3 : (rgb[i] > 9) ? 2 : 1);
-											do { *--p = (rgb[i] % 10) + '0';
-											} while ((rgb[i] /= 10) > 0);
-										}
-										*out++ = 'm';
-
-										break;
-									}
+									if(isdigit(r)) r -= '0';
+									else r -= 87;
+									if(isdigit(g)) g -= '0';
+									else g -= 87;
+									if(isdigit(b)) b -= '0';
+									else b -= 87;
 									
-									color = Sys_Con_NearestColor(rgb[0], rgb[1], rgb[2]);
+									color = Sys_Con_NearestColor(r * 17, g * 17, b * 17);
 									in += 3; // 3 only, the switch down there does the fourth
 								}
 								else
-								{
 									color = in[1];
 								
-									if (sys_colortranslation.integer == 3 && isdigit(color)) // Quake to RGB
-									{
-										color -= '0';
-										VectorScale(string_colors[color], 255 * string_colors[color][3], rgb);
-										++in;
-										goto rgbout;
-									}
-								}
-
 								switch(color)
 								{
 									case STRING_COLOR_TAG:
@@ -1410,16 +1342,16 @@ void Con_MaskPrint(unsigned additionalmask, const char *msg)
 						*out++ = '[';
 						*out++ = 'm';
 					}
-					*out = '\0';
-					Sys_Print(printline, out - printline);
+					*out++ = 0;
+					Sys_PrintToTerminal(printline);
 				}
-				else if(sys_colortranslation.integer == -1) // print as text
+				else if(sys_colortranslation.integer == 2) // Quake
 				{
-					Sys_Print(line, index);
+					Sys_PrintToTerminal(line);
 				}
 				else // strip
 				{
-					char printline[MAX_INPUTLINE]; // it can only get shorter here
+					static char printline[MAX_INPUTLINE]; // it can only get shorter here
 					const char *in;
 					char *out;
 					for(in = line, out = printline; *in; ++in)
@@ -1465,8 +1397,8 @@ void Con_MaskPrint(unsigned additionalmask, const char *msg)
 								break;
 						}
 					}
-					*out = '\0';
-					Sys_Print(printline, out - printline);
+					*out++ = 0;
+					Sys_PrintToTerminal(printline);
 				}
 			}
 			// empty the line buffer
@@ -1484,7 +1416,7 @@ void Con_MaskPrint(unsigned additionalmask, const char *msg)
 Con_MaskPrintf
 ================
 */
-void Con_MaskPrintf(unsigned mask, const char *fmt, ...)
+void Con_MaskPrintf(int mask, const char *fmt, ...)
 {
 	va_list argptr;
 	char msg[MAX_INPUTLINE];
@@ -1557,112 +1489,6 @@ void Con_DPrintf(const char *fmt, ...)
 }
 
 
-/**
- * @brief      Returns a horizontal line
- * @details    Returns a graphical horizontal line of length len, but never wider than the
- *             console. Includes a newline, unless len is >= to the console width
- * @note       Authored by johnfitz
- *
- * @param[in]  len   Length of the horizontal line
- *
- * @return     A string of the line
- */
-const char *Con_Quakebar(int len, char *bar, size_t barsize)
-{
-	assert(barsize >= 5);
-
-	len = min(len, (int)barsize - 2);
-	len = min(len, con_linewidth);
-
-	bar[0] = '\35';
-	memset(&bar[1], '\36', len - 2);
-	bar[len - 1] = '\37';
-
-	if (len < con_linewidth)
-	{
-		bar[len] = '\n';
-		bar[len + 1] = 0;
-	}
-	else
-		bar[len] = 0;
-
-	return bar;
-}
-
-/**
- * @brief      Left-pad a string with spaces to make it appear centered
- * @note       Authored by johnfitz
- *
- * @param[in]  maxLineLength  Center-align
- * @param[in]  fmt        A printf format string
- * @param[in]  <unnamed>  Zero or more values used by fmt
- */
-void Con_CenterPrintf(int maxLineLength, const char *fmt, ...)
-{
-	va_list argptr;
-	char    msg[MAX_INPUTLINE];  // the original message
-	char    spaces[21];          // buffer for spaces
-	char   *msgCursor, *lineEnding;
-	int     lineLength, msgLength;
-	size_t  indentSize;
-
-	va_start(argptr, fmt);
-	msgLength = dpvsnprintf(msg, sizeof (msg), fmt, argptr);
-	va_end(argptr);
-
-	if (msgLength < 0)
-	{
-		Con_Printf(CON_WARN "The message given to Con_CenterPrintf was too long\n");
-		return;
-	}
-
-	maxLineLength = min(maxLineLength, con_linewidth);
-
-	for (msgCursor = msg; *msgCursor;)
-	{
-		lineEnding = strchr(msgCursor, '\n');
-		if (lineEnding)
-		{
-			lineLength = lineEnding - msgCursor;  // print just the line
-			lineEnding++;  // set cursor to next character after new line
-		}
-		else // last line
-		{
-			lineLength = msgLength;  // print entire message
-			lineEnding = msgCursor + lineLength;  // set next line cursor to terminator
-		}
-
-		if (lineLength < maxLineLength)
-		{
-			indentSize = min(sizeof(spaces) - 1, (size_t)(maxLineLength - lineLength) / 2);
-			memset(spaces, ' ', indentSize);
-			spaces[indentSize] = 0;
-			Con_MaskPrintf(CON_MASK_HIDENOTIFY, "%s%.*s\n", spaces, lineLength, msgCursor);
-		}
-		else
-			Con_MaskPrintf(CON_MASK_HIDENOTIFY, "%.*s\n", lineLength, msgCursor);
-		msgLength -= lineEnding - msgCursor;  // Consume all characters until end of line
-		msgCursor = lineEnding;  // Update message cursor
-	}
-}
-
-/**
- * @brief      Prints a center-aligned message to the console
- * @note       Authored by johnfitz
- *
- * @param[in]  str   A multiline string to print
- */
-void Con_CenterPrint(const char *str)
-{
-	char bar[42];
-
-	Con_MaskPrintf(CON_MASK_HIDENOTIFY, "%s", Con_Quakebar(40, bar, sizeof(bar)));
-	Con_CenterPrintf(40, "%s\n", str);
-	Con_MaskPrintf(CON_MASK_HIDENOTIFY, "%s", bar);
-}
-
-
-
 /*
 ==============================================================================
 
@@ -1675,55 +1501,38 @@ DRAWING
 ================
 Con_DrawInput
 
-It draws either the console input line or the chat input line (if is_console is false)
 The input line scrolls horizontally if typing goes beyond the right edge
 
 Modified by EvilTypeGuy eviltypeguy@qeradiant.com
 ================
 */
-static void Con_DrawInput(qbool is_console, float x, float v, float inputsize)
+static void Con_DrawInput (void)
 {
-	int y, i, col_out, linepos, text_start, prefix_start = 0;
-	char text[MAX_INPUTLINE + 5 + 9 + 1]; // space for ^xRGB, "say_team:" and \0
-	float xo;
+	int		y;
+	int		i;
+	char text[sizeof(key_line)+5+1]; // space for ^^xRGB too
+	float x, xo;
 	size_t len_out;
-	const char *prefix;
-	dp_font_t *fnt;
+	int col_out;
 
-	if (is_console && !key_consoleactive)
+	if (!key_consoleactive)
 		return;		// don't draw anything
 
-	if (is_console)
-	{
-		// empty prefix because ] is part of the console edit line
-		prefix = "";
-		dp_strlcpy(text, key_line, sizeof(text));
-		linepos = key_linepos;
-		fnt = FONT_CONSOLE;
-	}
-	else
-	{
-		if (chat_mode < 0)
-			prefix = "]";
-		else if(chat_mode)
-			prefix = "say_team:";
-		else
-			prefix = "say:";
-		dp_strlcpy(text, chat_buffer, sizeof(text));
-		linepos = chat_bufferpos;
-		fnt = FONT_CHAT;
-	}
+	strlcpy(text, key_line, sizeof(text));
+
+	// Advanced Console Editing by Radix radix@planetquake.com
+	// Added/Modified by EvilTypeGuy eviltypeguy@qeradiant.com
 
 	y = (int)strlen(text);
 
 	// make the color code visible when the cursor is inside it
-	if(text[linepos] != 0)
+	if(text[key_linepos] != 0)
 	{
-		for(i=1; i < 5 && linepos - i > 0; ++i)
-			if(text[linepos-i] == STRING_COLOR_TAG)
+		for(i=1; i < 5 && key_linepos - i > 0; ++i)
+			if(text[key_linepos-i] == STRING_COLOR_TAG)
 			{
 				int caret_pos, ofs = 0;
-				caret_pos = linepos - i;
+				caret_pos = key_linepos - i;
 				if(i == 1 && text[caret_pos+1] == STRING_COLOR_TAG)
 					ofs = 1;
 				else if(i == 1 && isdigit(text[caret_pos+1]))
@@ -1749,31 +1558,18 @@ static void Con_DrawInput(qbool is_console, float x, float v, float inputsize)
 			}
 	}
 
-	if (!is_console)
-	{
-		prefix_start = x;
-		x += DrawQ_TextWidth(prefix, 0, inputsize, inputsize, false, fnt);
-	}
-
-	len_out = linepos;
+	len_out = key_linepos;
 	col_out = -1;
-	xo = 0;
-	if (linepos > 0)
-		xo = DrawQ_TextWidth_UntilWidth_TrackColors(text, &len_out, inputsize, inputsize, &col_out, false, fnt, 1000000000);
+	xo = DrawQ_TextWidth_UntilWidth_TrackColors(text, &len_out, con_textsize.value, con_textsize.value, &col_out, false, FONT_CONSOLE, 1000000000);
+	x = vid_conwidth.value * 0.95 - xo; // scroll
+	if(x >= 0)
+		x = 0;
 
-	text_start = x + (vid_conwidth.value - x) * 0.95 - xo; // scroll
-	if(text_start >= x)
-		text_start = x;
-	else if (!is_console)
-		prefix_start -= (x - text_start);
-
-	if (!is_console)
-		DrawQ_String(prefix_start, v, prefix, 0, inputsize, inputsize, 1.0, 1.0, 1.0, 1.0, 0, NULL, false, fnt);
-
-	DrawQ_String(text_start, v, text, y + 3, inputsize, inputsize, 1.0, 1.0, 1.0, 1.0, 0, NULL, false, fnt);
+	// draw it
+	DrawQ_String(x, con_vislines - con_textsize.value*2, text, y + 3, con_textsize.value, con_textsize.value, 1.0, 1.0, 1.0, 1.0, 0, NULL, false, FONT_CONSOLE );
 
 	// draw a cursor on top of this
-	if ((int)(host.realtime*con_cursorspeed) & 1)		// cursor is visible
+	if ((int)(realtime*con_cursorspeed) & 1)		// cursor is visible
 	{
 		if (!utf8_enable.integer)
 		{
@@ -1789,7 +1585,7 @@ static void Con_DrawInput(qbool is_console, float x, float v, float inputsize)
 			memcpy(text, curbuf, len);
 			text[len] = 0;
 		}
-		DrawQ_String(text_start + xo, v, text, 0, inputsize, inputsize, 1.0, 1.0, 1.0, 1.0, 0, &col_out, false, fnt);
+		DrawQ_String(x + xo, con_vislines - con_textsize.value*2, text, 0, con_textsize.value, con_textsize.value, 1.0, 1.0, 1.0, 1.0, 0, &col_out, false, FONT_CONSOLE);
 	}
 }
 
@@ -1823,13 +1619,13 @@ static float Con_WordWidthFunc(void *passthrough, const char *w, size_t *length,
 		return DrawQ_TextWidth(w, *length, ti->fontsize, ti->fontsize, false, ti->font);
 	else
 	{
-		Sys_Printf("Con_WordWidthFunc: can't get here (maxWidth should never be %f)\n", maxWidth);
+		Sys_PrintfToTerminal("Con_WordWidthFunc: can't get here (maxWidth should never be %f)\n", maxWidth);
 		// Note: this is NOT a Con_Printf, as it could print recursively
 		return 0;
 	}
 }
 
-static int Con_CountLineFunc(void *passthrough, const char *line, size_t length, float width, qbool isContinuation)
+static int Con_CountLineFunc(void *passthrough, const char *line, size_t length, float width, qboolean isContinuation)
 {
 	(void) passthrough;
 	(void) line;
@@ -1839,7 +1635,7 @@ static int Con_CountLineFunc(void *passthrough, const char *line, size_t length,
 	return 1;
 }
 
-static int Con_DisplayLineFunc(void *passthrough, const char *line, size_t length, float width, qbool isContinuation)
+static int Con_DisplayLineFunc(void *passthrough, const char *line, size_t length, float width, qboolean isContinuation)
 {
 	con_text_info_t *ti = (con_text_info_t *) passthrough;
 
@@ -1860,7 +1656,7 @@ static int Con_DisplayLineFunc(void *passthrough, const char *line, size_t lengt
 	return 1;
 }
 
-static int Con_DrawNotifyRect(unsigned mask_must, unsigned mask_mustnot, float maxage, float x, float y, float width, float height, float fontsize, float alignment_x, float alignment_y, const char *continuationString)
+static int Con_DrawNotifyRect(int mask_must, int mask_mustnot, float maxage, float x, float y, float width, float height, float fontsize, float alignment_x, float alignment_y, const char *continuationString)
 {
 	int i;
 	int lines = 0;
@@ -1944,9 +1740,10 @@ Draws the last few lines of output transparently over the game top
 */
 void Con_DrawNotify (void)
 {
-	float x, v;
+	float	x, v, xr;
 	float chatstart, notifystart, inputsize, height;
 	float align;
+	char	temptext[MAX_INPUTLINE];
 	int numChatlines;
 	int chatpos;
 
@@ -2022,12 +1819,26 @@ void Con_DrawNotify (void)
 	}
 	if (key_dest == key_message)
 	{
-		inputsize = (numChatlines ? con_chatsize : con_notifysize).value;
-		Con_DrawInput(false, x, v, inputsize);
-	}
-	else
-		chat_bufferpos = 0;
+		//static char *cursor[2] = { "\xee\x80\x8a", "\xee\x80\x8b" }; // { off, on }
+		int colorindex = -1;
+		const char *cursor;
+		char charbuf16[16];
+		cursor = u8_encodech(0xE00A + ((int)(realtime * con_cursorspeed)&1), NULL, charbuf16);
 
+		// LordHavoc: speedup, and other improvements
+		if (chat_mode < 0)
+			dpsnprintf(temptext, sizeof(temptext), "]%s%s", chat_buffer, cursor);
+		else if(chat_mode)
+			dpsnprintf(temptext, sizeof(temptext), "say_team:%s%s", chat_buffer, cursor);
+		else
+			dpsnprintf(temptext, sizeof(temptext), "say:%s%s", chat_buffer, cursor);
+
+		// FIXME word wrap
+		inputsize = (numChatlines ? con_chatsize : con_notifysize).value;
+		xr = vid_conwidth.value - DrawQ_TextWidth(temptext, 0, inputsize, inputsize, false, FONT_CHAT);
+		x = min(xr, x);
+		DrawQ_String(x, v, temptext, 0, inputsize, inputsize, 1.0, 1.0, 1.0, 1.0, 0, &colorindex, false, FONT_CHAT);
+	}
 	if (con_mutex) Thread_UnlockMutex(con_mutex);
 }
 
@@ -2061,7 +1872,7 @@ If alpha is 0, the line is not drawn, but still wrapped and its height
 returned.
 ================
 */
-static int Con_DrawConsoleLine(unsigned mask_must, unsigned mask_mustnot, float y, int lineno, float ymin, float ymax)
+static int Con_DrawConsoleLine(int mask_must, int mask_mustnot, float y, int lineno, float ymin, float ymax)
 {
 	float width = vid_conwidth.value;
 	con_text_info_t ti;
@@ -2093,7 +1904,7 @@ Calculates the last visible line index and how much to show of it based on
 con_backscroll.
 ================
 */
-static void Con_LastVisibleLine(unsigned mask_must, unsigned mask_mustnot, int *last, int *limitlast)
+static void Con_LastVisibleLine(int mask_must, int mask_mustnot, int *last, int *limitlast)
 {
 	int lines_seen = 0;
 	int i;
@@ -2135,14 +1946,13 @@ Draws the console with the solid background
 The typing input line at the bottom should only be drawn if typing is allowed
 ================
 */
-void Con_DrawConsole (int lines, qbool forcedfullscreen)
+void Con_DrawConsole (int lines)
 {
 	float alpha, alpha0;
 	double sx, sy;
 	int mask_must = 0;
 	int mask_mustnot = (developer.integer>0) ? 0 : CON_MASK_DEVELOPER;
 	cachepic_t *conbackpic;
-	unsigned int conbackflags;
 
 	if (lines <= 0)
 		return;
@@ -2157,18 +1967,15 @@ void Con_DrawConsole (int lines, qbool forcedfullscreen)
 	r_draw2d_force = true;
 
 // draw the background
-	alpha0 = forcedfullscreen ? 1.0f : scr_conalpha.value; // always full alpha when not forced fullscreen
+	alpha0 = cls.signon == SIGNONS ? scr_conalpha.value : 1.0f; // always full alpha when not in game
 	if((alpha = alpha0 * scr_conalphafactor.value) > 0)
 	{
 		sx = scr_conscroll_x.value;
 		sy = scr_conscroll_y.value;
-		conbackflags = CACHEPICFLAG_FAILONMISSING; // So console is readable when game content is missing
-		if (sx != 0 || sy != 0)
-			conbackflags &= CACHEPICFLAG_NOCLAMP;
-		conbackpic = scr_conbrightness.value >= 0.01f ? Draw_CachePic_Flags("gfx/conback", conbackflags) : NULL;
-		sx *= host.realtime; sy *= host.realtime;
+		conbackpic = scr_conbrightness.value >= 0.01f ? Draw_CachePic_Flags("gfx/conback", (sx != 0 || sy != 0) ? CACHEPICFLAG_NOCLAMP : 0) : NULL;
+		sx *= realtime; sy *= realtime;
 		sx -= floor(sx); sy -= floor(sy);
-		if (Draw_IsPicLoaded(conbackpic))
+		if (conbackpic && conbackpic->tex != r_texture_notexture)
 			DrawQ_SuperPic(0, lines - vid_conheight.integer, conbackpic, vid_conwidth.integer, vid_conheight.integer,
 					0 + sx, 0 + sy, scr_conbrightness.value, scr_conbrightness.value, scr_conbrightness.value, alpha,
 					1 + sx, 0 + sy, scr_conbrightness.value, scr_conbrightness.value, scr_conbrightness.value, alpha,
@@ -2183,9 +1990,9 @@ void Con_DrawConsole (int lines, qbool forcedfullscreen)
 		sx = scr_conscroll2_x.value;
 		sy = scr_conscroll2_y.value;
 		conbackpic = Draw_CachePic_Flags("gfx/conback2", (sx != 0 || sy != 0) ? CACHEPICFLAG_NOCLAMP : 0);
-		sx *= host.realtime; sy *= host.realtime;
+		sx *= realtime; sy *= realtime;
 		sx -= floor(sx); sy -= floor(sy);
-		if(Draw_IsPicLoaded(conbackpic))
+		if(conbackpic && conbackpic->tex != r_texture_notexture)
 			DrawQ_SuperPic(0, lines - vid_conheight.integer, conbackpic, vid_conwidth.integer, vid_conheight.integer,
 					0 + sx, 0 + sy, scr_conbrightness.value, scr_conbrightness.value, scr_conbrightness.value, alpha,
 					1 + sx, 0 + sy, scr_conbrightness.value, scr_conbrightness.value, scr_conbrightness.value, alpha,
@@ -2198,9 +2005,9 @@ void Con_DrawConsole (int lines, qbool forcedfullscreen)
 		sx = scr_conscroll3_x.value;
 		sy = scr_conscroll3_y.value;
 		conbackpic = Draw_CachePic_Flags("gfx/conback3", (sx != 0 || sy != 0) ? CACHEPICFLAG_NOCLAMP : 0);
-		sx *= host.realtime; sy *= host.realtime;
+		sx *= realtime; sy *= realtime;
 		sx -= floor(sx); sy -= floor(sy);
-		if(Draw_IsPicLoaded(conbackpic))
+		if(conbackpic && conbackpic->tex != r_texture_notexture)
 			DrawQ_SuperPic(0, lines - vid_conheight.integer, conbackpic, vid_conwidth.integer, vid_conheight.integer,
 					0 + sx, 0 + sy, scr_conbrightness.value, scr_conbrightness.value, scr_conbrightness.value, alpha,
 					1 + sx, 0 + sy, scr_conbrightness.value, scr_conbrightness.value, scr_conbrightness.value, alpha,
@@ -2255,7 +2062,7 @@ void Con_DrawConsole (int lines, qbool forcedfullscreen)
 #endif
 
 // draw the input prompt, user text, and cursor if desired
-	Con_DrawInput(true, 0, con_vislines - con_textsize.value * 2, con_textsize.value);
+	Con_DrawInput ();
 
 	r_draw2d_force = false;
 	if (con_mutex) Thread_UnlockMutex(con_mutex);
@@ -2269,10 +2076,10 @@ Prints not only map filename, but also
 its format (q1/q2/q3/hl) and even its message
 */
 //[515]: here is an ugly hack.. two gotos... oh my... *but it works*
-//LadyHavoc: rewrote bsp type detection, rewrote message extraction to do proper worldspawn parsing
-//LadyHavoc: added .ent file loading, and redesigned error handling to still try the .ent file even if the map format is not recognized, this also eliminated one goto
-//LadyHavoc: FIXME: man this GetMapList is STILL ugly code even after my cleanups...
-qbool GetMapList (const char *s, char *completedname, int completednamebufferlength)
+//LordHavoc: rewrote bsp type detection, rewrote message extraction to do proper worldspawn parsing
+//LordHavoc: added .ent file loading, and redesigned error handling to still try the .ent file even if the map format is not recognized, this also eliminated one goto
+//LordHavoc: FIXME: man this GetMapList is STILL ugly code even after my cleanups...
+qboolean GetMapList (const char *s, char *completedname, int completednamebufferlength)
 {
 	fssearch_t	*t;
 	char		message[1024];
@@ -2282,7 +2089,7 @@ qbool GetMapList (const char *s, char *completedname, int completednamebufferlen
 	unsigned char buf[1024];
 
 	dpsnprintf(message, sizeof(message), "maps/%s*.bsp", s);
-	t = FS_Search(message, 1, true, NULL);
+	t = FS_Search(message, 1, true);
 	if(!t)
 		return false;
 	if (t->numfilenames > 1)
@@ -2310,18 +2117,18 @@ qbool GetMapList (const char *s, char *completedname, int completednamebufferlen
 		char entfilename[MAX_QPATH];
 		char desc[64];
 		desc[0] = 0;
-		dp_strlcpy(message, "^1ERROR: open failed^7", sizeof(message));
+		strlcpy(message, "^1ERROR: open failed^7", sizeof(message));
 		p = 0;
 		f = FS_OpenVirtualFile(t->filenames[i], true);
 		if(f)
 		{
-			dp_strlcpy(message, "^1ERROR: not a known map format^7", sizeof(message));
+			strlcpy(message, "^1ERROR: not a known map format^7", sizeof(message));
 			memset(buf, 0, 1024);
 			FS_Read(f, buf, 1024);
 			if (!memcmp(buf, "IBSP", 4))
 			{
 				p = LittleLong(((int *)buf)[1]);
-				if (p == Q3BSPVERSION || p == Q3BSPVERSION_LIVE || p == Q3BSPVERSION_IG)
+				if (p == Q3BSPVERSION)
 				{
 					q3dheader_t *header = (q3dheader_t *)buf;
 					lumpofs = LittleLong(header->lumps[Q3LUMP_ENTITIES].fileofs);
@@ -2362,16 +2169,11 @@ qbool GetMapList (const char *s, char *completedname, int completednamebufferlen
 				lumplen = BuffLittleLong(buf + 4 + 8 * LUMP_ENTITIES + 4);
 				dpsnprintf(desc, sizeof(desc), "BSP2RMQe");
 			}
-			else if(!memcmp(buf, "VBSP", 4))
-			{
-				hl2dheader_t *header = (hl2dheader_t *)buf;
-				lumpofs = LittleLong(header->lumps[HL2LUMP_ENTITIES].fileofs);
-				lumplen = LittleLong(header->lumps[HL2LUMP_ENTITIES].filelen);
-				dpsnprintf(desc, sizeof(desc), "VBSP%i", LittleLong(((int *)buf)[1]));
-			}
 			else
+			{
 				dpsnprintf(desc, sizeof(desc), "unknown%i", BuffLittleLong(buf));
-			dp_strlcpy(entfilename, t->filenames[i], sizeof(entfilename));
+			}
+			strlcpy(entfilename, t->filenames[i], sizeof(entfilename));
 			memcpy(entfilename + strlen(entfilename) - 4, ".ent", 5);
 			entities = (char *)FS_LoadFile(entfilename, tempmempool, true, NULL);
 			if (!entities && lumplen >= 10)
@@ -2407,7 +2209,7 @@ qbool GetMapList (const char *s, char *completedname, int completednamebufferlen
 					if (!strcmp(keyname, "message"))
 					{
 						// get the message contents
-						dp_strlcpy(message, com_token, sizeof(message));
+						strlcpy(message, com_token, sizeof(message));
 						break;
 					}
 				}
@@ -2532,7 +2334,7 @@ static int Nicks_strncasecmp(char *a, char *b, unsigned int a_len)
 	// if A contains a non-alphanumeric, B must contain it as well though!
 	while(a_len)
 	{
-		qbool alnum_a, alnum_b;
+		qboolean alnum_a, alnum_b;
 
 		if(tolower(*a) == tolower(*b))
 		{
@@ -2567,9 +2369,9 @@ static int Nicks_strncasecmp(char *a, char *b, unsigned int a_len)
 
    Count the number of possible nicks to complete
  */
-static int Nicks_CompleteCountPossible(char *line, int pos, char *s, qbool isCon)
+static int Nicks_CompleteCountPossible(char *line, int pos, char *s, qboolean isCon)
 {
-	char name[MAX_SCOREBOARDNAME];
+	char name[128];
 	int i, p;
 	int match;
 	int spos;
@@ -2601,7 +2403,8 @@ static int Nicks_CompleteCountPossible(char *line, int pos, char *s, qbool isCon
 		{
 			if(spos > 0 && line[spos-1] != ' ' && line[spos-1] != ';' && line[spos-1] != '\"' && line[spos-1] != '\'')
 			{
-				if(!(isCon && spos == 1)) // console start
+				if(!(isCon && line[spos-1] == ']' && spos == 1) && // console start
+				   !(spos > 1 && line[spos-1] >= '0' && line[spos-1] <= '9' && line[spos-2] == STRING_COLOR_TAG)) // color start
 				{
 					--spos;
 					continue;
@@ -2616,10 +2419,10 @@ static int Nicks_CompleteCountPossible(char *line, int pos, char *s, qbool isCon
 		if(match < 0)
 			continue;
 		//Con_Printf("Possible match: %s|%s\n", cl.scores[p].name, name);
-		dp_strlcpy(Nicks_list[count], cl.scores[p].name, sizeof(Nicks_list[count]));
+		strlcpy(Nicks_list[count], cl.scores[p].name, sizeof(Nicks_list[count]));
 
 		// the sanitized list
-		dp_strlcpy(Nicks_sanlist[count], name, sizeof(Nicks_sanlist[count]));
+		strlcpy(Nicks_sanlist[count], name, sizeof(Nicks_sanlist[count]));
 		if(!count)
 		{
 			Nicks_matchpos = match;
@@ -2733,7 +2536,7 @@ static void Nicks_CutMatchesAlphaNumeric(int count)
 	if(Nicks_strcleanlen(Nicks_sanlist[0]) < strlen(tempstr))
 	{
 		// if the clean sanitized one is longer than the current one, use it, it has crap chars which definitely are in there
-		dp_strlcpy(Nicks_sanlist[0], tempstr, sizeof(Nicks_sanlist[0]));
+		strlcpy(Nicks_sanlist[0], tempstr, sizeof(Nicks_sanlist[0]));
 	}
 }
 
@@ -2789,7 +2592,7 @@ static void Nicks_CutMatchesNoSpaces(int count)
 	if(Nicks_strcleanlen(Nicks_sanlist[0]) < strlen(tempstr))
 	{
 		// if the clean sanitized one is longer than the current one, use it, it has crap chars which definitely are in there
-		dp_strlcpy(Nicks_sanlist[0], tempstr, sizeof(Nicks_sanlist[0]));
+		strlcpy(Nicks_sanlist[0], tempstr, sizeof(Nicks_sanlist[0]));
 	}
 }
 
@@ -2825,7 +2628,7 @@ static const char **Nicks_CompleteBuildList(int count)
 */
 static int Nicks_AddLastColor(char *buffer, int pos)
 {
-	qbool quote_added = false;
+	qboolean quote_added = false;
 	int match;
 	int color = STRING_COLOR_DEFAULT + '0';
 	char r = 0, g = 0, b = 0;
@@ -2885,6 +2688,45 @@ static int Nicks_AddLastColor(char *buffer, int pos)
 	return pos;
 }
 
+int Nicks_CompleteChatLine(char *buffer, size_t size, unsigned int pos)
+{
+	int n;
+	/*if(!con_nickcompletion.integer)
+	  return; is tested in Nicks_CompletionCountPossible */
+	n = Nicks_CompleteCountPossible(buffer, pos, &buffer[pos], false);
+	if(n == 1)
+	{
+		size_t len;
+		char *msg;
+
+		msg = Nicks_list[0];
+		len = min(size - Nicks_matchpos - 3, strlen(msg));
+		memcpy(&buffer[Nicks_matchpos], msg, len);
+		if( len < (size - 7) ) // space for color (^[0-9] or ^xrgb) and space and \0
+			len = (int)Nicks_AddLastColor(buffer, Nicks_matchpos+(int)len);
+		buffer[len++] = ' ';
+		buffer[len] = 0;
+		return (int)len;
+	} else if(n > 1)
+	{
+		int len;
+		char *msg;
+		Con_Printf("\n%i possible nicks:\n", n);
+		Cmd_CompleteNicksPrint(n);
+
+		Nicks_CutMatches(n);
+
+		msg = Nicks_sanlist[0];
+		len = (int)min(size - Nicks_matchpos, strlen(msg));
+		memcpy(&buffer[Nicks_matchpos], msg, len);
+		buffer[Nicks_matchpos + len] = 0;
+		//pos += len;
+		return Nicks_matchpos + len;
+	}
+	return pos;
+}
+
+
 /*
 	Con_CompleteCommandLine
 
@@ -2895,9 +2737,9 @@ static int Nicks_AddLastColor(char *buffer, int pos)
 	Enhanced to tab-complete map names by [515]
 
 */
-int Con_CompleteCommandLine(cmd_state_t *cmd, qbool is_console)
+void Con_CompleteCommandLine (void)
 {
-	const char *text = "";
+	const char *cmd = "";
 	char *s;
 	const char **list[4] = {0, 0, 0, 0};
 	char s2[512];
@@ -2907,49 +2749,26 @@ int Con_CompleteCommandLine(cmd_state_t *cmd, qbool is_console)
 	const char *space, *patterns;
 	char vabuf[1024];
 
-	char *line;
-	int linestart, linepos;
-	unsigned int linesize;
-	if (is_console)
-	{
-		line = key_line;
-		linepos = key_linepos;
-		linesize = sizeof(key_line);
-		linestart = 1;
-	}
-	else
-	{
-		line = chat_buffer;
-		linepos = chat_bufferpos;
-		linesize = sizeof(chat_buffer);
-		linestart = 0;
-	}
-
 	//find what we want to complete
-	pos = linepos;
-	while(--pos >= linestart)
+	pos = key_linepos;
+	while(--pos)
 	{
-		k = line[pos];
+		k = key_line[pos];
 		if(k == '\"' || k == ';' || k == ' ' || k == '\'')
 			break;
 	}
 	pos++;
 
-	s = line + pos;
-	dp_strlcpy(s2, line + linepos, sizeof(s2)); //save chars after cursor
-	line[linepos] = 0; //hide them
+	s = key_line + pos;
+	strlcpy(s2, key_line + key_linepos, sizeof(s2));	//save chars after cursor
+	key_line[key_linepos] = 0;					//hide them
 
-	c = v = a = n = cmd_len = 0;
-	if (!is_console)
-		goto nicks;
-
-	space = strchr(line + 1, ' ');
-	if(space && pos == (space - line) + 1)
+	space = strchr(key_line + 1, ' ');
+	if(space && pos == (space - key_line) + 1)
 	{
-		// adding 1 to line drops the leading ]
-		dp_ustr2stp(command, sizeof(command), line + 1, space - (line + 1));
+		strlcpy(command, key_line + 1, min(sizeof(command), (unsigned int)(space - key_line)));
 
-		patterns = Cvar_VariableString(cmd->cvars, va(vabuf, sizeof(vabuf), "con_completion_%s", command), CF_CLIENT | CF_SERVER); // TODO maybe use a better place for this?
+		patterns = Cvar_VariableString(va(vabuf, sizeof(vabuf), "con_completion_%s", command)); // TODO maybe use a better place for this?
 		if(patterns && !*patterns)
 			patterns = NULL; // get rid of the empty string
 
@@ -2960,18 +2779,18 @@ int Con_CompleteCommandLine(cmd_state_t *cmd, qbool is_console)
 			if (GetMapList(s, t, sizeof(t)))
 			{
 				// first move the cursor
-				linepos += (int)strlen(t) - (int)strlen(s);
+				key_linepos += (int)strlen(t) - (int)strlen(s);
 
 				// and now do the actual work
 				*s = 0;
-				dp_strlcat(line, t, MAX_INPUTLINE);
-				dp_strlcat(line, s2, MAX_INPUTLINE); //add back chars after cursor
+				strlcat(key_line, t, MAX_INPUTLINE);
+				strlcat(key_line, s2, MAX_INPUTLINE); //add back chars after cursor
 
 				// and fix the cursor
-				if(linepos > (int) strlen(line))
-					linepos = (int) strlen(line);
+				if(key_linepos > (int) strlen(key_line))
+					key_linepos = (int) strlen(key_line);
 			}
-			return linepos;
+			return;
 		}
 		else
 		{
@@ -3006,19 +2825,19 @@ int Con_CompleteCommandLine(cmd_state_t *cmd, qbool is_console)
 					fssearch_t *search;
 					if(strchr(com_token, '/'))
 					{
-						search = FS_Search(com_token, true, true, NULL);
+						search = FS_Search(com_token, true, true);
 					}
 					else
 					{
 						const char *slash = strrchr(s, '/');
 						if(slash)
 						{
-							dp_strlcpy(t, s, min(sizeof(t), (unsigned int)(slash - s + 2))); // + 2, because I want to include the slash
-							dp_strlcat(t, com_token, sizeof(t));
-							search = FS_Search(t, true, true, NULL);
+							strlcpy(t, s, min(sizeof(t), (unsigned int)(slash - s + 2))); // + 2, because I want to include the slash
+							strlcat(t, com_token, sizeof(t));
+							search = FS_Search(t, true, true);
 						}
 						else
-							search = FS_Search(com_token, true, true, NULL);
+							search = FS_Search(com_token, true, true);
 					}
 					if(search)
 					{
@@ -3036,12 +2855,12 @@ int Con_CompleteCommandLine(cmd_state_t *cmd, qbool is_console)
 					const char *slash = strrchr(s, '/');
 					if(slash)
 					{
-						dp_strlcpy(t, s, min(sizeof(t), (unsigned int)(slash - s + 2))); // + 2, because I want to include the slash
-						dp_strlcat(t, "*", sizeof(t));
-						search = FS_Search(t, true, true, NULL);
+						strlcpy(t, s, min(sizeof(t), (unsigned int)(slash - s + 2))); // + 2, because I want to include the slash
+						strlcat(t, "*", sizeof(t));
+						search = FS_Search(t, true, true);
 					}
 					else
-						search = FS_Search("*", true, true, NULL);
+						search = FS_Search("*", true, true);
 					if(search)
 					{
 						for(i = 0; i < search->numfilenames; ++i)
@@ -3096,51 +2915,49 @@ int Con_CompleteCommandLine(cmd_state_t *cmd, qbool is_console)
 						// of resultbuf.strings[0]. We want to append the characters
 						// from resultbuf.strings[0] to (not including) p as these are
 						// the unique prefix
-						dp_strlcpy(t, (resultbuf.numstrings > 0 ? resultbuf : dirbuf).strings[0], min(matchchars + 1, sizeof(t)));
+						strlcpy(t, (resultbuf.numstrings > 0 ? resultbuf : dirbuf).strings[0], min(matchchars + 1, sizeof(t)));
 					}
 
 					// first move the cursor
-					linepos += (int)strlen(t) - (int)strlen(s);
+					key_linepos += (int)strlen(t) - (int)strlen(s);
 
 					// and now do the actual work
 					*s = 0;
-					dp_strlcat(line, t, MAX_INPUTLINE);
-					dp_strlcat(line, s2, MAX_INPUTLINE); //add back chars after cursor
+					strlcat(key_line, t, MAX_INPUTLINE);
+					strlcat(key_line, s2, MAX_INPUTLINE); //add back chars after cursor
 
 					// and fix the cursor
-					if(linepos > (int) strlen(line))
-						linepos = (int) strlen(line);
+					if(key_linepos > (int) strlen(key_line))
+						key_linepos = (int) strlen(key_line);
 				}
 				stringlistfreecontents(&resultbuf);
 				stringlistfreecontents(&dirbuf);
 
-				return linepos; // bail out, when we complete for a command that wants a file name
+				return; // bail out, when we complete for a command that wants a file name
 			}
 		}
 	}
 
 	// Count number of possible matches and print them
-	c = Cmd_CompleteCountPossible(cmd, s);
+	c = Cmd_CompleteCountPossible(s);
 	if (c)
 	{
 		Con_Printf("\n%i possible command%s\n", c, (c > 1) ? "s: " : ":");
-		Cmd_CompleteCommandPrint(cmd, s);
+		Cmd_CompleteCommandPrint(s);
 	}
-	v = Cvar_CompleteCountPossible(cmd->cvars, s, CF_CLIENT | CF_SERVER);
+	v = Cvar_CompleteCountPossible(s);
 	if (v)
 	{
 		Con_Printf("\n%i possible variable%s\n", v, (v > 1) ? "s: " : ":");
-		Cvar_CompleteCvarPrint(cmd->cvars, s, CF_CLIENT | CF_SERVER);
+		Cvar_CompleteCvarPrint(s);
 	}
-	a = Cmd_CompleteAliasCountPossible(cmd, s);
+	a = Cmd_CompleteAliasCountPossible(s);
 	if (a)
 	{
 		Con_Printf("\n%i possible alias%s\n", a, (a > 1) ? "es: " : ":");
-		Cmd_CompleteAliasPrint(cmd, s);
+		Cmd_CompleteAliasPrint(s);
 	}
-
-nicks:
-	n = Nicks_CompleteCountPossible(line, linepos, s, is_console);
+	n = Nicks_CompleteCountPossible(key_line, key_linepos, s, true);
 	if (n)
 	{
 		Con_Printf("\n%i possible nick%s\n", n, (n > 1) ? "s: " : ":");
@@ -3150,23 +2967,18 @@ nicks:
 	if (!(c + v + a + n))	// No possible matches
 	{
 		if(s2[0])
-			dp_strlcpy(&line[linepos], s2, linesize - linepos);
-		return linepos;
+			strlcpy(&key_line[key_linepos], s2, sizeof(key_line) - key_linepos);
+		return;
 	}
 
 	if (c)
-		text = *(list[0] = Cmd_CompleteBuildList(cmd, s));
+		cmd = *(list[0] = Cmd_CompleteBuildList(s));
 	if (v)
-		text = *(list[1] = Cvar_CompleteBuildList(cmd->cvars, s, cmd->cvars_flagsmask));
+		cmd = *(list[1] = Cvar_CompleteBuildList(s));
 	if (a)
-		text = *(list[2] = Cmd_CompleteAliasBuildList(cmd, s));
+		cmd = *(list[2] = Cmd_CompleteAliasBuildList(s));
 	if (n)
-	{
-		if (is_console)
-			text = *(list[3] = Nicks_CompleteBuildList(n));
-		else
-			text = *(Nicks_CompleteBuildList(n));
-	}
+		cmd = *(list[3] = Nicks_CompleteBuildList(n));
 
 	for (cmd_len = (int)strlen(s);;cmd_len++)
 	{
@@ -3174,10 +2986,10 @@ nicks:
 		for (i = 0; i < 3; i++)
 			if (list[i])
 				for (l = list[i];*l;l++)
-					if ((*l)[cmd_len] != text[cmd_len])
+					if ((*l)[cmd_len] != cmd[cmd_len])
 						goto done;
 		// all possible matches share this character, so we continue...
-		if (!text[cmd_len])
+		if (!cmd[cmd_len])
 		{
 			// if all matches ended at the same position, stop
 			// (this means there is only one match)
@@ -3187,42 +2999,37 @@ nicks:
 done:
 
 	// prevent a buffer overrun by limiting cmd_len according to remaining space
-	cmd_len = min(cmd_len, (int)linesize - 1 - pos);
-	if (text)
+	cmd_len = min(cmd_len, (int)sizeof(key_line) - 1 - pos);
+	if (cmd)
 	{
-		linepos = pos;
-		memcpy(&line[linepos], text, cmd_len);
-		linepos += cmd_len;
+		key_linepos = pos;
+		memcpy(&key_line[key_linepos], cmd, cmd_len);
+		key_linepos += cmd_len;
 		// if there is only one match, add a space after it
-		if (c + v + a + n == 1 && linepos < (int)linesize - 1)
+		if (c + v + a + n == 1 && key_linepos < (int)sizeof(key_line) - 1)
 		{
 			if(n)
 			{ // was a nick, might have an offset, and needs colors ;) --blub
-				linepos = pos - Nicks_offset[0];
+				key_linepos = pos - Nicks_offset[0];
 				cmd_len = (int)strlen(Nicks_list[0]);
-				cmd_len = min(cmd_len, (int)linesize - 3 - pos);
+				cmd_len = min(cmd_len, (int)sizeof(key_line) - 3 - pos);
 
-				memcpy(&line[linepos] , Nicks_list[0], cmd_len);
-				linepos += cmd_len;
-				if(linepos < (int)(linesize - 7)) // space for color code (^[0-9] or ^xrgb), space and \0
-					linepos = Nicks_AddLastColor(line, linepos);
+				memcpy(&key_line[key_linepos] , Nicks_list[0], cmd_len);
+				key_linepos += cmd_len;
+				if(key_linepos < (int)(sizeof(key_line)-4)) // space for ^, X and space and \0
+					key_linepos = Nicks_AddLastColor(key_line, key_linepos);
 			}
-			line[linepos++] = ' ';
+			key_line[key_linepos++] = ' ';
 		}
 	}
 
 	// use strlcat to avoid a buffer overrun
-	line[linepos] = 0;
-	dp_strlcat(line, s2, linesize);
-
-	if (!is_console)
-		return linepos;
+	key_line[key_linepos] = 0;
+	strlcat(key_line, s2, sizeof(key_line));
 
 	// free the command, cvar, and alias lists
 	for (i = 0; i < 4; i++)
 		if (list[i])
 			Mem_Free((void *)list[i]);
-
-	return linepos;
 }
 

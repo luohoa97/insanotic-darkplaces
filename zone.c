@@ -19,7 +19,8 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 */
 // Z_zone.c
 
-#include "darkplaces.h"
+#include "quakedef.h"
+#include "thread.h"
 
 #ifdef WIN32
 #include <windows.h>
@@ -28,10 +29,15 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include <unistd.h>
 #endif
 
+#ifdef _MSC_VER
+#include <vadefs.h>
+#else
+#include <stdint.h>
+#endif
 #define MEMHEADER_SENTINEL_FOR_ADDRESS(p) ((sentinel_seed ^ (unsigned int) (uintptr_t) (p)) + sentinel_seed)
 unsigned int sentinel_seed;
 
-qbool mem_bigendian = false;
+qboolean mem_bigendian = false;
 void *mem_mutex = NULL;
 
 // divVerent: enables file backed malloc using mmap to conserve swap space (instead of malloc)
@@ -39,7 +45,7 @@ void *mem_mutex = NULL;
 # define FILE_BACKED_MALLOC 0
 #endif
 
-// LadyHavoc: enables our own low-level allocator (instead of malloc)
+// LordHavoc: enables our own low-level allocator (instead of malloc)
 #ifndef MEMCLUMPING
 # define MEMCLUMPING 0
 #endif
@@ -87,11 +93,11 @@ static memclump_t *clumpchain = NULL;
 #endif
 
 
-cvar_t developer_memory = {CF_CLIENT | CF_SERVER, "developer_memory", "0", "prints debugging information about memory allocations"};
-cvar_t developer_memorydebug = {CF_CLIENT | CF_SERVER, "developer_memorydebug", "0", "enables memory corruption checks (very slow)"};
-cvar_t developer_memoryreportlargerthanmb = {CF_CLIENT | CF_SERVER, "developer_memorylargerthanmb", "16", "prints debugging information about memory allocations over this size"};
-cvar_t sys_memsize_physical = {CF_CLIENT | CF_SERVER | CF_READONLY, "sys_memsize_physical", "", "physical memory size in MB (or empty if unknown)"};
-cvar_t sys_memsize_virtual = {CF_CLIENT | CF_SERVER | CF_READONLY, "sys_memsize_virtual", "", "virtual memory size in MB (or empty if unknown)"};
+cvar_t developer_memory = {0, "developer_memory", "0", "prints debugging information about memory allocations"};
+cvar_t developer_memorydebug = {0, "developer_memorydebug", "0", "enables memory corruption checks (very slow)"};
+cvar_t developer_memoryreportlargerthanmb = {0, "developer_memorylargerthanmb", "16", "prints debugging information about memory allocations over this size"};
+cvar_t sys_memsize_physical = {CVAR_READONLY, "sys_memsize_physical", "", "physical memory size in MB (or empty if unknown)"};
+cvar_t sys_memsize_virtual = {CVAR_READONLY, "sys_memsize_virtual", "", "virtual memory size in MB (or empty if unknown)"};
 
 static mempool_t *poolchain = NULL;
 
@@ -101,9 +107,6 @@ void Mem_PrintList(size_t minallocationsize);
 #if FILE_BACKED_MALLOC
 #include <stdlib.h>
 #include <sys/mman.h>
-#ifndef MAP_NORESERVE
-#define MAP_NORESERVE 0
-#endif
 typedef struct mmap_data_s
 {
 	size_t len;
@@ -124,7 +127,7 @@ static void *mmap_malloc(size_t size)
 	data = (unsigned char *) mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_NORESERVE, fd, 0);
 	close(fd);
 	unlink(vabuf);
-	if(!data || data == (void *)-1)
+	if(!data)
 		return NULL;
 	data->len = size;
 	return (void *) (data + 1);
@@ -146,9 +149,6 @@ static void mmap_free(void *mem)
 // (Windows growing its swapfile for example)
 static void *attempt_malloc(size_t size)
 {
-#ifndef WIN32
-	return malloc(size);
-#else
 	void *base;
 	// try for half a second or so
 	unsigned int attempts = 500;
@@ -160,7 +160,6 @@ static void *attempt_malloc(size_t size)
 		Sys_Sleep(1000);
 	}
 	return NULL;
-#endif
 }
 #endif
 
@@ -205,14 +204,14 @@ static void *Clump_AllocBlock(size_t size)
 #if MEMCLUMPING
 	if (size <= MEMCLUMPSIZE)
 	{
-		intptr_t index;
-		size_t bit;
-		size_t needbits;
-		size_t startbit;
-		size_t endbit;
-		size_t needints;
-		intptr_t startindex;
-		intptr_t endindex;
+		int index;
+		unsigned int bit;
+		unsigned int needbits;
+		unsigned int startbit;
+		unsigned int endbit;
+		unsigned int needints;
+		int startindex;
+		int endindex;
 		unsigned int value;
 		unsigned int mask;
 		unsigned int *array;
@@ -316,10 +315,10 @@ nofreeblock:
 static void Clump_FreeBlock(void *base, size_t size)
 {
 #if MEMCLUMPING
-	size_t needbits;
-	size_t startbit;
-	size_t endbit;
-	size_t bit;
+	unsigned int needbits;
+	unsigned int startbit;
+	unsigned int endbit;
+	unsigned int bit;
 	memclump_t **clumpchainpointer;
 	memclump_t *clump;
 	unsigned char *start = (unsigned char *)base;
@@ -423,7 +422,11 @@ void *_Mem_Alloc(mempool_t *pool, void *olddata, size_t size, size_t alignment, 
 	memcpy((unsigned char *) mem + sizeof(memheader_t) + mem->size, &sentinel2, sizeof(sentinel2));
 
 	// append to head of list
-	List_Add(&mem->list, &pool->chain);
+	mem->next = pool->chain;
+	mem->prev = NULL;
+	pool->chain = mem;
+	if (mem->next)
+		mem->next->prev = mem;
 
 	if (mem_mutex)
 		Thread_UnlockMutex(mem_mutex);
@@ -464,11 +467,16 @@ static void _Mem_FreeBlock(memheader_t *mem, const char *filename, int fileline)
 	if (developer_memory.integer)
 		Con_DPrintf("Mem_Free: pool %s, alloc %s:%i, free %s:%i, size %i bytes\n", pool->name, mem->filename, mem->fileline, filename, fileline, (int)(mem->size));
 	// unlink memheader from doubly linked list
-	if (mem->list.prev->next != &mem->list || mem->list.next->prev != &mem->list)
+	if ((mem->prev ? mem->prev->next != mem : pool->chain != mem) || (mem->next && mem->next->prev != mem))
 		Sys_Error("Mem_Free: not allocated or double freed (free at %s:%i)", filename, fileline);
 	if (mem_mutex)
 		Thread_LockMutex(mem_mutex);
-	List_Delete(&mem->list);
+	if (mem->prev)
+		mem->prev->next = mem->next;
+	else
+		pool->chain = mem->next;
+	if (mem->next)
+		mem->next->prev = mem->prev;
 	// memheader has been unlinked, do the actual free now
 	size = mem->size;
 	realsize = sizeof(memheader_t) + size + sizeof(sentinel2);
@@ -497,7 +505,7 @@ void _Mem_Free(void *data, const char *filename, int fileline)
 	_Mem_FreeBlock((memheader_t *)((unsigned char *) data - sizeof(memheader_t)), filename, fileline);
 }
 
-mempool_t *_Mem_AllocPool(const char *name, unsigned flags, mempool_t *parent, const char *filename, int fileline)
+mempool_t *_Mem_AllocPool(const char *name, int flags, mempool_t *parent, const char *filename, int fileline)
 {
 	mempool_t *pool;
 	if (developer_memorydebug.integer)
@@ -517,10 +525,10 @@ mempool_t *_Mem_AllocPool(const char *name, unsigned flags, mempool_t *parent, c
 	pool->filename = filename;
 	pool->fileline = fileline;
 	pool->flags = flags;
-	List_Create(&pool->chain);
+	pool->chain = NULL;
 	pool->totalsize = 0;
 	pool->realsize = sizeof(mempool_t);
-	dp_strlcpy (pool->name, name, sizeof (pool->name));
+	strlcpy (pool->name, name, sizeof (pool->name));
 	pool->parent = parent;
 	pool->next = poolchain;
 	poolchain = pool;
@@ -547,8 +555,8 @@ void _Mem_FreePool(mempool_t **poolpointer, const char *filename, int fileline)
 		*chainaddress = pool->next;
 
 		// free memory owned by the pool
-		while (!List_Is_Empty(&pool->chain))
-			_Mem_FreeBlock(List_First_Entry(&pool->chain, memheader_t, list), filename, fileline);
+		while (pool->chain)
+			_Mem_FreeBlock(pool->chain, filename, fileline);
 
 		// free child pools, too
 		for(iter = poolchain; iter; iter = temp) {
@@ -586,8 +594,8 @@ void _Mem_EmptyPool(mempool_t *pool, const char *filename, int fileline)
 		Sys_Error("Mem_EmptyPool: trashed pool sentinel 2 (allocpool at %s:%i, emptypool at %s:%i)", pool->filename, pool->fileline, filename, fileline);
 
 	// free memory owned by the pool
-	while (!List_Is_Empty(&pool->chain))
-		_Mem_FreeBlock(List_First_Entry(&pool->chain, memheader_t, list), filename, fileline);
+	while (pool->chain)
+		_Mem_FreeBlock(pool->chain, filename, fileline);
 
 	// empty child pools, too
 	for(chainaddress = poolchain; chainaddress; chainaddress = chainaddress->next)
@@ -640,7 +648,7 @@ void _Mem_CheckSentinelsGlobal(const char *filename, int fileline)
 			Sys_Error("Mem_CheckSentinelsGlobal: trashed pool sentinel 2 (allocpool at %s:%i, sentinel check at %s:%i)", pool->filename, pool->fileline, filename, fileline);
 	}
 	for (pool = poolchain;pool;pool = pool->next)
-		List_For_Each_Entry(mem, &pool->chain, memheader_t, list)
+		for (mem = pool->chain;mem;mem = mem->next)
 			_Mem_CheckSentinels((void *)((unsigned char *) mem + sizeof(memheader_t)), filename, fileline);
 #if MEMCLUMPING
 	for (pool = poolchain;pool;pool = pool->next)
@@ -649,7 +657,7 @@ void _Mem_CheckSentinelsGlobal(const char *filename, int fileline)
 #endif
 }
 
-qbool Mem_IsAllocated(mempool_t *pool, const void *data)
+qboolean Mem_IsAllocated(mempool_t *pool, void *data)
 {
 	memheader_t *header;
 	memheader_t *target;
@@ -658,7 +666,7 @@ qbool Mem_IsAllocated(mempool_t *pool, const void *data)
 	{
 		// search only one pool
 		target = (memheader_t *)((unsigned char *) data - sizeof(memheader_t));
-		List_For_Each_Entry(header, &pool->chain, memheader_t, list)
+		for( header = pool->chain ; header ; header = header->next )
 			if( header == target )
 				return true;
 	}
@@ -750,9 +758,9 @@ void Mem_ExpandableArray_FreeRecord(memexpandablearray_t *l, void *record) // co
 		{
 			j = (p - l->arrays[i].data) / l->recordsize;
 			if (p != l->arrays[i].data + j * l->recordsize)
-				Sys_Error("Mem_ExpandableArray_FreeRecord: no such record %p\n", (void *)p);
+				Sys_Error("Mem_ExpandableArray_FreeRecord: no such record %p\n", p);
 			if (!l->arrays[i].allocflags[j])
-				Sys_Error("Mem_ExpandableArray_FreeRecord: record %p is already free!\n", (void *)p);
+				Sys_Error("Mem_ExpandableArray_FreeRecord: record %p is already free!\n", p);
 			l->arrays[i].allocflags[j] = false;
 			l->arrays[i].numflaggedrecords--;
 			return;
@@ -811,10 +819,10 @@ void Mem_PrintStats(void)
 	Con_Printf("total allocated size: %lu bytes (%.3fMB)\n", (unsigned long)realsize, realsize / 1048576.0);
 	for (pool = poolchain;pool;pool = pool->next)
 	{
-		if ((pool->flags & POOLFLAG_TEMP) && !List_Is_Empty(&pool->chain))
+		if ((pool->flags & POOLFLAG_TEMP) && pool->chain)
 		{
-			Con_Printf(CON_WARN "Memory pool %p has sprung a leak totalling %lu bytes (%.3fMB)!  Listing contents...\n", (void *)pool, (unsigned long)pool->totalsize, pool->totalsize / 1048576.0);
-			List_For_Each_Entry(mem, &pool->chain, memheader_t, list)
+			Con_Printf("Memory pool %p has sprung a leak totalling %lu bytes (%.3fMB)!  Listing contents...\n", (void *)pool, (unsigned long)pool->totalsize, pool->totalsize / 1048576.0);
+			for (mem = pool->chain;mem;mem = mem->next)
 				Con_Printf("%10lu bytes allocated at %s:%i\n", (unsigned long)mem->size, mem->filename, mem->fileline);
 		}
 	}
@@ -831,22 +839,22 @@ void Mem_PrintList(size_t minallocationsize)
 	{
 		Con_Printf("%10luk (%10luk actual) %s (%+li byte change) %s\n", (unsigned long) ((pool->totalsize + 1023) / 1024), (unsigned long)((pool->realsize + 1023) / 1024), pool->name, (long)(pool->totalsize - pool->lastchecksize), (pool->flags & POOLFLAG_TEMP) ? "TEMP" : "");
 		pool->lastchecksize = pool->totalsize;
-		List_For_Each_Entry(mem, &pool->chain, memheader_t, list)
+		for (mem = pool->chain;mem;mem = mem->next)
 			if (mem->size >= minallocationsize)
 				Con_Printf("%10lu bytes allocated at %s:%i\n", (unsigned long)mem->size, mem->filename, mem->fileline);
 	}
 }
 
-static void MemList_f(cmd_state_t *cmd)
+static void MemList_f(void)
 {
-	switch(Cmd_Argc(cmd))
+	switch(Cmd_Argc())
 	{
 	case 1:
 		Mem_PrintList(1<<30);
 		Mem_PrintStats();
 		break;
 	case 2:
-		Mem_PrintList(atoi(Cmd_Argv(cmd, 1)) * 1024);
+		Mem_PrintList(atoi(Cmd_Argv(1)) * 1024);
 		Mem_PrintStats();
 		break;
 	default:
@@ -855,22 +863,24 @@ static void MemList_f(cmd_state_t *cmd)
 	}
 }
 
-static void MemStats_f(cmd_state_t *cmd)
+static void MemStats_f(void)
 {
 	Mem_CheckSentinelsGlobal();
+	R_TextureStats_Print(false, false, true);
+	GL_Mesh_ListVBOs(false);
 	Mem_PrintStats();
 }
 
 
-char *_Mem_strdup(mempool_t *pool, const char *s, const char *filename, int fileline)
+char* Mem_strdup (mempool_t *pool, const char* s)
 {
 	char* p;
 	size_t sz;
 	if (s == NULL)
 		return NULL;
 	sz = strlen (s) + 1;
-	p = (char*)_Mem_Alloc (pool, NULL, sz, alignof(char), filename, fileline);
-	dp_strlcpy (p, s, sz);
+	p = (char*)Mem_Alloc (pool, sz);
+	strlcpy (p, s, sz);
 	return p;
 }
 
@@ -906,9 +916,8 @@ void Memory_Shutdown (void)
 
 void Memory_Init_Commands (void)
 {
-	Cmd_AddCommand(CF_SHARED, "memstats", MemStats_f, "prints memory system statistics");
-	Cmd_AddCommand(CF_SHARED, "memlist", MemList_f, "prints memory pool information (or if used as memlist 5 lists individual allocations of 5K or larger, 0 lists all allocations)");
-
+	Cmd_AddCommand ("memstats", MemStats_f, "prints memory system statistics");
+	Cmd_AddCommand ("memlist", MemList_f, "prints memory pool information (or if used as memlist 5 lists individual allocations of 5K or larger, 0 lists all allocations)");
 	Cvar_RegisterVariable (&developer_memory);
 	Cvar_RegisterVariable (&developer_memorydebug);
 	Cvar_RegisterVariable (&developer_memoryreportlargerthanmb);

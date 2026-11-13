@@ -29,8 +29,8 @@ int Key_StringToKeynum(const char *str);
 
 #define MAINMENU "mainmenu"
 
-cvar_t menu_rmlui = {CF_CLIENT | CF_ARCHIVE, "menu_rmlui", "1", "show the main menu as an RmlUi document (ui/mainmenu.rml) instead of the QuakeC one"};
-cvar_t rml_scale = {CF_CLIENT | CF_ARCHIVE, "rml_scale", "0", "size of RmlUi documents: how many pixels a dp is; 0 picks one from the window height (and a bigger one on touch screens)"};
+cvar_t menu_rmlui = {CVAR_SAVE, "menu_rmlui", "1", "show the main menu as an RmlUi document (ui/mainmenu.rml) instead of the QuakeC one"};
+cvar_t rml_scale = {CVAR_SAVE, "rml_scale", "0", "size of RmlUi documents: how many pixels a dp is; 0 picks one from the window height (and a bigger one on touch screens)"};
 // QuakeC sets this each frame: 1 while its main screen (the overview of
 // Singleplayer, Multiplayer, ...) is showing and no dialog is open
 static cvar_t menu_overview = {0, "_menu_overview", "0", "set by the menu: 1 while the menu's main screen is up"};
@@ -39,11 +39,11 @@ static cvar_t menu_rml_active = {0, "_menu_rml_active", "0", "set by the engine:
 
 // Pages a server sends (see docs/MODDING.md). They are untrusted: they can
 // only talk back to the server, never run commands here.
-cvar_t cl_allow_server_pages = {CF_CLIENT | CF_ARCHIVE, "cl_allow_server_pages", "1", "1 lets a server open its own pages (RmlUi documents from its pk3) on this client; they can only answer the server, never run commands here"};
-cvar_t cl_server_page_timeout = {CF_CLIENT | CF_ARCHIVE, "cl_server_page_timeout", "600", "seconds a page from a server stays open before it is closed; 0 = no limit"};
+cvar_t cl_allow_server_pages = {CVAR_SAVE, "cl_allow_server_pages", "1", "1 lets a server open its own pages (RmlUi documents from its pk3) on this client; they can only answer the server, never run commands here"};
+cvar_t cl_server_page_timeout = {CVAR_SAVE, "cl_server_page_timeout", "600", "seconds a page from a server stays open before it is closed; 0 = no limit"};
 
-static qbool ui_created;
-static qbool ui_mainmenu_failed;
+static qboolean ui_created;
+static qboolean ui_mainmenu_failed;
 static unsigned int ui_texture_serial;
 
 // documents shown with rml_show, to bring back after a renderer restart
@@ -147,8 +147,8 @@ void UIE_DrawTriangles(const float *xy, const float *uv, const float *rgba, int 
 		vertex3f = (float *)Mem_Alloc(cls.permanentmempool, sizeof(float) * 3 * capacity);
 	}
 	// DrawQ works in console units; the document is laid out in window pixels
-	sx = (float)vid_conwidth.integer / (float)vid.mode.width;
-	sy = (float)vid_conheight.integer / (float)vid.mode.height;
+	sx = (float)vid_conwidth.integer / (float)vid.width;
+	sy = (float)vid_conheight.integer / (float)vid.height;
 	for (i = 0; i < numvertices; i++)
 	{
 		vertex3f[i * 3 + 0] = xy[i * 2 + 0] * sx;
@@ -176,7 +176,7 @@ void UIE_Scissor(int enable, int x, int y, int width, int height)
 
 double UIE_Time(void)
 {
-	return host.realtime;
+	return realtime;
 }
 
 void UIE_Log(int level, const char *text)
@@ -190,13 +190,13 @@ void UIE_Log(int level, const char *text)
 void UIE_Command(const char *command)
 {
 	Con_DPrintf("RmlUi: command %s\n", command);
-	Cbuf_AddText(cmd_local, command);
-	Cbuf_AddText(cmd_local, "\n");
+	Cbuf_AddText(command);
+	Cbuf_AddText("\n");
 }
 
 const char *UIE_CvarString(const char *name)
 {
-	return Cvar_VariableString(&cvars_all, name, CF_CLIENT | CF_SERVER);
+	return Cvar_VariableString(name);
 }
 
 int UIE_FileExists(const char *path)
@@ -224,9 +224,9 @@ void UIE_KeysFor(const char *command, char *key1, char *key2, int size)
 	Key_FindKeysForCommand(command, keys, 2, bindmap);
 	*key1 = *key2 = 0;
 	if (keys[0] >= 0)
-		dp_strlcpy(key1, Key_KeynumToString(keys[0], name, sizeof(name)), size);
+		strlcpy(key1, Key_KeynumToString(keys[0], name, sizeof(name)), size);
 	if (keys[1] >= 0)
-		dp_strlcpy(key2, Key_KeynumToString(keys[1], name, sizeof(name)), size);
+		strlcpy(key2, Key_KeynumToString(keys[1], name, sizeof(name)), size);
 }
 
 void UIE_BindKey(const char *command, int slot, int key)
@@ -245,7 +245,7 @@ void UIE_BindKey(const char *command, int slot, int key)
 	}
 }
 
-static qbool ui_capture_keys;
+static qboolean ui_capture_keys;
 
 void UIE_CaptureKeys(int on)
 {
@@ -259,13 +259,13 @@ int UIE_ServerList(UIE_Server *out, int max)
 	{
 		const serverlist_entry_t *e = ServerList_GetCacheEntry(i);
 		UIE_Server *o = out + n;
-		if (!e->responded)
+		if (e->query != SQS_QUERIED)
 			continue;
-		dp_strlcpy(o->cname, e->info.cname, sizeof(o->cname));
-		dp_strlcpy(o->name, e->info.name, sizeof(o->name));
-		dp_strlcpy(o->map, e->info.map, sizeof(o->map));
+		strlcpy(o->cname, e->info.cname, sizeof(o->cname));
+		strlcpy(o->name, e->info.name, sizeof(o->name));
+		strlcpy(o->map, e->info.map, sizeof(o->map));
 		// the game mode is the first field of the status the game code sends
-		dp_strlcpy(o->type, e->info.qcstatus, sizeof(o->type));
+		strlcpy(o->type, e->info.qcstatus, sizeof(o->type));
 		if (strchr(o->type, ':'))
 			*strchr(o->type, ':') = 0;
 		o->ping = e->info.ping;
@@ -286,12 +286,12 @@ int UIE_ServerDetail_Get(const char *cname, UIE_ServerDetail *out)
 	for (i = 0; i < serverlist_cachecount; i++)
 	{
 		const serverlist_entry_t *e = ServerList_GetCacheEntry(i);
-		if (!e->responded || strcmp(e->info.cname, cname))
+		if (e->query != SQS_QUERIED || strcmp(e->info.cname, cname))
 			continue;
-		dp_strlcpy(out->players, e->info.players, sizeof(out->players));
-		dp_strlcpy(out->qcstatus, e->info.qcstatus, sizeof(out->qcstatus));
-		dp_strlcpy(out->mod, e->info.mod, sizeof(out->mod));
-		dp_strlcpy(out->game, e->info.game, sizeof(out->game));
+		strlcpy(out->players, e->info.players, sizeof(out->players));
+		strlcpy(out->qcstatus, e->info.qcstatus, sizeof(out->qcstatus));
+		strlcpy(out->mod, e->info.mod, sizeof(out->mod));
+		strlcpy(out->game, e->info.game, sizeof(out->game));
 		out->numbots = e->info.numbots;
 		out->numhumans = e->info.numhumans;
 		out->maxplayers = e->info.maxplayers;
@@ -313,21 +313,21 @@ void UIE_ServerRefresh(int reset)
 int UIE_FileList(const char *pattern, char (*out)[128], int max)
 {
 	int i, n = 0;
-	fssearch_t *s = FS_Search(pattern, true, true, NULL);
+	fssearch_t *s = FS_Search(pattern, true, true);
 	if (!s)
 		return 0;
 	for (i = 0; i < s->numfilenames && n < max; i++)
-		dp_strlcpy(out[n++], s->filenames[i], 128);
+		strlcpy(out[n++], s->filenames[i], 128);
 	FS_FreeSearch(s);
 	return n;
 }
 
 void UIE_CvarSet(const char *name, const char *value)
 {
-	cvar_t *var = Cvar_FindVar(&cvars_all, name, CF_CLIENT | CF_SERVER);
-	if (!var || (var->flags & (CF_READONLY | CF_PRIVATE)))
+	cvar_t *var = Cvar_FindVar(name);
+	if (!var || (var->flags & (CVAR_READONLY | CVAR_PRIVATE)))
 		return;
-	Cvar_Set(&cvars_all, name, value);
+	Cvar_Set(name, value);
 }
 
 void UIE_ServerCommand(const char *line)
@@ -335,7 +335,7 @@ void UIE_ServerCommand(const char *line)
 	if (cls.state != ca_connected || cls.demoplayback)
 		return;
 	Con_DPrintf("RmlUi: to the server: %s\n", line);
-	CL_ForwardToServer(line);
+	Cmd_ForwardStringToServer(line);
 }
 
 void UIE_ClipboardSet(const char *text)
@@ -345,11 +345,11 @@ void UIE_ClipboardSet(const char *text)
 
 void UIE_ClipboardGet(char *out, int size)
 {
-	char *text = Sys_SDL_GetClipboardData();
+	char *text = Sys_GetClipboardData();
 	out[0] = 0;
 	if (text)
 	{
-		dp_strlcpy(out, text, size);
+		strlcpy(out, text, size);
 		Z_Free(text);
 	}
 }
@@ -373,16 +373,16 @@ static float UI_RML_DPRatio(void)
 	// with a finger, so they get fewer, bigger dps (a phone in landscape
 	// ends up about 450 dp high). The short side counts, so a phone held
 	// upright is about 450 dp wide instead of 210.
-	return (float)(vid.mode.height < vid.mode.width ? vid.mode.height : vid.mode.width) / (vid_touchscreen.integer ? 450.0f : 720.0f);
+	return (float)(vid.height < vid.width ? vid.height : vid.width) / (vid_touchscreen.integer ? 450.0f : 720.0f);
 }
 
 static void UI_RML_Create(void)
 {
 	int i;
 
-	if (ui_created || !vid.mode.width || !vid.mode.height)
+	if (ui_created || !vid.width || !vid.height)
 		return;
-	if (!UIRml_Create(vid.mode.width, vid.mode.height, UI_RML_DPRatio()))
+	if (!UIRml_Create(vid.width, vid.height, UI_RML_DPRatio()))
 	{
 		ui_mainmenu_failed = true;
 		return;
@@ -441,24 +441,24 @@ static void UI_RML_PrintLine(const char *line)
 	Con_Printf("  %s\n", line);
 }
 
-static void RML_Show_f(cmd_state_t *cmd)
+static void RML_Show_f(void)
 {
-	if (Cmd_Argc(cmd) < 2)
+	if (Cmd_Argc() < 2)
 	{
 		Con_Printf("usage: rml_show <document>   shows ui/<document>.rml\n");
 		return;
 	}
-	CL_StartVideo();
+	Host_StartVideo();
 	UI_RML_Create();
 	if (!ui_created)
 		return;
-	if (!UIRml_Show(Cmd_Argv(cmd, 1)))
-		Con_Printf("rml_show: ui/%s.rml did not load\n", Cmd_Argv(cmd, 1));
+	if (!UIRml_Show(Cmd_Argv(1)))
+		Con_Printf("rml_show: ui/%s.rml did not load\n", Cmd_Argv(1));
 }
 
 // The paths a page may have: ui/<folder>/<name>.rml, plain file name
 // characters. The server checks this too; the client does not trust it.
-static qbool UI_RML_ServerPathOK(const char *path)
+static qboolean UI_RML_ServerPathOK(const char *path)
 {
 	size_t n = strlen(path), i;
 	if (n < 8 || n > 120 || strncmp(path, "ui/", 3) || strcmp(path + n - 4, ".rml") || strstr(path, ".."))
@@ -473,17 +473,17 @@ static qbool UI_RML_ServerPathOK(const char *path)
 	return strchr(path + 3, '/') != NULL;
 }
 
-static void RML_ShowServer_f(cmd_state_t *cmd)
+static void RML_ShowServer_f(void)
 {
 	static double last;
 	const char *path, *why;
 
-	if (Cmd_Argc(cmd) != 2)
+	if (Cmd_Argc() != 2)
 	{
 		Con_Printf("usage: rml_show_server <ui/folder/page.rml>   (a server sends this)\n");
 		return;
 	}
-	path = Cmd_Argv(cmd, 1);
+	path = Cmd_Argv(1);
 	if (!cl_allow_server_pages.integer)
 		return;
 	if (cls.state != ca_connected || cls.demoplayback)
@@ -494,10 +494,10 @@ static void RML_ShowServer_f(cmd_state_t *cmd)
 		return;
 	}
 	// a server cannot make the screen flicker with pages
-	if (host.realtime - last < 0.5)
+	if (realtime - last < 0.5)
 		return;
-	last = host.realtime;
-	CL_StartVideo();
+	last = realtime;
+	Host_StartVideo();
 	UI_RML_Create();
 	if (!ui_created)
 		return;
@@ -506,23 +506,23 @@ static void RML_ShowServer_f(cmd_state_t *cmd)
 		Con_Printf("Could not show the server's page %s: %s\n", path, why);
 }
 
-static void RML_CloseServer_f(cmd_state_t *cmd)
+static void RML_CloseServer_f(void)
 {
 	if (ui_created && UIRml_ServerShown())
 		UIRml_HideAll();
 }
 
-static void RML_Hide_f(cmd_state_t *cmd)
+static void RML_Hide_f(void)
 {
-	if (Cmd_Argc(cmd) < 2)
+	if (Cmd_Argc() < 2)
 	{
 		UIRml_HideAll();
 		return;
 	}
-	UIRml_Hide(Cmd_Argv(cmd, 1));
+	UIRml_Hide(Cmd_Argv(1));
 }
 
-static void RML_Reload_f(cmd_state_t *cmd)
+static void RML_Reload_f(void)
 {
 	if (!ui_created)
 	{
@@ -534,7 +534,7 @@ static void RML_Reload_f(cmd_state_t *cmd)
 	ui_mainmenu_failed = false;
 	if (UIRml_Show(MAINMENU))
 	{
-		if (!Cvar_VariableValue(&cvars_all, "_menu_overview", CF_CLIENT | CF_SERVER) || !menu_rmlui.integer)
+		if (!Cvar_VariableValue("_menu_overview") || !menu_rmlui.integer)
 			UIRml_Hide(MAINMENU);
 	}
 	else
@@ -545,44 +545,44 @@ static void RML_Reload_f(cmd_state_t *cmd)
 // A click the way the window system would deliver it, for tests: the pointer
 // moves, the button goes down and up through Key_Event, so it takes the same
 // route into the menu as a real one.
-static void RML_Click_f(cmd_state_t *cmd)
+static void RML_Click_f(void)
 {
-	if (Cmd_Argc(cmd) < 3)
+	if (Cmd_Argc() < 3)
 	{
 		Con_Printf("usage: rml_click <x> <y>   click the primary button at a window pixel\n");
 		return;
 	}
-	in_windowmouse_x = atoi(Cmd_Argv(cmd, 1));
-	in_windowmouse_y = atoi(Cmd_Argv(cmd, 2));
+	in_windowmouse_x = atoi(Cmd_Argv(1));
+	in_windowmouse_y = atoi(Cmd_Argv(2));
 	Key_Event(K_MOUSE1, 0, true);
 	Key_Event(K_MOUSE1, 0, false);
 }
 
 // A drag, for tests of drag scrolling: the button goes down at the start, the
 // pointer takes ten frames to the end, then the button goes up.
-static struct { qbool active; int frame; int x0, y0, x1, y1; } ui_drag;
+static struct { qboolean active; int frame; int x0, y0, x1, y1; } ui_drag;
 
 // A finger by hand, for tests: rml_touch down|move|up <x> <y>. The window
 // system would keep reporting the real pointer, so the position is set again
 // every frame while the finger is down.
-static struct { qbool down; int x, y; } ui_finger;
+static struct { qboolean down; int x, y; } ui_finger;
 
-static void RML_Touch_f(cmd_state_t *cmd)
+static void RML_Touch_f(void)
 {
-	const char *what = Cmd_Argc(cmd) > 1 ? Cmd_Argv(cmd, 1) : "";
+	const char *what = Cmd_Argc() > 1 ? Cmd_Argv(1) : "";
 	if (!strcmp(what, "up"))
 	{
 		ui_finger.down = false;
 		Key_Event(K_MOUSE1, 0, false);
 		return;
 	}
-	if (Cmd_Argc(cmd) < 4 || (strcmp(what, "down") && strcmp(what, "move")))
+	if (Cmd_Argc() < 4 || (strcmp(what, "down") && strcmp(what, "move")))
 	{
 		Con_Printf("usage: rml_touch down|move <x> <y>, rml_touch up   (for tests)\n");
 		return;
 	}
-	ui_finger.x = in_windowmouse_x = atoi(Cmd_Argv(cmd, 2));
-	ui_finger.y = in_windowmouse_y = atoi(Cmd_Argv(cmd, 3));
+	ui_finger.x = in_windowmouse_x = atoi(Cmd_Argv(2));
+	ui_finger.y = in_windowmouse_y = atoi(Cmd_Argv(3));
 	if (!strcmp(what, "down"))
 	{
 		ui_finger.down = true;
@@ -591,15 +591,15 @@ static void RML_Touch_f(cmd_state_t *cmd)
 }
 
 // A key press and release by name, for tests (the window system is not asked)
-static void RML_Key_f(cmd_state_t *cmd)
+static void RML_Key_f(void)
 {
 	int key;
 	const char *name;
-	qbool ctrl = false;
-	if (Cmd_Argc(cmd) < 2)
+	qboolean ctrl = false;
+	if (Cmd_Argc() < 2)
 		name = "";
 	else
-		name = Cmd_Argv(cmd, 1);
+		name = Cmd_Argv(1);
 	// "ctrl+v": the key with control held down
 	if (!strncasecmp(name, "ctrl+", 5))
 	{
@@ -621,41 +621,41 @@ static void RML_Key_f(cmd_state_t *cmd)
 
 // typed text as one input event (what an input method or a paste delivers),
 // and the system clipboard, for tests
-static void RML_Text_f(cmd_state_t *cmd)
+static void RML_Text_f(void)
 {
-	if (Cmd_Argc(cmd) < 2)
+	if (Cmd_Argc() < 2)
 	{
 		Con_Printf("usage: rml_text <text>   deliver text as one input event (for tests)\n");
 		return;
 	}
-	Key_TextInput(Cmd_Argv(cmd, 1));
+	Key_TextInput(Cmd_Argv(1));
 }
 
-static void RML_Clip_f(cmd_state_t *cmd)
+static void RML_Clip_f(void)
 {
-	if (Cmd_Argc(cmd) < 2)
+	if (Cmd_Argc() < 2)
 		return;
-	Sys_SetClipboardData(Cmd_Argv(cmd, 1));
+	Sys_SetClipboardData(Cmd_Argv(1));
 }
 
-static void RML_State_f(cmd_state_t *cmd)
+static void RML_State_f(void)
 {
-	if (Cmd_Argc(cmd) < 2 || !ui_created)
+	if (Cmd_Argc() < 2 || !ui_created)
 		return;
-	UIRml_State(Cmd_Argv(cmd, 1), UI_RML_PrintLine);
+	UIRml_State(Cmd_Argv(1), UI_RML_PrintLine);
 }
 
-static void RML_Drag_f(cmd_state_t *cmd)
+static void RML_Drag_f(void)
 {
-	if (Cmd_Argc(cmd) < 5)
+	if (Cmd_Argc() < 5)
 	{
 		Con_Printf("usage: rml_drag <x0> <y0> <x1> <y1>   press at the first pixel, drag to the second, release\n");
 		return;
 	}
-	ui_drag.x0 = atoi(Cmd_Argv(cmd, 1));
-	ui_drag.y0 = atoi(Cmd_Argv(cmd, 2));
-	ui_drag.x1 = atoi(Cmd_Argv(cmd, 3));
-	ui_drag.y1 = atoi(Cmd_Argv(cmd, 4));
+	ui_drag.x0 = atoi(Cmd_Argv(1));
+	ui_drag.y0 = atoi(Cmd_Argv(2));
+	ui_drag.x1 = atoi(Cmd_Argv(3));
+	ui_drag.y1 = atoi(Cmd_Argv(4));
 	ui_drag.frame = 0;
 	ui_drag.active = true;
 }
@@ -685,7 +685,7 @@ static void UI_RML_DragStep(void)
 	ui_drag.frame++;
 }
 
-static void RML_List_f(cmd_state_t *cmd)
+static void RML_List_f(void)
 {
 	if (!ui_created)
 	{
@@ -704,19 +704,19 @@ void UI_RML_Init(void)
 	Cvar_RegisterVariable(&cl_server_page_timeout);
 	Cvar_RegisterVariable(&menu_overview);
 	Cvar_RegisterVariable(&menu_rml_active);
-	Cmd_AddCommand(CF_CLIENT, "rml_show", RML_Show_f, "show an RmlUi document: rml_show <name> loads ui/<name>.rml and draws it above the menu");
-	Cmd_AddCommand(CF_CLIENT, "rml_hide", RML_Hide_f, "hide an RmlUi document (all of them without a name)");
-	Cmd_AddCommand(CF_CLIENT, "rml_show_server", RML_ShowServer_f, "open a page the server sent (ui/<folder>/<name>.rml); servers use this");
-	Cmd_AddCommand(CF_CLIENT, "rml_close_server", RML_CloseServer_f, "close the page a server opened");
-	Cmd_AddCommand(CF_CLIENT, "rml_reload", RML_Reload_f, "load the RmlUi documents, stylesheets and images again (for editing them)");
-	Cmd_AddCommand(CF_CLIENT, "rml_click", RML_Click_f, "click at a window pixel as if with the mouse (for tests)");
-	Cmd_AddCommand(CF_CLIENT, "rml_drag", RML_Drag_f, "press, drag and release the primary button between window pixels (for tests)");
-	Cmd_AddCommand(CF_CLIENT, "rml_touch", RML_Touch_f, "a finger by hand: rml_touch down|move <x> <y>, rml_touch up (for tests)");
-	Cmd_AddCommand(CF_CLIENT, "rml_key", RML_Key_f, "press and release a key by name (for tests)");
-	Cmd_AddCommand(CF_CLIENT, "rml_text", RML_Text_f, "deliver text as one input event, as an input method does (for tests)");
-	Cmd_AddCommand(CF_CLIENT, "rml_clip", RML_Clip_f, "put text on the system clipboard (for tests)");
-	Cmd_AddCommand(CF_CLIENT, "rml_state", RML_State_f, "print whether the element with an id is hovered or pressed (for tests)");
-	Cmd_AddCommand(CF_CLIENT, "rml_list", RML_List_f, "list the RmlUi documents");
+	Cmd_AddCommand("rml_show", RML_Show_f, "show an RmlUi document: rml_show <name> loads ui/<name>.rml and draws it above the menu");
+	Cmd_AddCommand("rml_hide", RML_Hide_f, "hide an RmlUi document (all of them without a name)");
+	Cmd_AddCommand("rml_show_server", RML_ShowServer_f, "open a page the server sent (ui/<folder>/<name>.rml); servers use this");
+	Cmd_AddCommand("rml_close_server", RML_CloseServer_f, "close the page a server opened");
+	Cmd_AddCommand("rml_reload", RML_Reload_f, "load the RmlUi documents, stylesheets and images again (for editing them)");
+	Cmd_AddCommand("rml_click", RML_Click_f, "click at a window pixel as if with the mouse (for tests)");
+	Cmd_AddCommand("rml_drag", RML_Drag_f, "press, drag and release the primary button between window pixels (for tests)");
+	Cmd_AddCommand("rml_touch", RML_Touch_f, "a finger by hand: rml_touch down|move <x> <y>, rml_touch up (for tests)");
+	Cmd_AddCommand("rml_key", RML_Key_f, "press and release a key by name (for tests)");
+	Cmd_AddCommand("rml_text", RML_Text_f, "deliver text as one input event, as an input method does (for tests)");
+	Cmd_AddCommand("rml_clip", RML_Clip_f, "put text on the system clipboard (for tests)");
+	Cmd_AddCommand("rml_state", RML_State_f, "print whether the element with an id is hovered or pressed (for tests)");
+	Cmd_AddCommand("rml_list", RML_List_f, "list the RmlUi documents");
 }
 
 /*
@@ -742,7 +742,7 @@ int UI_RML_Modal(void)
 	return ui_created && UIRml_AnyShownExcept(MAINMENU);
 }
 
-static qbool UI_RML_MainMenuShown(void)
+static qboolean UI_RML_MainMenuShown(void)
 {
 	return ui_created && UIRml_IsShown(MAINMENU);
 }
@@ -751,7 +751,7 @@ static void UI_RML_DrawCursor(void)
 {
 	cachepic_t *pic;
 	char name[MAX_QPATH];
-	const char *skin = Cvar_VariableString(&cvars_all, "menu_skin", CF_CLIENT | CF_SERVER);
+	const char *skin = Cvar_VariableString("menu_skin");
 	float x, y;
 
 	if (vid_touchscreen.integer || VID_InputIsTouch())
@@ -762,8 +762,8 @@ static void UI_RML_DrawCursor(void)
 		pic = Draw_CachePic_Flags("gfx/menu/luminos/cursor", CACHEPICFLAG_QUIET);
 	if (!pic || !Draw_GetPicTexture(pic))
 		return;
-	x = in_windowmouse_x * (float)vid_conwidth.integer / (float)vid.mode.width;
-	y = in_windowmouse_y * (float)vid_conheight.integer / (float)vid.mode.height;
+	x = in_windowmouse_x * (float)vid_conwidth.integer / (float)vid.width;
+	y = in_windowmouse_y * (float)vid_conheight.integer / (float)vid.height;
 	// the skin's cursor is 32x32 console units
 	DrawQ_Pic(x, y, pic, 32, 32, 1, 1, 1, 1, 0);
 }
@@ -787,8 +787,8 @@ static void UI_RML_DrawServerBand(void)
 
 	if (!UIRml_ServerShown())
 		return;
-	sx = (float)vid_conwidth.integer / (float)vid.mode.width;
-	sy = (float)vid_conheight.integer / (float)vid.mode.height;
+	sx = (float)vid_conwidth.integer / (float)vid.width;
+	sy = (float)vid_conheight.integer / (float)vid.height;
 	h = UI_RML_BandHeight() * sy;
 	w = (float)vid_conwidth.integer;
 	bw = 72.0f * UI_RML_DPRatio() * sx;
@@ -800,8 +800,8 @@ static void UI_RML_DrawServerBand(void)
 
 void UI_RML_Draw(void)
 {
-	qbool want_main;
-	qbool active;
+	qboolean want_main;
+	qboolean active;
 
 	if (!menu_rmlui.integer && !ui_created)
 	{
@@ -820,7 +820,7 @@ void UI_RML_Draw(void)
 	if (menu_rml_active.integer != (active ? 1 : 0))
 		Cvar_SetValueQuick(&menu_rml_active, active);
 
-	want_main = active && Cvar_VariableValue(&cvars_all, "_menu_overview", CF_CLIENT | CF_SERVER) != 0 && (key_dest == key_menu || key_dest == key_menu_grabbed);
+	want_main = active && Cvar_VariableValue("_menu_overview") != 0 && (key_dest == key_menu || key_dest == key_menu_grabbed);
 	if (want_main != UI_RML_MainMenuShown())
 	{
 		if (want_main)
@@ -837,17 +837,17 @@ void UI_RML_Draw(void)
 	if (!UI_RML_MainMenuShown() && !UIRml_AnyShownExcept(MAINMENU))
 		return;
 
-	UIRml_Resize(vid.mode.width, vid.mode.height, UI_RML_DPRatio());
+	UIRml_Resize(vid.width, vid.height, UI_RML_DPRatio());
 	UIRml_SetTouch(vid_touchscreen.integer || VID_InputIsTouch());
 	UIRml_SetBodyClass(MAINMENU, "touch", vid_touchscreen.integer != 0);
 	UIRml_SetBodyClass(MAINMENU, "ingame", cls.state == ca_connected);
 	// state the in-game menu's stylesheet reacts to: which words and buttons it shows
 	UIRml_SetBodyClass("settings", "ingame", cls.state == ca_connected);
 	UIRml_SetBodyClass("gamemenu", "demo", cls.demoplayback != 0);
-	UIRml_SetBodyClass("gamemenu", "campaign", Cvar_VariableValue(&cvars_all, "g_campaign", CF_CLIENT | CF_SERVER) != 0);
-	UIRml_SetBodyClass("gamemenu", "solo", sv.active && !strcmp(Cvar_VariableString(&cvars_all, "net_address", CF_CLIENT | CF_SERVER), "127.0.0.1"));
+	UIRml_SetBodyClass("gamemenu", "campaign", Cvar_VariableValue("g_campaign") != 0);
+	UIRml_SetBodyClass("gamemenu", "solo", sv.active && !strcmp(Cvar_VariableString("net_address"), "127.0.0.1"));
 	{
-		int teams = (int)Cvar_VariableValue(&cvars_all, "_teams_available", CF_CLIENT | CF_SERVER);
+		int teams = (int)Cvar_VariableValue("_teams_available");
 		UIRml_SetBodyClass("teamselect", "red", (teams & 1) != 0);
 		UIRml_SetBodyClass("teamselect", "blue", (teams & 2) != 0);
 		UIRml_SetBodyClass("teamselect", "yellow", (teams & 4) != 0);
@@ -912,7 +912,7 @@ static int UI_RML_TranslateKey(int key)
 int UI_RML_KeyEvent(int key, int ascii, int down)
 {
 	int mods, k;
-	qbool modal, main_shown;
+	qboolean modal, main_shown;
 
 	if (!ui_created || key < 0 || key >= MAX_KEYS)
 		return 0;
@@ -947,7 +947,7 @@ int UI_RML_KeyEvent(int key, int ascii, int down)
 	if (key >= K_MOUSE1 && key <= K_MOUSE3)
 	{
 		// the close button of the band of a page from a server
-		if (UIRml_ServerShown() && in_windowmouse_y < UI_RML_BandHeight() && in_windowmouse_x > vid.mode.width - 72.0f * UI_RML_DPRatio())
+		if (UIRml_ServerShown() && in_windowmouse_y < UI_RML_BandHeight() && in_windowmouse_x > vid.width - 72.0f * UI_RML_DPRatio())
 		{
 			UIRml_HideAll();
 			ui_routed[key] = 1;

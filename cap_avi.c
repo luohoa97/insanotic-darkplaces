@@ -18,7 +18,7 @@ typedef struct capturevideostate_avi_formatspecific_s
 	fs_offset_t videofile_ix_master_video_start_offset;
 	fs_offset_t videofile_ix_movistart;
 	fs_offset_t position;
-	qbool canseek;
+	qboolean canseek;
 	sizebuf_t riffbuffer;
 	unsigned char riffbufferdata[128];
 	sizebuf_t riffindexbuffer;
@@ -147,7 +147,7 @@ static void SCR_CaptureVideo_RIFF_Pop(void)
 		if(sizehint != -1)
 		{
 			int i;
-			Con_Printf(CON_WARN "WARNING: invalid size hint %d when writing video data (actual size: %d)\n", (int) sizehint, x);
+			Con_Printf("WARNING: invalid size hint %d when writing video data (actual size: %d)\n", (int) sizehint, x);
 			for(i = 0; i <= format->riffstacklevel; ++i)
 			{
 				Con_Printf("  RIFF level %d = %s\n", i, format->riffstackfourcc[i]);
@@ -269,7 +269,7 @@ static void SCR_CaptureVideo_RIFF_MakeIxChunk(const char *fcc, const char *dwChu
 	FS_Seek(cls.capturevideo.videofile, 0, SEEK_END); // return value doesn't matter here
 }
 
-static void SCR_CaptureVideo_RIFF_Finish(qbool final)
+static void SCR_CaptureVideo_RIFF_Finish(qboolean final)
 {
 	LOAD_FORMATSPECIFIC_AVI();
 	// close the "movi" list
@@ -370,12 +370,14 @@ static void SCR_CaptureVideo_ConvertFrame_BGRA_to_I420_flip(int width, int heigh
 	}
 }
 
-static void SCR_CaptureVideo_Avi_VideoFrames(int num, u8 *in)
+static void SCR_CaptureVideo_Avi_VideoFrames(int num)
 {
 	LOAD_FORMATSPECIFIC_AVI();
 	int x = 0, width = cls.capturevideo.width, height = cls.capturevideo.height;
-	unsigned char *out = cls.capturevideo.outbuffer;
-
+	unsigned char *in, *out;
+	// FIXME: width/height must be multiple of 2, enforce this?
+	in = cls.capturevideo.outbuffer;
+	out = cls.capturevideo.outbuffer + width*height*4;
 	SCR_CaptureVideo_ConvertFrame_BGRA_to_I420_flip(width, height, in, out);
 	x = width*height+(width/2)*(height/2)*2;
 	while(num-- > 0)
@@ -502,20 +504,14 @@ void SCR_CaptureVideo_Avi_BeginVideo(void)
 	double aspect;
 	char vabuf[1024];
 
-	aspect = vid.mode.width / (vid.mode.height * vid_pixelheight.value);
+	aspect = vid.width / (vid.height * vid_pixelheight.value);
 
 	cls.capturevideo.format = CAPTUREVIDEOFORMAT_AVI_I420;
 	cls.capturevideo.formatextension = "avi";
 	cls.capturevideo.videofile = FS_OpenRealFile(va(vabuf, sizeof(vabuf), "%s.%s", cls.capturevideo.basename, cls.capturevideo.formatextension), "wb", false);
-	if (!cls.capturevideo.videofile)
-	{
-		Con_Printf(CON_ERROR "Failed to open video file \"%s\", cancelling video capture.\n", vabuf);
-		cls.capturevideo.error = true;
-		return;
-	}
-	cls.capturevideo.writeEndVideo = SCR_CaptureVideo_Avi_EndVideo;
-	cls.capturevideo.writeVideoFrame = SCR_CaptureVideo_Avi_VideoFrames;
-	cls.capturevideo.writeSoundFrame = SCR_CaptureVideo_Avi_SoundFrame;
+	cls.capturevideo.endvideo = SCR_CaptureVideo_Avi_EndVideo;
+	cls.capturevideo.videoframes = SCR_CaptureVideo_Avi_VideoFrames;
+	cls.capturevideo.soundframe = SCR_CaptureVideo_Avi_SoundFrame;
 	cls.capturevideo.formatspecific = Mem_Alloc(tempmempool, sizeof(capturevideostate_avi_formatspecific_t));
 	{
 		LOAD_FORMATSPECIFIC_AVI();

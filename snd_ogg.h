@@ -24,14 +24,12 @@
 #ifndef SND_OGG_H
 #define SND_OGG_H
 
-#include "qtypes.h"
-struct sfx_s;
 
-qbool OGG_OpenLibrary (void);
+qboolean OGG_OpenLibrary (void);
 void OGG_CloseLibrary (void);
-qbool OPUS_OpenLibrary (void);
+qboolean OPUS_OpenLibrary (void);
 void OPUS_CloseLibrary (void);
-qbool OGG_LoadVorbisFile (const char *filename, struct sfx_s *sfx);
+qboolean OGG_LoadVorbisFile (const char *filename, sfx_t *sfx);
 
 
 #endif
