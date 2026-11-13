@@ -191,6 +191,7 @@ extern cvar_t vid_bitsperpixel;
 extern cvar_t vid_samples;
 extern cvar_t vid_refreshrate;
 extern cvar_t vid_userefreshrate;
+extern cvar_t vid_touchscreen_mouselook;
 extern cvar_t vid_touchscreen_density;
 extern cvar_t vid_touchscreen_xdpi;
 extern cvar_t vid_touchscreen_ydpi;

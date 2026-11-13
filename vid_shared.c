@@ -159,6 +159,7 @@ cvar_t vid_stereobuffer = {CVAR_SAVE, "vid_stereobuffer", "0", "enables 'quad-bu
 // the density cvars are completely optional, set and use when something needs to have a density-independent size.
 // TODO: set them when changing resolution, setting them from the commandline will be independent from the resolution - use only if you have a native fixed resolution.
 // values for the Samsung Galaxy SIII, Snapdragon version: 2.000000 density, 304.799988 xdpi, 303.850464 ydpi
+cvar_t vid_touchscreen_mouselook = {CVAR_READONLY, "vid_touchscreen_mouselook", "0", "1 while a mouse the system lists, and the player has used, aims in the game next to the touch controls (its buttons fire instead of pressing the controls). Touch assists read it; nothing sets it yet"};
 cvar_t vid_touchscreen_density = {0, "vid_touchscreen_density", "2.0", "Standard quantized screen density multiplier (see Android documentation for DisplayMetrics), similar values are given on iPhoneOS"};
 cvar_t vid_touchscreen_xdpi = {0, "vid_touchscreen_xdpi", "300", "Horizontal DPI of the screen (only valid on Android currently)"};
 cvar_t vid_touchscreen_ydpi = {0, "vid_touchscreen_ydpi", "300", "Vertical DPI of the screen (only valid on Android currently)"};
@@ -1686,6 +1687,7 @@ void VID_Shared_Init(void)
 	Cvar_RegisterVariable(&vid_refreshrate);
 	Cvar_RegisterVariable(&vid_userefreshrate);
 	Cvar_RegisterVariable(&vid_stereobuffer);
+	Cvar_RegisterVariable(&vid_touchscreen_mouselook);
 	Cvar_RegisterVariable(&vid_touchscreen_density);
 	Cvar_RegisterVariable(&vid_touchscreen_xdpi);
 	Cvar_RegisterVariable(&vid_touchscreen_ydpi);

@@ -118,6 +118,16 @@ OBJ_COMMON= \
 	$(OBJ_LUA) \
 	zstd_zstddeclib.o \
 	bih.o \
+	touch_aim.o \
+	touch_assist.o \
+	touch_dodge.o \
+	touch_ledge.o \
+	touch_hook.o \
+	touch_nade.o \
+	touch_pause.o \
+	touch_turn.o \
+	touch_tactics.o \
+	touch_wepquery.o \
 	crypto.o \
 	cl_collision.o \
 	cl_demo.o \

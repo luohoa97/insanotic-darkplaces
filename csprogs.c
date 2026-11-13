@@ -3,6 +3,8 @@
 #include "progsvm.h"
 #include "clprogdefs.h"
 #include "csprogs.h"
+#include "touch_hud.h"
+#include "touch_aim.h"
 #include "cl_collision.h"
 #include "snd_main.h"
 #include "clvm_cmds.h"
@@ -1164,6 +1166,8 @@ static void CL_VM_Init_Inner (void)
 
 	// Update Coop and Deathmatch Globals (at this point the client knows them from ServerInfo)
 	CL_VM_UpdateCoopDeathmatchGlobals(cl.gametype);
+	TouchHUD_ProgsChanged(); // Touch assists: bind the weapon registry
+	TouchAim_ProgsChanged();
 }
 
 void CL_VM_ShutDown (void)
@@ -1186,6 +1190,8 @@ void CL_VM_ShutDown (void)
 	CSQC_END
 	Con_DPrint("CSQC ^1unloaded\n");
 	cl.csqc_loaded = false;
+	TouchHUD_ProgsChanged(); // Touch assists
+	TouchAim_ProgsChanged();
 }
 
 qboolean CL_VM_GetEntitySoundOrigin(int entnum, vec3_t out)
