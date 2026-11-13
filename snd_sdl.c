@@ -112,6 +112,23 @@ qboolean SndSys_Init (const snd_format_t* requested, snd_format_t* suggested)
 
 	Con_DPrint ("SndSys_Init: using the SDL module\n");
 
+#ifdef __ANDROID__
+	// Insanotic: prefer AAudio (low latency, no OpenSL ES queue copies) and fall
+	// back to OpenSL ES on devices or SDL builds without it. An explicit
+	// SDL_AUDIODRIVER in the environment wins.
+	if (!getenv("SDL_AUDIODRIVER"))
+	{
+		SDL_SetHint(SDL_HINT_AUDIODRIVER, "aaudio");
+		if (SDL_InitSubSystem(SDL_INIT_AUDIO))
+		{
+			Con_Printf("AAudio unavailable (%s), falling back to OpenSL ES\n", SDL_GetError());
+			SDL_SetHint(SDL_HINT_AUDIODRIVER, "openslES");
+		}
+		else
+			SDL_QuitSubSystem(SDL_INIT_AUDIO); // reinitialised below with the same driver
+	}
+#endif
+
 	// Init the SDL Audio subsystem
 	if( SDL_InitSubSystem( SDL_INIT_AUDIO ) ) {
 		Con_Print( "Initializing the SDL Audio subsystem failed!\n" );
