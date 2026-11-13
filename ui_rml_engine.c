@@ -365,15 +365,38 @@ Life cycle
 ================================================================================
 */
 
+/*
+Sizes follow the device, not the last input. vid_touchscreen is an input mode:
+a mouse event (a hover, a pen, a Bluetooth mouse, a synthetic event while the
+game loads) clears it and the next finger sets it again, so a dp ratio derived
+from it made the whole UI jump in size on the first tap. A phone or tablet
+(DP_MOBILETOUCH) is a touch device for good; anything else is not, unless it
+started in touch mode (+vid_touchscreen 1 on the command line).
+*/
+static qboolean UI_RML_TouchDevice(void)
+{
+	static int latched = -1;
+
+	if (latched < 0)
+	{
+#ifdef DP_MOBILETOUCH
+		latched = 1;
+#else
+		latched = vid_touchscreen.integer != 0;
+#endif
+	}
+	return latched != 0;
+}
+
 static float UI_RML_DPRatio(void)
 {
 	if (rml_scale.value > 0)
 		return rml_scale.value;
-	// 720 dp on the short side on a monitor; touch screens are held close and used
+	// 720 dp on the short side on a monitor; touch devices are held close and used
 	// with a finger, so they get fewer, bigger dps (a phone in landscape
 	// ends up about 450 dp high). The short side counts, so a phone held
 	// upright is about 450 dp wide instead of 210.
-	return (float)(vid.height < vid.width ? vid.height : vid.width) / (vid_touchscreen.integer ? 450.0f : 720.0f);
+	return (float)(vid.height < vid.width ? vid.height : vid.width) / (UI_RML_TouchDevice() ? 450.0f : 720.0f);
 }
 
 static void UI_RML_Create(void)
