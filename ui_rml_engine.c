@@ -57,6 +57,7 @@ static int ui_num_remembered;
 static unsigned char ui_routed[MAX_KEYS];
 
 static float ui_mouse_sent[2] = {-1, -1};
+static qbool ui_modal_was; // a document from rml_show was up on the last frame
 
 /*
 ================================================================================
@@ -858,6 +859,19 @@ void UI_RML_Draw(void)
 		}
 		else
 			UIRml_Hide(MAINMENU);
+	}
+	// Hand the game back. The in-game menu (gamemenu, teamselect) is a document
+	// shown over key_menu; closing it with Resume, Escape, the close button or
+	// a tap outside, only hid the document and left the game stuck in the menu
+	// with nothing drawn. When the last one is gone and neither the main menu
+	// nor the old menu has taken over, close the menu as well.
+	{
+		qbool modal_now = UIRml_AnyShownExcept(MAINMENU) != 0;
+		if (ui_modal_was && !modal_now && !UI_RML_MainMenuShown() && cls.state == ca_connected
+			&& (key_dest == key_menu || key_dest == key_menu_grabbed)
+			&& Cvar_VariableValue(&cvars_all, "_menu_overview", CF_CLIENT | CF_SERVER) == 0)
+			Cbuf_AddText(cmd_local, "\ntogglemenu 0\n");
+		ui_modal_was = modal_now;
 	}
 	if (!UI_RML_MainMenuShown() && !UIRml_AnyShownExcept(MAINMENU))
 		return;
