@@ -1,5 +1,5 @@
 
-// This code written in 2010 by Forest Hale (darkplacesengine gmail com), and placed into public domain.
+// This code written in 2010 by Ashley Rose Hale (LadyHavoc) (darkplacesengine gmail com), and placed into public domain.
 
 // Based on information in http://zach.in.tu-clausthal.de/papers/vrst02.html (in particular vrst02_boxtree.pdf)
 
@@ -39,14 +39,18 @@ typedef struct bih_node_s
 	// TODO: move bounds data to parent node and remove it from leafs?
 	float mins[3];
 	float maxs[3];
-	// node indexes of children (always > this node's index)
-	int front;
-	int back;
-	// interval of children
-	float frontmin; // children[0]
-	float backmax; // children[1]
-	// BIH_UNORDERED uses this for a list of leafindex (all >= 0), -1 = end of list
-	int children[BIH_MAXUNORDEREDCHILDREN];
+	union {
+		struct{
+			// node indexes of children (always > this node's index)
+			int front;
+			int back;
+			// interval of children
+			float frontmin; // children[0]
+			float backmax; // children[1]
+		};
+		// BIH_UNORDERED uses this for a list of leafindex (all >= 0), -1 = end of list
+		int children[BIH_MAXUNORDEREDCHILDREN];
+	};
 }
 bih_node_t;
 

@@ -1,6 +1,6 @@
 /*
 Copyright (C) 1996-1997 Id Software, Inc.
-Copyright (C) 2003 Forest Hale
+Copyright (C) 2003 Ashley Rose Hale (LadyHavoc)
 
 This program is free software; you can redistribute it and/or
 modify it under the terms of the GNU General Public License
@@ -22,7 +22,12 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #ifndef NET_H
 #define NET_H
 
+#include <stdarg.h>
+#include "qtypes.h"
+#include "crypto.h"
 #include "lhnet.h"
+#include "common.h"
+struct cmd_state_s;
 
 #define NET_HEADERSIZE		(2 * sizeof(unsigned int))
 /// Insanotic: most reliable fragments a connection keeps in flight
@@ -187,7 +192,7 @@ typedef struct netconn_s
 	struct netconn_qw_s
 	{
 		// QW protocol
-		qboolean	fatal_error;
+		qbool	fatal_error;
 
 		float		last_received;		// for timeouts
 
@@ -204,11 +209,11 @@ typedef struct netconn_s
 	// sequencing variables
 		unsigned int		incoming_sequence;
 		unsigned int		incoming_acknowledged;
-		qboolean		incoming_reliable_acknowledged;	///< single bit
+		qbool		incoming_reliable_acknowledged;	///< single bit
 
-		qboolean		incoming_reliable_sequence;		///< single bit, maintained local
+		qbool		incoming_reliable_sequence;		///< single bit, maintained local
 
-		qboolean		reliable_sequence;			///< single bit
+		qbool		reliable_sequence;			///< single bit
 		unsigned int		last_reliable_sequence;		///< sequence number of last send
 	}
 	qw;
@@ -244,10 +249,10 @@ typedef struct netconn_s
 } netconn_t;
 
 extern netconn_t *netconn_list;
-extern mempool_t *netconn_mempool;
+extern struct mempool_s *netconn_mempool;
 
-extern cvar_t hostname;
-extern cvar_t developer_networking;
+extern struct cvar_s hostname;
+extern struct cvar_s developer_networking;
 
 #ifdef CONFIG_MENU
 #define SERVERLIST_VIEWLISTSIZE		SERVERLIST_TOTALSIZE
@@ -274,20 +279,27 @@ typedef struct serverlist_info_s
 {
 	/// address for connecting
 	char cname[128];
-	/// ping time for sorting servers
+	unsigned cname_len;
+	/// ping time for sorting servers, in milliseconds, 0 means no data
 	int ping;
 	/// name of the game
 	char game[32];
+	unsigned game_len;
 	/// name of the mod
 	char mod[32];
+	unsigned mod_len;
 	/// name of the map
 	char map[32];
+	unsigned map_len;
 	/// name of the session
 	char name[128];
+	unsigned name_len;
 	/// qc-defined short status string
 	char qcstatus[128];
+	unsigned qcstatus_len;
 	/// frags/ping/name list (if they fit in the packet)
 	char players[2800];
+	unsigned players_len;
 	/// max client number
 	int maxplayers;
 	/// number of currently connected players (including bots)
@@ -305,12 +317,12 @@ typedef struct serverlist_info_s
 	///  not filterable by QC)
 	int gameversion;
 
-	// categorized sorting
+	/// categorized sorting
 	int category;
 	/// favorite server flag
-	qboolean isfavorite;
+	qbool isfavorite;
 	/// the server can send a picture of its map (Insanotic, "inspreview" in its infoResponse)
-	qboolean mappreview;
+	qbool mappreview;
 } serverlist_info_t;
 
 /// ask a server (its address as in the server list) for the picture of a map
@@ -346,22 +358,11 @@ typedef enum
 	SLSF_CATEGORIES = 4
 } serverlist_sortflags_t;
 
-typedef enum
-{
-	SQS_NONE = 0,
-	SQS_QUERYING,
-	SQS_QUERIED,
-	SQS_TIMEDOUT,
-	SQS_REFRESHING
-} serverlist_query_state;
-
 typedef struct serverlist_entry_s
 {
-	/// used to determine whether this entry should be included into the final view
-	serverlist_query_state query;
-	/// used to count the number of times the host has tried to query this server already
-	unsigned querycounter;
-	/// used to calculate ping when update comes in
+	/// used to track when a server should be considered timed out and removed from the final view
+	qbool responded;
+	/// used to calculate ping in PROTOCOL_QUAKEWORLD, and for net_slist_maxtries interval, and for timeouts
 	double querytime;
 	/// query protocol to use on this server, may be PROTOCOL_QUAKEWORLD or PROTOCOL_DARKPLACES7
 	int protocol;
@@ -370,12 +371,14 @@ typedef struct serverlist_entry_s
 
 	// legacy stuff
 	char line1[128];
+	unsigned line1_len;
 	char line2[128];
+	unsigned line2_len;
 } serverlist_entry_t;
 
 typedef struct serverlist_mask_s
 {
-	qboolean			active;
+	qbool			active;
 	serverlist_maskop_t  tests[SLIF_COUNT];
 	serverlist_info_t info;
 } serverlist_mask_t;
@@ -387,21 +390,19 @@ extern serverlist_mask_t serverlist_andmasks[SERVERLIST_ANDMASKCOUNT];
 extern serverlist_mask_t serverlist_ormasks[SERVERLIST_ORMASKCOUNT];
 
 extern serverlist_infofield_t serverlist_sortbyfield;
-extern int serverlist_sortflags; // not using the enum, as it is a bitmask
+extern unsigned serverlist_sortflags; // not using the enum, as it is a bitmask
 
 #if SERVERLIST_TOTALSIZE > 65536
 #error too many servers, change type of index array
 #endif
-extern int serverlist_viewcount;
-extern unsigned short serverlist_viewlist[SERVERLIST_VIEWLISTSIZE];
+extern unsigned serverlist_viewcount;
+extern uint16_t serverlist_viewlist[SERVERLIST_VIEWLISTSIZE];
 
-extern int serverlist_cachecount;
+extern unsigned serverlist_cachecount;
 extern serverlist_entry_t *serverlist_cache;
 extern const serverlist_entry_t *serverlist_callbackentry;
 
-extern qboolean serverlist_consoleoutput;
-
-void ServerList_GetPlayerStatistics(int *numplayerspointer, int *maxplayerspointer);
+void ServerList_GetPlayerStatistics(unsigned *numplayerspointer, unsigned *maxplayerspointer);
 #endif
 
 //============================================================================
@@ -411,19 +412,19 @@ void ServerList_GetPlayerStatistics(int *numplayerspointer, int *maxplayerspoint
 //============================================================================
 
 extern char cl_net_extresponse[NET_EXTRESPONSE_MAX][1400];
-extern int cl_net_extresponse_count;
-extern int cl_net_extresponse_last;
+extern unsigned cl_net_extresponse_count;
+extern unsigned cl_net_extresponse_last;
 
 extern char sv_net_extresponse[NET_EXTRESPONSE_MAX][1400];
-extern int sv_net_extresponse_count;
-extern int sv_net_extresponse_last;
+extern unsigned sv_net_extresponse_count;
+extern unsigned sv_net_extresponse_last;
 
 #ifdef CONFIG_MENU
 extern double masterquerytime;
-extern int masterquerycount;
-extern int masterreplycount;
-extern int serverquerycount;
-extern int serverreplycount;
+extern unsigned masterquerycount;
+extern unsigned masterreplycount;
+extern unsigned serverquerycount;
+extern unsigned serverreplycount;
 #endif
 
 extern sizebuf_t cl_message;
@@ -431,21 +432,21 @@ extern sizebuf_t sv_message;
 extern char cl_readstring[MAX_INPUTLINE];
 extern char sv_readstring[MAX_INPUTLINE];
 
-extern cvar_t sv_public;
+extern struct cvar_s sv_public;
 
-extern cvar_t cl_netlocalping;
+extern struct cvar_s net_fakelag;
 
-extern cvar_t cl_netport;
-extern cvar_t sv_netport;
-extern cvar_t net_address;
-extern cvar_t net_address_ipv6;
-extern cvar_t net_usesizelimit;
-extern cvar_t net_burstreserve;
+extern struct cvar_s cl_netport;
+extern struct cvar_s sv_netport;
+extern struct cvar_s net_address;
+extern struct cvar_s net_address_ipv6;
+extern struct cvar_s net_usesizelimit;
+extern struct cvar_s net_burstreserve;
 
-qboolean NetConn_CanSend(netconn_t *conn);
-int NetConn_SendUnreliableMessage(netconn_t *conn, sizebuf_t *data, protocolversion_t protocol, int rate, int burstsize, qboolean quakesignon_suppressreliables);
-qboolean NetConn_HaveClientPorts(void);
-qboolean NetConn_HaveServerPorts(void);
+qbool NetConn_CanSend(netconn_t *conn);
+int NetConn_SendUnreliableMessage(netconn_t *conn, sizebuf_t *data, protocolversion_t protocol, int rate, int burstsize, qbool quakesignon_suppressreliables);
+qbool NetConn_HaveClientPorts(void);
+qbool NetConn_HaveServerPorts(void);
 void NetConn_CloseClientPorts(void);
 void NetConn_OpenClientPorts(void);
 void NetConn_CloseServerPorts(void);
@@ -457,32 +458,31 @@ void NetConn_Init(void);
 void NetConn_Shutdown(void);
 netconn_t *NetConn_Open(lhnetsocket_t *mysocket, lhnetaddress_t *peeraddress);
 void NetConn_Close(netconn_t *conn);
-void NetConn_Listen(qboolean state);
+void NetConn_Listen(qbool state);
 int NetConn_Read(lhnetsocket_t *mysocket, void *data, int maxlength, lhnetaddress_t *peeraddress);
 int NetConn_Write(lhnetsocket_t *mysocket, const void *data, int length, const lhnetaddress_t *peeraddress);
 int NetConn_WriteString(lhnetsocket_t *mysocket, const char *string, const lhnetaddress_t *peeraddress);
 int NetConn_IsLocalGame(void);
 void NetConn_ClientFrame(void);
 void NetConn_ServerFrame(void);
-void NetConn_SleepMicroseconds(int microseconds);
 void NetConn_Heartbeat(int priority);
-void Net_Stats_f(void);
+void Net_Stats_f(struct cmd_state_s *cmd);
 
 #ifdef CONFIG_MENU
-void NetConn_QueryMasters(qboolean querydp, qboolean queryqw);
+void NetConn_QueryMasters(qbool querydp, qbool queryqw);
 void NetConn_QueryQueueFrame(void);
-void Net_Slist_f(void);
-void Net_SlistQW_f(void);
-void Net_Refresh_f(void);
+void Net_Slist_f(struct cmd_state_s *cmd);
+void Net_SlistQW_f(struct cmd_state_s *cmd);
+void Net_Refresh_f(struct cmd_state_s *cmd);
 
 /// ServerList interface (public)
 /// manually refresh the view set, do this after having changed the mask or any other flag
-void ServerList_RebuildViewList(void);
+void ServerList_RebuildViewList(cvar_t* var);
 void ServerList_ResetMasks(void);
-void ServerList_QueryList(qboolean resetcache, qboolean querydp, qboolean queryqw, qboolean consoleoutput);
+void ServerList_QueryList(qbool resetcache, qbool querydp, qbool queryqw, qbool consoleoutput);
 
 /// called whenever net_slist_favorites changes
-void NetConn_UpdateFavorites(void);
+void NetConn_UpdateFavorites_c(struct cvar_s *var);
 #endif
 
 #define MAX_CHALLENGES 128

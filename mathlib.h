@@ -31,23 +31,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 struct mplane_s;
 extern vec3_t vec3_origin;
 
-#define float_nanmask (0x7F800000)
-#define double_nanmask (0x7FF8000000000000)
-#define FLOAT_IS_NAN(x) (((*(int *)&x)&float_nanmask)==float_nanmask)
-#define DOUBLE_IS_NAN(x) (((*(long long *)&x)&double_nanmask)==double_nanmask)
-
-#ifdef VEC_64
-#define VEC_IS_NAN(x) DOUBLE_IS_NAN(x)
-#else
-#define VEC_IS_NAN(x) FLOAT_IS_NAN(x)
-#endif
-
-#ifdef PRVM_64
-#define PRVM_IS_NAN(x) DOUBLE_IS_NAN(x)
-#else
-#define PRVM_IS_NAN(x) FLOAT_IS_NAN(x)
-#endif
-
 #define bound(min,num,max) ((num) >= (min) ? ((num) < (max) ? (num) : (max)) : (min))
 
 #ifndef min
@@ -55,7 +38,7 @@ extern vec3_t vec3_origin;
 #define max(A,B) ((A) > (B) ? (A) : (B))
 #endif
 
-/// LordHavoc: this function never returns exactly MIN or exactly MAX, because
+/// LadyHavoc: this function never returns exactly MIN or exactly MAX, because
 /// of a QuakeC bug in id1 where the line
 /// self.nextthink = self.nexthink + random() * 0.5;
 /// can result in 0 (self.nextthink is 0 at this point in the code to begin
@@ -83,41 +66,48 @@ unsigned int CeilPowerOf2(unsigned int value);
 #define RAD2DEG(a) ((a) * (180.0f / (float) M_PI))
 #define ANGLEMOD(a) ((a) - 360.0 * floor((a) / 360.0))
 
+#define Q_rint(x) ((x) > 0 ? (int)((x) + 0.5) : (int)((x) - 0.5)) //johnfitz -- from joequake
+
+#define ForVec2(q) for((q)=0;(q)<2;(q)++)
+#define ForVec(q) for((q)=0;(q)<3;(q)++)
+#define ForVec4(q) for((q)=0;(q)<4;(q)++)
+
 #define DotProduct2(a,b) ((a)[0]*(b)[0]+(a)[1]*(b)[1])
 #define Vector2Clear(a) ((a)[0]=(a)[1]=0)
 #define Vector2Compare(a,b) (((a)[0]==(b)[0])&&((a)[1]==(b)[1]))
-#define Vector2Copy(a,b) ((b)[0]=(a)[0],(b)[1]=(a)[1])
-#define Vector2Negate(a,b) ((b)[0]=-((a)[0]),(b)[1]=-((a)[1]))
-#define Vector2Set(a,b,c) ((a)[0]=(b),(a)[1]=(c))
+#define Vector2Copy(in,out) ((out)[0]=(in)[0],(out)[1]=(in)[1])
+#define Vector2Negate(in,out) ((out)[0]=-((in)[0]),(out)[1]=-((in)[1]))
+#define Vector2Set(vec,x,y) ((vec)[0]=(x),(vec)[1]=(y))
 #define Vector2Scale(in, scale, out) ((out)[0] = (in)[0] * (scale),(out)[1] = (in)[1] * (scale))
-#define Vector2Normalize2(v,dest) {float ilength = (float) sqrt(DotProduct2((v),(v)));if (ilength) ilength = 1.0f / ilength;dest[0] = (v)[0] * ilength;dest[1] = (v)[1] * ilength;}
+#define Vector2Normalize2(v,dest) {float ilength = (float)DotProduct2((v),(v));if (ilength) ilength = 1.0f / sqrt(ilength);dest[0] = (v)[0] * ilength;dest[1] = (v)[1] * ilength;}
+#define Vector2Length(a) (sqrt(DotProduct2(a, a)))
 
 #define DotProduct4(a,b) ((a)[0]*(b)[0]+(a)[1]*(b)[1]+(a)[2]*(b)[2]+(a)[3]*(b)[3])
 #define Vector4Clear(a) ((a)[0]=(a)[1]=(a)[2]=(a)[3]=0)
 #define Vector4Compare(a,b) (((a)[0]==(b)[0])&&((a)[1]==(b)[1])&&((a)[2]==(b)[2])&&((a)[3]==(b)[3]))
-#define Vector4Copy(a,b) ((b)[0]=(a)[0],(b)[1]=(a)[1],(b)[2]=(a)[2],(b)[3]=(a)[3])
-#define Vector4Negate(a,b) ((b)[0]=-((a)[0]),(b)[1]=-((a)[1]),(b)[2]=-((a)[2]),(b)[3]=-((a)[3]))
-#define Vector4Set(a,b,c,d,e) ((a)[0]=(b),(a)[1]=(c),(a)[2]=(d),(a)[3]=(e))
-#define Vector4Normalize2(v,dest) {float ilength = (float) sqrt(DotProduct4((v),(v)));if (ilength) ilength = 1.0f / ilength;dest[0] = (v)[0] * ilength;dest[1] = (v)[1] * ilength;dest[2] = (v)[2] * ilength;dest[3] = (v)[3] * ilength;}
-#define Vector4Subtract(a,b,c) ((c)[0]=(a)[0]-(b)[0],(c)[1]=(a)[1]-(b)[1],(c)[2]=(a)[2]-(b)[2],(c)[3]=(a)[3]-(b)[3])
-#define Vector4Add(a,b,c) ((c)[0]=(a)[0]+(b)[0],(c)[1]=(a)[1]+(b)[1],(c)[2]=(a)[2]+(b)[2],(c)[3]=(a)[3]+(b)[3])
+#define Vector4Copy(in,out) ((out)[0]=(in)[0],(out)[1]=(in)[1],(out)[2]=(in)[2],(out)[3]=(in)[3])
+#define Vector4Negate(in,out) ((out)[0]=-((in)[0]),(out)[1]=-((in)[1]),(out)[2]=-((in)[2]),(out)[3]=-((in)[3]))
+#define Vector4Set(vec,r,g,b,a) ((vec)[0]=(r),(vec)[1]=(g),(vec)[2]=(b),(vec)[3]=(a))
+#define Vector4Normalize2(v,dest) {float ilength = (float)DotProduct4((v),(v));if (ilength) ilength = 1.0f / sqrt(ilength);dest[0] = (v)[0] * ilength;dest[1] = (v)[1] * ilength;dest[2] = (v)[2] * ilength;dest[3] = (v)[3] * ilength;}
+#define Vector4Subtract(a,b,out) ((out)[0]=(a)[0]-(b)[0],(out)[1]=(a)[1]-(b)[1],(out)[2]=(a)[2]-(b)[2],(out)[3]=(a)[3]-(b)[3])
+#define Vector4Add(a,b,out) ((out)[0]=(a)[0]+(b)[0],(out)[1]=(a)[1]+(b)[1],(out)[2]=(a)[2]+(b)[2],(out)[3]=(a)[3]+(b)[3])
 #define Vector4Scale(in, scale, out) ((out)[0] = (in)[0] * (scale),(out)[1] = (in)[1] * (scale),(out)[2] = (in)[2] * (scale),(out)[3] = (in)[3] * (scale))
-#define Vector4Multiply(a,b,c) ((c)[0]=(a)[0]*(b)[0],(c)[1]=(a)[1]*(b)[1],(c)[2]=(a)[2]*(b)[2],(c)[3]=(a)[3]*(b)[3])
-#define Vector4MA(a, scale, b, c) ((c)[0] = (a)[0] + (scale) * (b)[0],(c)[1] = (a)[1] + (scale) * (b)[1],(c)[2] = (a)[2] + (scale) * (b)[2],(c)[3] = (a)[3] + (scale) * (b)[3])
-#define Vector4Lerp(v1,lerp,v2,c) ((c)[0] = (v1)[0] + (lerp) * ((v2)[0] - (v1)[0]), (c)[1] = (v1)[1] + (lerp) * ((v2)[1] - (v1)[1]), (c)[2] = (v1)[2] + (lerp) * ((v2)[2] - (v1)[2]), (c)[3] = (v1)[3] + (lerp) * ((v2)[3] - (v1)[3]))
+#define Vector4Multiply(a,b,out) ((out)[0]=(a)[0]*(b)[0],(out)[1]=(a)[1]*(b)[1],(out)[2]=(a)[2]*(b)[2],(out)[3]=(a)[3]*(b)[3])
+#define Vector4MA(a, scale, b, out) ((out)[0] = (a)[0] + (scale) * (b)[0],(out)[1] = (a)[1] + (scale) * (b)[1],(out)[2] = (a)[2] + (scale) * (b)[2],(out)[3] = (a)[3] + (scale) * (b)[3])
+#define Vector4Lerp(v1,lerp,v2,out) ((out)[0] = (v1)[0] + (lerp) * ((v2)[0] - (v1)[0]), (out)[1] = (v1)[1] + (lerp) * ((v2)[1] - (v1)[1]), (out)[2] = (v1)[2] + (lerp) * ((v2)[2] - (v1)[2]), (out)[3] = (v1)[3] + (lerp) * ((v2)[3] - (v1)[3]))
 
 #define VectorNegate(a,b) ((b)[0]=-((a)[0]),(b)[1]=-((a)[1]),(b)[2]=-((a)[2]))
-#define VectorSet(a,b,c,d) ((a)[0]=(b),(a)[1]=(c),(a)[2]=(d))
+#define VectorSet(vec,x,y,z) ((vec)[0]=(x),(vec)[1]=(y),(vec)[2]=(z))
 #define VectorClear(a) ((a)[0]=(a)[1]=(a)[2]=0)
 #define DotProduct(a,b) ((a)[0]*(b)[0]+(a)[1]*(b)[1]+(a)[2]*(b)[2])
-#define VectorSubtract(a,b,c) ((c)[0]=(a)[0]-(b)[0],(c)[1]=(a)[1]-(b)[1],(c)[2]=(a)[2]-(b)[2])
-#define VectorAdd(a,b,c) ((c)[0]=(a)[0]+(b)[0],(c)[1]=(a)[1]+(b)[1],(c)[2]=(a)[2]+(b)[2])
-#define VectorCopy(a,b) ((b)[0]=(a)[0],(b)[1]=(a)[1],(b)[2]=(a)[2])
-#define VectorMultiply(a,b,c) ((c)[0]=(a)[0]*(b)[0],(c)[1]=(a)[1]*(b)[1],(c)[2]=(a)[2]*(b)[2])
-#define CrossProduct(a,b,c) ((c)[0]=(a)[1]*(b)[2]-(a)[2]*(b)[1],(c)[1]=(a)[2]*(b)[0]-(a)[0]*(b)[2],(c)[2]=(a)[0]*(b)[1]-(a)[1]*(b)[0])
-#define VectorNormalize(v) {float ilength = (float) sqrt(DotProduct((v),(v)));if (ilength) ilength = 1.0f / ilength;(v)[0] *= ilength;(v)[1] *= ilength;(v)[2] *= ilength;}
-#define VectorNormalize2(v,dest) {float ilength = (float) sqrt(DotProduct((v),(v)));if (ilength) ilength = 1.0f / ilength;dest[0] = (v)[0] * ilength;dest[1] = (v)[1] * ilength;dest[2] = (v)[2] * ilength;}
-#define VectorNormalizeDouble(v) {double ilength = sqrt(DotProduct((v),(v)));if (ilength) ilength = 1.0 / ilength;(v)[0] *= ilength;(v)[1] *= ilength;(v)[2] *= ilength;}
+#define VectorSubtract(a,b,out) ((out)[0]=(a)[0]-(b)[0],(out)[1]=(a)[1]-(b)[1],(out)[2]=(a)[2]-(b)[2])
+#define VectorAdd(a,b,out) ((out)[0]=(a)[0]+(b)[0],(out)[1]=(a)[1]+(b)[1],(out)[2]=(a)[2]+(b)[2])
+#define VectorCopy(in,out) ((out)[0]=(in)[0],(out)[1]=(in)[1],(out)[2]=(in)[2])
+#define VectorMultiply(a,b,out) ((out)[0]=(a)[0]*(b)[0],(out)[1]=(a)[1]*(b)[1],(out)[2]=(a)[2]*(b)[2])
+#define CrossProduct(a,b,out) ((out)[0]=(a)[1]*(b)[2]-(a)[2]*(b)[1],(out)[1]=(a)[2]*(b)[0]-(a)[0]*(b)[2],(out)[2]=(a)[0]*(b)[1]-(a)[1]*(b)[0])
+#define VectorNormalize(v) {float ilength = (float)DotProduct((v),(v));if (ilength) ilength = 1.0f / sqrt(ilength);(v)[0] *= ilength;(v)[1] *= ilength;(v)[2] *= ilength;}
+#define VectorNormalize2(v,dest) {float ilength = (float)DotProduct((v),(v));if (ilength) ilength = 1.0f / sqrt(ilength);dest[0] = (v)[0] * ilength;dest[1] = (v)[1] * ilength;dest[2] = (v)[2] * ilength;}
+#define VectorNormalizeDouble(v) {double ilength = DotProduct((v),(v));if (ilength) ilength = 1.0 / sqrt(ilength);(v)[0] *= ilength;(v)[1] *= ilength;(v)[2] *= ilength;}
 #define VectorDistance2(a, b) (((a)[0] - (b)[0]) * ((a)[0] - (b)[0]) + ((a)[1] - (b)[1]) * ((a)[1] - (b)[1]) + ((a)[2] - (b)[2]) * ((a)[2] - (b)[2]))
 #define VectorDistance(a, b) (sqrt(VectorDistance2(a,b)))
 #define VectorLength(a) (sqrt((double)DotProduct(a, a)))
@@ -125,17 +115,23 @@ unsigned int CeilPowerOf2(unsigned int value);
 #define VectorScale(in, scale, out) ((out)[0] = (in)[0] * (scale),(out)[1] = (in)[1] * (scale),(out)[2] = (in)[2] * (scale))
 #define VectorScaleCast(in, scale, outtype, out) ((out)[0] = (outtype) ((in)[0] * (scale)),(out)[1] = (outtype) ((in)[1] * (scale)),(out)[2] = (outtype) ((in)[2] * (scale)))
 #define VectorCompare(a,b) (((a)[0]==(b)[0])&&((a)[1]==(b)[1])&&((a)[2]==(b)[2]))
-#define VectorMA(a, scale, b, c) ((c)[0] = (a)[0] + (scale) * (b)[0],(c)[1] = (a)[1] + (scale) * (b)[1],(c)[2] = (a)[2] + (scale) * (b)[2])
-#define VectorM(scale1, b1, c) ((c)[0] = (scale1) * (b1)[0],(c)[1] = (scale1) * (b1)[1],(c)[2] = (scale1) * (b1)[2])
-#define VectorMAM(scale1, b1, scale2, b2, c) ((c)[0] = (scale1) * (b1)[0] + (scale2) * (b2)[0],(c)[1] = (scale1) * (b1)[1] + (scale2) * (b2)[1],(c)[2] = (scale1) * (b1)[2] + (scale2) * (b2)[2])
-#define VectorMAMAM(scale1, b1, scale2, b2, scale3, b3, c) ((c)[0] = (scale1) * (b1)[0] + (scale2) * (b2)[0] + (scale3) * (b3)[0],(c)[1] = (scale1) * (b1)[1] + (scale2) * (b2)[1] + (scale3) * (b3)[1],(c)[2] = (scale1) * (b1)[2] + (scale2) * (b2)[2] + (scale3) * (b3)[2])
-#define VectorMAMAMAM(scale1, b1, scale2, b2, scale3, b3, scale4, b4, c) ((c)[0] = (scale1) * (b1)[0] + (scale2) * (b2)[0] + (scale3) * (b3)[0] + (scale4) * (b4)[0],(c)[1] = (scale1) * (b1)[1] + (scale2) * (b2)[1] + (scale3) * (b3)[1] + (scale4) * (b4)[1],(c)[2] = (scale1) * (b1)[2] + (scale2) * (b2)[2] + (scale3) * (b3)[2] + (scale4) * (b4)[2])
+#define VectorMA(a, scale, b, out) ((out)[0] = (a)[0] + (scale) * (b)[0],(out)[1] = (a)[1] + (scale) * (b)[1],(out)[2] = (a)[2] + (scale) * (b)[2])
+#define VectorM(scale1, b1, out) ((out)[0] = (scale1) * (b1)[0],(out)[1] = (scale1) * (b1)[1],(out)[2] = (scale1) * (b1)[2])
+#define VectorMAM(scale1, b1, scale2, b2, out) ((out)[0] = (scale1) * (b1)[0] + (scale2) * (b2)[0],(out)[1] = (scale1) * (b1)[1] + (scale2) * (b2)[1],(out)[2] = (scale1) * (b1)[2] + (scale2) * (b2)[2])
+#define VectorMAMAM(scale1, b1, scale2, b2, scale3, b3, out) ((out)[0] = (scale1) * (b1)[0] + (scale2) * (b2)[0] + (scale3) * (b3)[0],(out)[1] = (scale1) * (b1)[1] + (scale2) * (b2)[1] + (scale3) * (b3)[1],(out)[2] = (scale1) * (b1)[2] + (scale2) * (b2)[2] + (scale3) * (b3)[2])
+#define VectorMAMAMAM(scale1, b1, scale2, b2, scale3, b3, scale4, b4, out) ((out)[0] = (scale1) * (b1)[0] + (scale2) * (b2)[0] + (scale3) * (b3)[0] + (scale4) * (b4)[0],(out)[1] = (scale1) * (b1)[1] + (scale2) * (b2)[1] + (scale3) * (b3)[1] + (scale4) * (b4)[1],(out)[2] = (scale1) * (b1)[2] + (scale2) * (b2)[2] + (scale3) * (b3)[2] + (scale4) * (b4)[2])
 #define VectorRandom(v) do{(v)[0] = lhrandom(-1, 1);(v)[1] = lhrandom(-1, 1);(v)[2] = lhrandom(-1, 1);}while(DotProduct(v, v) > 1)
-#define VectorLerp(v1,lerp,v2,c) ((c)[0] = (v1)[0] + (lerp) * ((v2)[0] - (v1)[0]), (c)[1] = (v1)[1] + (lerp) * ((v2)[1] - (v1)[1]), (c)[2] = (v1)[2] + (lerp) * ((v2)[2] - (v1)[2]))
-#define VectorReflect(a,r,b,c) do{double d;d = DotProduct((a), (b)) * -(1.0 + (r));VectorMA((a), (d), (b), (c));}while(0)
+#define VectorLerp(v1,lerp,v2,out) ((out)[0] = (v1)[0] + (lerp) * ((v2)[0] - (v1)[0]), (out)[1] = (v1)[1] + (lerp) * ((v2)[1] - (v1)[1]), (out)[2] = (v1)[2] + (lerp) * ((v2)[2] - (v1)[2]))
+#define VectorReflect(a,r,b,out) do{double d;d = DotProduct((a), (b)) * -(1.0 + (r));VectorMA((a), (d), (b), (out));}while(0)
 #define BoxesOverlap(a,b,c,d) ((a)[0] <= (d)[0] && (b)[0] >= (c)[0] && (a)[1] <= (d)[1] && (b)[1] >= (c)[1] && (a)[2] <= (d)[2] && (b)[2] >= (c)[2])
 #define BoxInsideBox(a,b,c,d) ((a)[0] >= (c)[0] && (b)[0] <= (d)[0] && (a)[1] >= (c)[1] && (b)[1] <= (d)[1] && (a)[2] >= (c)[2] && (b)[2] <= (d)[2])
 #define TriangleBBoxOverlapsBox(a,b,c,d,e) (min((a)[0], min((b)[0], (c)[0])) < (e)[0] && max((a)[0], max((b)[0], (c)[0])) > (d)[0] && min((a)[1], min((b)[1], (c)[1])) < (e)[1] && max((a)[1], max((b)[1], (c)[1])) > (d)[1] && min((a)[2], min((b)[2], (c)[2])) < (e)[2] && max((a)[2], max((b)[2], (c)[2])) > (d)[2])
+#define VectorSnap(a,x,y,z,c) ((c)[0] = (x) * (floor((a)[0] * (1.0f / (x)) + 0.5f) + 0.5f), (c)[1] = (y) * (floor((a)[1] * (1.0f / (y)) + 0.5f) + 0.5f), (c)[2] = (z) * (floor((a)[2] * (1.0f / (z)) + 0.5f) + 0.5f))
+
+#define AABBInsertAndSetKeep(a,b,c,d,k) ((a)[0] = ((a)[0] > (c)[0] ? ((k)=true,(c)[0]) : (a)[0]), (a)[1] = ((a)[1] > (c)[1] ? ((k)=true,(c)[1]) : (a)[1]), (a)[2] = ((a)[2] > (c)[2] ? ((k)=true,(c)[2]) : (a)[2]), (b)[0] = ((b)[0] < (d)[0] ? ((k)=true,(d)[0]) : (b)[0]), (b)[1] = ((b)[1] < (d)[1] ? ((k)=true,(d)[1]) : (b)[1]), (b)[2] = ((b)[2] < (d)[2] ? ((k)=true,(d)[2]) : (b)[2]))
+#define AABBInsert(a,b,c,d) ((a)[0] = ((a)[0] > (c)[0] ? (c)[0] : (a)[0]), (a)[1] = ((a)[1] > (c)[1] ? (c)[1] : (a)[1]), (a)[2] = ((a)[2] > (c)[2] ? (c)[2] : (a)[2]), (b)[0] = ((b)[0] < (d)[0] ? (d)[0] : (b)[0]), (b)[1] = ((b)[1] < (d)[1] ? (d)[1] : (b)[1]), (b)[2] = ((b)[2] < (d)[2] ? (d)[2] : (b)[2]))
+#define AABBFrom(a,b,c,d) ((a)[0] = (c)[0], (a)[1] = (c)[1], (a)[2] = (c)[2], (b)[0] = (d)[0], (b)[1] = (d)[1], (b)[2] = (d)[2])
+#define AABBNearestPoint(a,b,p,o) ((o)[0] = bound((a)[0], (p)[0], (b)[0]), (o)[1] = bound((a)[1], (p)[1], (b)[1]), (o)[2] = bound((a)[2], (p)[2], (b)[2]))
 
 #define TriangleNormal(a,b,c,n) ( \
 	(n)[0] = ((a)[1] - (b)[1]) * ((c)[2] - (b)[2]) - ((a)[2] - (b)[2]) * ((c)[1] - (b)[1]), \
@@ -187,10 +183,10 @@ int PointInfrontOfTriangle(const float *p, const float *a, const float *b, const
 #define VectorLehmerRandom(seed,v) do{(v)[0] = Math_crandomf(seed);(v)[1] = Math_crandomf(seed);(v)[2] = Math_crandomf(seed);}while(DotProduct(v, v) > 1)
 
 /*
-// LordHavoc: quaternion math, untested, don't know if these are correct,
+// LadyHavoc: quaternion math, untested, don't know if these are correct,
 // need to add conversion to/from matrices
-// LordHavoc: later note: the matrix faq is useful: http://skal.planet-d.net/demo/matrixfaq.htm
-// LordHavoc: these are probably very wrong and I'm not sure I care, not used by anything
+// LadyHavoc: later note: the matrix faq is useful: http://skal.planet-d.net/demo/matrixfaq.htm
+// LadyHavoc: these are probably very wrong and I'm not sure I care, not used by anything
 
 // returns length of quaternion
 #define qlen(a) ((float) sqrt((a)[0]*(a)[0]+(a)[1]*(a)[1]+(a)[2]*(a)[2]+(a)[3]*(a)[3]))
@@ -233,13 +229,8 @@ float r2is = 1.0f / sin(r2);\
 
 #define VectorCopy4(a,b) {(b)[0]=(a)[0];(b)[1]=(a)[1];(b)[2]=(a)[2];(b)[3]=(a)[3];}
 
-vec_t Length (vec3_t v);
-
 /// returns vector length
 float VectorNormalizeLength (vec3_t v);
-
-/// returns vector length
-float VectorNormalizeLength2 (vec3_t v, vec3_t dest);
 
 #define NUMVERTEXNORMALS	162
 extern float m_bytenormals[NUMVERTEXNORMALS][3];
@@ -251,16 +242,16 @@ void R_ConcatRotations (const float in1[3*3], const float in2[3*3], float out[3*
 void R_ConcatTransforms (const float in1[3*4], const float in2[3*4], float out[3*4]);
 
 void AngleVectors (const vec3_t angles, vec3_t forward, vec3_t right, vec3_t up);
-/// LordHavoc: proper matrix version of AngleVectors
+/// LadyHavoc: proper matrix version of AngleVectors
 void AngleVectorsFLU (const vec3_t angles, vec3_t forward, vec3_t left, vec3_t up);
 /// divVerent: improper matrix version of AngleVectors
 void AngleVectorsDuke3DFLU (const vec3_t angles, vec3_t forward, vec3_t left, vec3_t up, double maxShearAngle);
-/// LordHavoc: builds a [3][4] matrix
+/// LadyHavoc: builds a [3][4] matrix
 void AngleMatrix (const vec3_t angles, const vec3_t translate, vec_t matrix[][4]);
-/// LordHavoc: calculates pitch/yaw/roll angles from forward and up vectors
-void AnglesFromVectors (vec3_t angles, const vec3_t forward, const vec3_t up, qboolean flippitch);
+/// LadyHavoc: calculates pitch/yaw/roll angles from forward and up vectors
+void AnglesFromVectors (vec3_t angles, const vec3_t forward, const vec3_t up, qbool flippitch);
 
-/// LordHavoc: like AngleVectors, but taking a forward vector instead of angles, useful!
+/// LadyHavoc: like AngleVectors, but taking a forward vector instead of angles, useful!
 void VectorVectors(const vec3_t forward, vec3_t right, vec3_t up);
 void VectorVectorsDouble(const double *forward, double *right, double *up);
 
@@ -275,7 +266,7 @@ void BoxPlaneCornerDistances_Separate(const vec3_t emins, const vec3_t emaxs, co
 #define PlaneDist(point,plane)  ((plane)->type < 3 ? (point)[(plane)->type] : DotProduct((point), (plane)->normal))
 #define PlaneDiff(point,plane) (((plane)->type < 3 ? (point)[(plane)->type] : DotProduct((point), (plane)->normal)) - (plane)->dist)
 
-/// LordHavoc: minimal plane structure
+/// LadyHavoc: minimal plane structure
 typedef struct tinyplane_s
 {
 	float normal[3], dist;

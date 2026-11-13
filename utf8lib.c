@@ -1,5 +1,6 @@
-#include "quakedef.h"
+#include "darkplaces.h"
 #include "utf8lib.h"
+#include "draw.h"
 
 /*
 ================================================================================
@@ -7,7 +8,7 @@ Initialization of UTF-8 support and new cvars.
 ================================================================================
 */
 // for compatibility this defaults to 0
-cvar_t    utf8_enable = {CVAR_SAVE, "utf8_enable", "0", "Enable UTF-8 support. For compatibility, this is disabled by default in most games."};
+cvar_t utf8_enable = {CF_CLIENT | CF_SERVER | CF_ARCHIVE, "utf8_enable", "0", "Enable UTF-8 support. For compatibility, this is disabled by default in most games."};
 
 void   u8_Init(void)
 {
@@ -59,7 +60,7 @@ Uchar utf8_range[5] = {
  * @return        Whether or not another valid character is in the string
  */
 #define U8_ANALYZE_INFINITY 7
-static qboolean u8_analyze(const char *_s, size_t *_start, size_t *_len, Uchar *_ch, size_t _maxlen)
+static qbool u8_analyze(const char *_s, size_t *_start, size_t *_len, Uchar *_ch, size_t _maxlen)
 {
 	const unsigned char *s = (const unsigned char*)_s;
 	size_t i, j;
@@ -169,7 +170,7 @@ findchar:
 	     (bits >= 3 && ch < 0x800) ||
 	     (bits >= 4 && ch < 0x10000) ||
 	     ch >= 0x10FFFF // RFC 3629
-		)
+	)
 	{
 		i += bits;
 		//fprintf(stderr, "overlong: %i bytes for %x\n", bits, ch);
@@ -231,20 +232,11 @@ static int colorcode_skipwidth(const unsigned char *s)
 	if(*s == STRING_COLOR_TAG)
 	{
 		if(s[1] <= '9' && s[1] >= '0') // ^[0-9] found
-		{
 			return 2;
-		}
-		else if(s[1] == STRING_COLOR_RGB_TAG_CHAR &&
-			((s[2] >= '0' && s[2] <= '9') || (s[2] >= 'a' && s[2] <= 'f') || (s[2] >= 'A' && s[2] <= 'F')) &&
-			((s[3] >= '0' && s[3] <= '9') || (s[3] >= 'a' && s[3] <= 'f') || (s[3] >= 'A' && s[3] <= 'F')) &&
-			((s[4] >= '0' && s[4] <= '9') || (s[4] >= 'a' && s[4] <= 'f') || (s[4] >= 'A' && s[4] <= 'F')))
-		{
+		else if(s[1] == STRING_COLOR_RGB_TAG_CHAR && isxdigit(s[2]) && isxdigit(s[3]) && isxdigit(s[4]))
 			return 5;
-		}
 		else if(s[1] == STRING_COLOR_TAG)
-		{
 			return 1; // special case, do NOT call colorcode_skipwidth for next char
-		}
 	}
 	return 0;
 }
@@ -780,9 +772,9 @@ all characters until the zero terminator.
 ============
 */
 size_t
-COM_StringLengthNoColors(const char *s, size_t size_s, qboolean *valid);
+COM_StringLengthNoColors(const char *s, size_t size_s, qbool *valid);
 size_t
-u8_COM_StringLengthNoColors(const char *_s, size_t size_s, qboolean *valid)
+u8_COM_StringLengthNoColors(const char *_s, size_t size_s, qbool *valid)
 {
 	const unsigned char *s = (const unsigned char*)_s;
 	const unsigned char *end;
@@ -800,7 +792,7 @@ u8_COM_StringLengthNoColors(const char *_s, size_t size_s, qboolean *valid)
 		{
 			case 0:
 				if(valid)
-					*valid = TRUE;
+					*valid = true;
 				return len;
 			case STRING_COLOR_TAG:
 				++s;
@@ -820,7 +812,7 @@ u8_COM_StringLengthNoColors(const char *_s, size_t size_s, qboolean *valid)
 					case 0: // ends with unfinished color code!
 						++len;
 						if(valid)
-							*valid = FALSE;
+							*valid = false;
 						return len;
 					case STRING_COLOR_TAG: // escaped ^
 						++len;
@@ -858,7 +850,7 @@ u8_COM_StringLengthNoColors(const char *_s, size_t size_s, qboolean *valid)
 		{
 			// we CAN end up here, if an invalid char is between this one and the end of the string
 			if(valid)
-				*valid = TRUE;
+				*valid = true;
 			return len;
 		}
 
@@ -866,7 +858,7 @@ u8_COM_StringLengthNoColors(const char *_s, size_t size_s, qboolean *valid)
 		{
 			// string length exceeded by new character
 			if(valid)
-				*valid = TRUE;
+				*valid = true;
 			return len;
 		}
 
@@ -886,7 +878,7 @@ u8_COM_StringLengthNoColors(const char *_s, size_t size_s, qboolean *valid)
  * @param maxwidth The maximum output width
  * @return        The number of bytes written, not including the terminating \0
  */
-size_t u8_strpad(char *out, size_t outsize, const char *in, qboolean leftalign, size_t minwidth, size_t maxwidth)
+size_t u8_strpad(char *out, size_t outsize, const char *in, qbool leftalign, size_t minwidth, size_t maxwidth)
 {
 	if(!utf8_enable.integer)
 	{
@@ -904,7 +896,7 @@ size_t u8_strpad(char *out, size_t outsize, const char *in, qboolean leftalign, 
 	}
 }
 
-size_t u8_strpad_colorcodes(char *out, size_t outsize, const char *in, qboolean leftalign, size_t minwidth, size_t maxwidth)
+size_t u8_strpad_colorcodes(char *out, size_t outsize, const char *in, qbool leftalign, size_t minwidth, size_t maxwidth)
 {
 	size_t l = u8_bytelen_colorcodes(in, maxwidth);
 	size_t actual_width = u8_strnlen_colorcodes(in, l);
@@ -914,6 +906,123 @@ size_t u8_strpad_colorcodes(char *out, size_t outsize, const char *in, qboolean 
 	int rpad = leftalign ? pad : 0;
 	return dpsnprintf(out, outsize, "%*s%.*s%*s", lpad, "", prec, in, rpad, "");
 }
+
+#ifdef WIN32
+
+/**
+ * Convert Windows "wide" characters to WTF-8 for internal manipulation
+ */
+int towtf8(const wchar *wstr, int wlen, char *str, int maxlen)
+{
+	int p = 0;
+	int i;
+	for (i = 0; i < wlen; ++i)
+	{
+		wchar point = wstr[i];
+		if (point < 0x80)
+		{
+			if (p + 1 > maxlen) break;
+			str[p++] = point;
+		}
+		else if (point < 0x800)
+		{
+			if (p + 2 > maxlen) break;
+			str[p++] = (0xc0 | ((point >>  6) & 0x1f));
+			str[p++] = (0x80 | ((point >>  0) & 0x3f));
+		}
+		else
+		#if WTF8U32
+		if (point < 0x10000)
+		#endif
+		{
+			if (p + 3 > maxlen) break;
+			str[p++] = (0xe0 | ((point >> 12) & 0x0f));
+			str[p++] = (0x80 | ((point >>  6) & 0x3f));
+			str[p++] = (0x80 | ((point >>  0) & 0x3f));
+		}
+		#if WTF8U32
+		else
+		#if WTF8CHECKS
+		if (point < 0x110000)
+		#endif
+		{
+			if (p + 4 > maxlen) break;
+			str[p++] = (0xf0 | ((point >> 18) & 0x07));
+			str[p++] = (0x80 | ((point >> 12) & 0x3f));
+			str[p++] = (0x80 | ((point >>  6) & 0x3f));
+			str[p++] = (0x80 | ((point >>  0) & 0x3f));
+		}
+		#endif
+	}
+	str[p] = 0x00;
+	return p;
+}
+
+/**
+ * Convert WTF-8 string to "wide" characters used by Windows
+ */
+int fromwtf8(const char *str, int len, wchar *wstr, int maxwlen)
+{
+	int p = 0;
+	int i;
+	for (i = 0; i < len;)
+	{
+		char byte = str[i++];
+		wchar point = byte;
+		int length = 1;
+		if (p + 1 > maxwlen) break;
+		#if WTF8CHECKS
+		if ((byte & 0xf8) == 0xf8)
+			return -1;
+		#endif
+		#if WTF8U32
+		if ((byte & 0xf8) == 0xf0)
+		{
+			length = 4;
+			point = byte & 0x07;
+		}
+		else
+		#endif
+		if ((byte & 0xf0) == 0xe0)
+		{
+			length = 3;
+			point = byte & 0x0f;
+		}
+		else if ((byte & 0xe0) == 0xc0)
+		{
+			length = 2;
+			point = byte & 0x1f;
+		}
+		#if WTF8CHECKS
+		else if ((byte & 0xc0) == 0x80)
+		{
+			return -1;
+		}
+		#endif
+		while (--length)
+		{
+			byte = str[i++];
+			#if WTF8CHECKS
+			if (byte == -1) return -1;
+			else if ((byte & 0xc0) != 0x80) return -1;
+			#endif
+			point = (point << 6) | (byte & 0x3f);
+		}
+		wstr[p++] = point;
+	}
+	wstr[p] = 0x00;
+	return p;
+}
+
+int wstrlen(const wchar *wstr)
+{
+	int i;
+	for (i = 0; wstr[i] != 0; ++i)
+		;
+	return i;
+}
+
+#endif // WIN32
 
 
 /*

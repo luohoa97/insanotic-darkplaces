@@ -33,7 +33,7 @@ is not a staircase.
 */
 int c_yes, c_no;
 
-qboolean SV_CheckBottom (prvm_edict_t *ent)
+qbool SV_CheckBottom (prvm_edict_t *ent)
 {
 	prvm_prog_t *prog = SVVM_prog;
 	vec3_t	mins, maxs, start, stop;
@@ -106,7 +106,7 @@ The move will be adjusted for slopes and stairs, but if the move isn't
 possible, no move is done and false is returned
 =============
 */
-qboolean SV_movestep (prvm_edict_t *ent, vec3_t move, qboolean relink, qboolean noenemy, qboolean settrace)
+qbool SV_movestep (prvm_edict_t *ent, vec3_t move, qbool relink, qbool noenemy, qbool settrace)
 {
 	prvm_prog_t *prog = SVVM_prog;
 	float		dz;
@@ -254,7 +254,7 @@ facing it.
 
 ======================
 */
-static qboolean SV_StepDirection (prvm_edict_t *ent, float yaw, float dist)
+static qbool SV_StepDirection (prvm_edict_t *ent, float yaw, float dist)
 {
 	prvm_prog_t *prog = SVVM_prog;
 	vec3_t		move, oldorigin;
@@ -397,7 +397,7 @@ SV_CloseEnough
 
 ======================
 */
-static qboolean SV_CloseEnough (prvm_edict_t *ent, prvm_edict_t *goal, float dist)
+static qbool SV_CloseEnough (prvm_edict_t *ent, prvm_edict_t *goal, float dist)
 {
 	int		i;
 
@@ -413,7 +413,7 @@ static qboolean SV_CloseEnough (prvm_edict_t *ent, prvm_edict_t *goal, float dis
 
 /*
 ======================
-SV_MoveToGoal
+VM_SV_MoveToGoal
 
 ======================
 */
@@ -422,7 +422,7 @@ void VM_SV_MoveToGoal(prvm_prog_t *prog)
 	prvm_edict_t		*ent, *goal;
 	float		dist;
 
-	VM_SAFEPARMCOUNT(1, SV_MoveToGoal);
+	VM_SAFEPARMCOUNT(1, VM_SV_MoveToGoal);
 
 	ent = PRVM_PROG_TO_EDICT(PRVM_serverglobaledict(self));
 	goal = PRVM_PROG_TO_EDICT(PRVM_serveredictedict(ent, goalentity));

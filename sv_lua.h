@@ -17,7 +17,7 @@ void LuaMods_ProgReset(void);
 // hook of the plugins. False when no plugin listens (the line then goes on to
 // the game code).
 struct client_s;
-qboolean LuaMods_PageReply(struct client_s *c, const char *line);
+qbool LuaMods_PageReply(struct client_s *c, const char *line);
 
 // QC builtins (XON_LUA)
 struct prvm_prog_s;

@@ -5,9 +5,13 @@
 #include <dirent.h>
 #endif
 
-#include "quakedef.h"
+#include "darkplaces.h"
 
-// LordHavoc: some portable directory listing code I wrote for lmp2pcx, now used in darkplaces to load id1/*.pak and such...
+#ifdef WIN32
+#include "utf8lib.h"
+#endif
+
+// LadyHavoc: some portable directory listing code I wrote for lmp2pcx, now used in darkplaces to load id1/*.pak and such...
 
 int matchpattern(const char *in, const char *pattern, int caseinsensitive)
 {
@@ -16,7 +20,7 @@ int matchpattern(const char *in, const char *pattern, int caseinsensitive)
 
 // wildcard_least_one: if true * matches 1 or more characters
 //                     if false * matches 0 or more characters
-int matchpattern_with_separator(const char *in, const char *pattern, int caseinsensitive, const char *separators, qboolean wildcard_least_one)
+int matchpattern_with_separator(const char *in, const char *pattern, int caseinsensitive, const char *separators, qbool wildcard_least_one)
 {
 	int c1, c2;
 	while (*pattern)
@@ -122,7 +126,7 @@ static int stringlistsort_cmp(const void *a, const void *b)
 	return strcasecmp(*(const char **)a, *(const char **)b);
 }
 
-void stringlistsort(stringlist_t *list, qboolean uniq)
+void stringlistsort(stringlist_t *list, qbool uniq)
 {
 	int i, j;
 	if(list->numstrings < 1)
@@ -164,20 +168,31 @@ static void adddirentry(stringlist_t *list, const char *path, const char *name)
 #ifdef WIN32
 void listdirectory(stringlist_t *list, const char *basepath, const char *path)
 {
-	char pattern[4096];
-	WIN32_FIND_DATA n_file;
+	#define BUFSIZE 4096
+	char pattern[BUFSIZE] = {0};
+	wchar patternw[BUFSIZE] = {0};
+	char filename[BUFSIZE] = {0};
+	wchar *filenamew;
+	int lenw = 0;
+	WIN32_FIND_DATAW n_file;
 	HANDLE hFile;
-	strlcpy (pattern, basepath, sizeof(pattern));
-	strlcat (pattern, path, sizeof (pattern));
-	strlcat (pattern, "*", sizeof (pattern));
+	dp_strlcpy(pattern, basepath, sizeof(pattern));
+	dp_strlcat(pattern, path, sizeof (pattern));
+	dp_strlcat(pattern, "*", sizeof (pattern));
+	fromwtf8(pattern, strlen(pattern), patternw, BUFSIZE);
 	// ask for the directory listing handle
-	hFile = FindFirstFile(pattern, &n_file);
+	hFile = FindFirstFileW(patternw, &n_file);
 	if(hFile == INVALID_HANDLE_VALUE)
 		return;
 	do {
-		adddirentry(list, path, n_file.cFileName);
-	} while (FindNextFile(hFile, &n_file) != 0);
+		filenamew = n_file.cFileName;
+		lenw = 0;
+		while(filenamew[lenw] != 0) ++lenw;
+		towtf8(filenamew, lenw, filename, BUFSIZE);
+		adddirentry(list, path, filename);
+	} while (FindNextFileW(hFile, &n_file) != 0);
 	FindClose(hFile);
+	#undef BUFSIZE
 }
 #else
 void listdirectory(stringlist_t *list, const char *basepath, const char *path)

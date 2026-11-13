@@ -27,8 +27,8 @@ typedef struct luasandbox_s
 	size_t mem;
 	size_t memlimit;
 	long budget;
-	qboolean killed;           // sticky: every count hook raises once set
-	qboolean disabled;
+	qbool killed;           // sticky: every count hook raises once set
+	qbool disabled;
 	char reason[256];
 	int handlers;              // number of xon.on registrations
 } luasandbox_t;
@@ -49,7 +49,7 @@ typedef struct luahost_s
 	const char *survivor;      // "server" / "game" (log messages)
 	cvar_t *instruction_limit;
 	cvar_t *memory_limit;
-	int cvar_flags;            // flags for cvars scripts create (client: CVAR_SAVE)
+	int cvar_flags;            // flags for cvars scripts create (client: CF_ARCHIVE)
 	// adds host specific functions to the xon table on top of the stack
 	void (*register_api)(lua_State *L);
 	luasandbox_t *items[LUASANDBOX_MAX];
@@ -66,7 +66,7 @@ luasandbox_t *LuaSandbox_FromState(lua_State *L);
 luasandbox_t *LuaSandbox_Load(luahost_t *host, const char *path);
 // pcall with a fresh instruction budget; on failure the script is logged and
 // disabled (its state is closed) and false is returned
-qboolean LuaSandbox_Call(luasandbox_t *m, int nargs, int nresults, const char *what);
+qbool LuaSandbox_Call(luasandbox_t *m, int nargs, int nresults, const char *what);
 void LuaSandbox_Disable(luasandbox_t *m, const char *reason);
 void LuaSandbox_CloseAll(luahost_t *host);
 void LuaSandbox_PrintList(luahost_t *host);
@@ -77,7 +77,7 @@ int LuaSandbox_HookCount(luahost_t *host, const char *name);
 int LuaSandbox_PushHandlers(luasandbox_t *m, const char *hook);
 
 void LuaSandbox_PushVec(lua_State *L, const vec3_t v);
-qboolean LuaSandbox_ToVec(lua_State *L, int idx, vec3_t out);
+qbool LuaSandbox_ToVec(lua_State *L, int idx, vec3_t out);
 void LuaSandbox_CheckVec(lua_State *L, int idx, vec3_t out);
 
 #endif
