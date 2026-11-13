@@ -560,6 +560,9 @@ typedef struct
 } ogg_stream_persfx_t;
 
 // Per-channel data structure
+// how many sample frames past the requested ones a streaming decode fills per refill
+#define OGG_DECODE_AHEAD_FRAMES 2048
+
 typedef struct
 {
 	OggVorbis_File	vf;
@@ -678,6 +681,17 @@ static void OGG_GetSamplesFloat (channel_t *ch, sfx_t *sfx, int firstsampleframe
 		per_ch->buffer_numframes -= offset;
 		// decompress as much as we can fit in the buffer
 		newlength = sizeof(per_ch->buffer) - per_ch->buffer_numframes * f;
+		// Insanotic: this runs inside the audio callback (threaded mixing), so
+		// do not refill the whole 16384 frame buffer (~340 ms of audio) in one
+		// go: decode what this request is missing plus a small lookahead, so
+		// the decode cost is spread evenly over many callbacks instead of one
+		// big spike that underruns small device buffers
+		{
+			int missingframes = numsampleframes - per_ch->buffer_numframes;
+			int wantbytes = (missingframes + OGG_DECODE_AHEAD_FRAMES) * f;
+			if (newlength > wantbytes)
+				newlength = wantbytes;
+		}
 		done = 0;
 		if (per_sfx->opus)
 		{

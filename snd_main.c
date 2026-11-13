@@ -285,6 +285,7 @@ static cvar_t snd_show = {0, "snd_show", "0", "shows some statistics about sound
 // (48KHz because a lot of onboard sound cards sucks at any other speed)
 static cvar_t snd_speed = {CVAR_SAVE, "snd_speed", "48000", "sound output frequency, in hertz"};
 static cvar_t snd_width = {CVAR_SAVE, "snd_width", "2", "sound output precision, in bytes (1 and 2 supported)"};
+cvar_t snd_buffersize = {CVAR_SAVE, "snd_buffersize", "0", "SDL audio device buffer size in sample frames (0 = automatic, 2048 at 48 kHz; try 1024, 2048 or 4096 if sound stutters; needs snd_restart)"};
 static cvar_t snd_channels = {CVAR_SAVE, "snd_channels", "2", "number of channels for the sound output (2 for stereo; up to 8 supported for 3D sound)"};
 
 static cvar_t snd_startloopingsounds = {0, "snd_startloopingsounds", "1", "whether to start sounds that would loop (you want this to be 1); existing sounds are not affected"};
@@ -902,6 +903,7 @@ void S_Init(void)
 	Cvar_RegisterVariable(&snd_speed);
 	Cvar_RegisterVariable(&snd_width);
 	Cvar_RegisterVariable(&snd_channels);
+	Cvar_RegisterVariable(&snd_buffersize);
 	Cvar_RegisterVariable(&snd_mutewhenidle);
 	Cvar_RegisterVariable(&snd_maxchannelvolume);
 	Cvar_RegisterVariable(&snd_softclip);

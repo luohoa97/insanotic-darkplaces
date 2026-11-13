@@ -131,6 +131,7 @@ extern cvar_t snd_streaming_length;
 #define SND_CHANNELLAYOUT_STANDARD	1
 #define SND_CHANNELLAYOUT_ALSA		2
 extern cvar_t snd_channellayout;
+extern cvar_t snd_buffersize;
 
 extern int snd_blocked;		// counter. When > 0, we stop submitting sound to the audio device
 
